@@ -1,0 +1,88 @@
+# Path ownership — machine-read, enforced by the commit guard and the edit-time path guard.
+#
+# WHY THIS IS SIX RULES AND NOT A FIFTEEN-ROW PROSE TABLE. The predecessor's ownership map grew to
+# fifteen rows precisely BECAUSE nothing enforced it: an audit found ~60 % of its source tree unowned,
+# and the map was patched by hand each time that bit. Here `unowned = "deny"` makes an unowned path a
+# blocked commit, so adding a rule is forced at the moment of the first write. The map stays short and,
+# more importantly, stays TRUE.
+
+[meta]
+schema_version = 1
+# What happens to a staged path matching no rule below.
+#   "deny"  -> the commit is blocked; add a rule (that is the point)
+#   "warn"  -> printed, allowed
+unowned = "deny"
+
+# The one sanctioned cross-line write. tools/inbound.py appends a dated INBOUND block to another
+# line's STATE.md; the guards whitelist it by tool, not by path.
+inbound_tool = "tools/inbound.py"
+
+# ---------------------------------------------------------------------------
+# Exclusive: only the owning line may write these.
+# ---------------------------------------------------------------------------
+
+[[rule]]
+globs = ["lines/D/**", "journal/D/**", "campaigns/D/**"]
+owner = "D"
+kind = "exclusive"
+
+[[rule]]
+globs = ["lines/T/**", "journal/T/**", "campaigns/T/**"]
+owner = "T"
+kind = "exclusive"
+
+[[rule]]
+globs = ["lines/X/**", "journal/X/**", "campaigns/X/**"]
+owner = "X"
+kind = "exclusive"
+
+[[rule]]
+# D owns everything that reads or writes LPJmL-FIT's own file formats, and the corpus that comes
+# out of them: the restart reader/writer, the .clm reader/writer, the NetCDF writers, provenance.
+globs = ["src/vegemu/binfmt/**", "src/vegemu/corpus/**", "scripts/corpus_*.py", "scripts/sbatch_cmodel.sh"]
+owner = "D"
+kind = "exclusive"
+
+[[rule]]
+# T owns the models and everything that trains or runs them.
+globs = ["src/vegemu/models/**", "src/vegemu/train/**", "scripts/train_*.py", "scripts/sbatch_train.sh"]
+owner = "T"
+kind = "exclusive"
+
+[[rule]]
+# X owns the experiment corpus. Pre-registrations are additionally immutable once sealed (that is
+# enforced separately, by hash, in tools/check_experiments.py — ownership alone is not enough).
+globs = ["experiments/**"]
+owner = "X"
+kind = "exclusive"
+
+# ---------------------------------------------------------------------------
+# Shared, additive-only: any line may ADD here; nobody restructures.
+# ---------------------------------------------------------------------------
+
+[[rule]]
+globs = [
+  "changelog.d/*.md",          # a new fragment only; CHANGELOG.md itself is integrator-owned
+  "docs/decisions/*.md",       # your own new record; accepted ones are immutable
+  "docs/reference/*.md",
+  ".claude/skills/**",
+  "src/vegemu/**",             # the shared library surface not carved out above
+  "tests/**",
+  "tools/**",
+  "scripts/**",
+]
+owner = "*"
+kind = "shared"
+
+# ---------------------------------------------------------------------------
+# Integrator-only: request the change, do not make it from a line.
+# ---------------------------------------------------------------------------
+
+[[rule]]
+globs = [
+  "CLAUDE.md", "MEMORY.md", "PLAN.md", "README.md", "CHANGELOG.md",
+  "config/**", ".github/**", ".claude/settings.json",
+  "pyproject.toml", "uv.lock", ".gitignore", ".gitattributes",
+]
+owner = "integrator"
+kind = "exclusive"

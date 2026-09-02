@@ -1,0 +1,99 @@
+# THE SINGLE SOURCE OF TRUTH FOR CI PATH FILTERS.
+#
+# WHY THIS FILE EXISTS AT ALL, RATHER THAN JUST THE WORKFLOW YAML.
+#
+# Path-filtered CI is correct -- most commits here are prose, a skill, a decision record or a state
+# file, and running a full matrix on those is waste. But it creates a trap that cost the predecessor
+# real time: **a workflow that is skipped by its path filter reports NO STATUS AT ALL, not a "skipped"
+# status.** So an agent that writes "wait until `test` completes" waits forever on a docs-only commit.
+#
+# The fix has three parts, and all three are needed:
+#   1. this file declares every gate and its filter, in one machine-readable place;
+#   2. `tools/check_gates.py` fails CI if any workflow's `paths:` block disagrees with this file, so
+#      the filters cannot drift away from what an agent reads;
+#   3. `tools/expected_gates.py` prints, from the ACTUAL diff, exactly which job names will run --
+#      and `tools/wait_gates.py` refuses to poll for anything else.
+#
+# If expected_gates.py prints none, there is no verdict coming: merge immediately.
+#
+# `job` is the exact check-run name to poll for. Keep it stable; it is an interface.
+
+[meta]
+schema_version = 1
+# Filters that apply to every gate: a change to the gate machinery re-runs everything.
+always = [".github/gates.toml", "tools/check_gates.py"]
+
+[[gate]]
+name = "budgets"
+job = "budgets"
+paths = ["**/*.md", "config/budgets.toml", ".claude/skills/**", "tools/check_budgets.py"]
+branches = ["main", "line/**"]
+blocks = "a doc over budget; a malformed MEMORY.md row; a non-allowlisted root .md; the skill caps; a budget raised without owner approval; a skill unused past the threshold"
+budget_seconds = 20
+
+[[gate]]
+name = "experiments"
+job = "experiments"
+paths = ["experiments/**", "tools/check_experiments.py", "tools/render_verdict.py"]
+branches = ["main", "line/**"]
+blocks = "E01-E14: a missing or post-hoc-edited pre-registration, a reported number with no null, a null that returned the wrong value, a null that passes the threshold, a verdict disagreeing with the computed rule, a non-append-only ledger"
+budget_seconds = 30
+
+[[gate]]
+name = "lint"
+job = "lint"
+paths = ["**/*.py", "pyproject.toml"]
+branches = ["main", "line/**"]
+blocks = "ruff over EVERY .py in the repo, including scripts/ and tools/. B905 (zip without strict=) and B023 (loop-variable closure) are non-ignorable: both silently corrupt paired data"
+budget_seconds = 40
+
+[[gate]]
+name = "types"
+job = "types"
+paths = ["src/**", "pyproject.toml"]
+branches = ["main", "line/**"]
+blocks = "mypy --strict on the package (scripts and tools are exempt by design)"
+budget_seconds = 90
+
+[[gate]]
+name = "test"
+job = "test"
+paths = ["src/**", "tests/**", "pyproject.toml", "uv.lock"]
+branches = ["main", "line/**"]
+blocks = "pytest, including the binary-format round-trip property test"
+budget_seconds = 480
+
+[[gate]]
+name = "pathsafety"
+job = "pathsafety"
+paths = ["scripts/**", "tools/**", "src/**"]
+branches = ["main", "line/**"]
+blocks = "a hardcoded absolute cluster path; a shell script that does not self-locate; an sbatch heredoc with no completion sentinel or no --account; a job path under /tmp"
+budget_seconds = 15
+
+[[gate]]
+name = "campaigns"
+job = "campaigns"
+paths = ["campaigns/**"]
+# main ONLY. An open campaign on a line branch is normal -- that is what a running job looks like.
+# It is only debt once it reaches main unharvested.
+branches = ["main"]
+blocks = "an open campaign more than 7 days past its harvest deadline; a non-append-only ledger; an abandoned campaign with no stated reason"
+budget_seconds = 15
+
+[[gate]]
+name = "changelog"
+job = "changelog"
+paths = ["changelog.d/**", "CHANGELOG.md", "tools/collate_changelog.py"]
+# main ONLY, for the same reason: an uncollated fragment on a line branch is CORRECT.
+branches = ["main"]
+blocks = "an uncollated changelog fragment on main"
+budget_seconds = 15
+
+[[gate]]
+name = "flags"
+job = "flags"
+paths = ["config/flags.toml", "src/**"]
+branches = ["main", "line/**"]
+blocks = "an opt-in flag whose flip_by date has passed while its default is unchanged; a flag with no flip_by or no owner_line"
+budget_seconds = 15

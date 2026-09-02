@@ -1,0 +1,37 @@
+# Generated to match .github/gates.toml. The `budgets` gate runs tools/check_gates.py, which FAILS
+# if this file's paths/branches drift from that declaration -- because tools/expected_gates.py tells
+# an agent which check-runs to poll from gates.toml, and a skipped workflow reports no status at all,
+# so a drifted filter makes an agent wait forever for a gate that will never appear.
+name: pathsafety
+
+on:
+  push:
+    branches:
+      - main
+      - line/**
+    paths:
+      - scripts/**
+      - tools/**
+      - src/**
+      - .github/gates.toml
+      - tools/check_gates.py
+  pull_request:
+    paths:
+      - scripts/**
+      - tools/**
+      - src/**
+      - .github/gates.toml
+      - tools/check_gates.py
+  workflow_dispatch:
+
+jobs:
+  pathsafety:
+    name: pathsafety
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: no hardcoded cluster paths, self-locating wrappers, job sentinel, no /tmp job paths
+        run: python tools/check_no_abs_paths.py

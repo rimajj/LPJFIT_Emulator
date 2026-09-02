@@ -1,0 +1,26 @@
+# Opt-in feature flags, each with a MANDATORY expiry date.
+#
+# WHY THE DATE IS MANDATORY. The predecessor's guardrail was "opt-in, default byte-identical" — sound,
+# and it shipped new behaviour safely. But it had a corollary that had to be learned three separate
+# times: that rule protects you from enabling too early, NOT from never enabling. Three flags whose
+# defaults were known to be WRONG sat unflipped for weeks, each work line recording the flip as the
+# other's to schedule. One of them was measured correct and still sat off.
+#
+# So every flag here carries `flip_by` and `owner_line`. The session-start open-loops report prints any
+# flag within 7 days of its date, and the `flags` CI gate FAILS once the date passes while the default
+# is unchanged. Shipping an opt-in is a reason to start measuring, never a reason to stop.
+#
+# Schema per flag:
+#   [flags.<name>]
+#   default      = <the value shipped today>
+#   target       = <the value we believe is correct; omit if genuinely unknown>
+#   owner_line   = "D" | "T" | "X"
+#   flip_by      = "YYYY-MM-DD"       # REQUIRED
+#   criterion    = "the exact arm and pass condition that decides the flip"
+#   adr          = "docs/decisions/<file>.md"   # where the criterion is recorded
+#
+# There are no flags yet. Add one only together with its flip criterion, in the same commit.
+
+[meta]
+schema_version = 1
+notice_days = 7

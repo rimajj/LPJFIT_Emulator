@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Cluster job output. Logs live in the worktree but are never tracked: they are per-run, per-node and
+# frequently enormous. The campaign ledger (campaigns/<L>/ledger.jsonl) is the TRACKED record of what
+# was submitted and where its log is; the log itself is disposable.
+logs/
+*.out
+*.err
+slurm-*.out
+
+# The campaign sweeper's push inbox. Written on the login node by a timer, consumed by the next
+# session, deliberately untracked so a robot never commits into a line branch a live session owns.
+campaigns/.inbox/
+
+# Data, model weights and LPJmL-FIT outputs are NEVER committed. They live under /p/tmp and
+# /p/projects and are referenced by absolute path from config/paths.yaml.
+#
+# NOTE: no data-versioning tool is configured, and that is deliberate rather than an oversight. The
+# predecessor declared one in an ignore file and never actually used it — no metadata, no pointers,
+# for the whole life of the repo — which left a false claim about reproducibility sitting in the tree.
+# Provenance here is instead a per-shard provenance.json plus the corpus manifest hash that every
+# experiment pre-registration cites.
+*.npy
+*.npz
+*.parquet
+*.nc
+*.clm
+*.lpj
+*.pt
+*.ckpt
+*.safetensors
+
+# Local scratch
+scratch/
+tmp/
+*.tmp

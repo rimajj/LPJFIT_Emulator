@@ -1,0 +1,107 @@
+# Document size budgets — the anti-accretion machinery.
+#
+# WHY THIS FILE EXISTS. In the predecessor repo every rule that was prose was violated and every rule
+# that was a gate held. Its memory file blew its own documented 400-line cap by 62 %; its runbook
+# reached 1,255 lines; one line-state file reached 3,924. The cap was never the problem — the absence
+# of a mechanism was. So: a warning at each edit (gradient), a denied commit (wall), and a CI gate.
+#
+# RAISING A BUDGET IS AN OWNER ACT. If this file is modified, the commit must carry the trailer
+#   Budget-change-approved-by: owner
+# or CI fails. An agent cannot lift the cap that binds it.
+
+[meta]
+schema_version = 1
+
+# ---------------------------------------------------------------------------
+# Root-level markdown is an ALLOWLIST. A new root doc is a red build, not a
+# judgement call. The predecessor accumulated seven partially-superseding
+# planning documents (~1,584 lines) that every session was told to read.
+# ---------------------------------------------------------------------------
+[root_md]
+allow = ["README.md", "CLAUDE.md", "MEMORY.md", "PLAN.md", "CHANGELOG.md"]
+
+# ---------------------------------------------------------------------------
+# Per-file line budgets. `glob` is matched with pathlib.PurePath.match semantics
+# extended to `**`. Budgets count all lines including blanks and code fences.
+# ---------------------------------------------------------------------------
+
+[[budget]]
+glob = "CLAUDE.md"
+max_lines = 180
+note = "Auto-loaded EVERY session, so it is a permanent per-session token tax. Invariants + doc map only."
+
+[[budget]]
+glob = "MEMORY.md"
+max_lines = 120
+# Structural, not stylistic: a row that is not a fixed-column table row is REJECTED, so this file
+# cannot silently become a narrative the way the predecessor's did.
+row_format = '^\| [a-z0-9-]+ \| .{1,200} \| .{1,80} \| \d{4}-\d{2}-\d{2} \|$'
+row_section = "table"
+note = "One fact per row. Prose is structurally impossible here."
+
+[[budget]]
+glob = "PLAN.md"
+max_lines = 150
+
+[[budget]]
+glob = "README.md"
+max_lines = 60
+
+[[budget]]
+glob = "lines/*/STATE.md"
+max_lines = 120
+
+[[budget]]
+glob = "journal/*/*.md"
+max_lines = 800
+note = "Auto-rotated by the writer at the cap. Never read at session start, so it never needs pruning."
+
+[[budget]]
+glob = "docs/decisions/*.md"
+max_lines = 120
+note = "Evidence tables longer than ~20 lines belong in experiments/<id>/, not in the decision."
+
+[[budget]]
+glob = "docs/reference/*.md"
+max_lines = 300
+
+[[budget]]
+glob = "experiments/*/verdict.md"
+max_lines = 80
+
+[[budget]]
+glob = ".claude/skills/*/SKILL.md"
+max_lines = 200
+note = "The entry point. Depth goes to references/, which is loaded on demand only."
+
+[[budget]]
+glob = ".claude/skills/*/references/*.md"
+max_lines = 400
+
+# ---------------------------------------------------------------------------
+# Section budgets — a heading inside a file.
+# ---------------------------------------------------------------------------
+[[section_budget]]
+glob = "lines/*/STATE.md"
+heading = "## NEXT — start here"
+max_lines = 60
+note = "This block is replayed verbatim into the next session. Past ~60 lines it stops being read."
+
+# ---------------------------------------------------------------------------
+# Aggregate budgets — the predecessor's skill set reached 17 skills / 9,324
+# lines, all of it inventoried at every session start. The content was
+# valuable; the placement was the bug. Skill #15 requires deleting or merging.
+# ---------------------------------------------------------------------------
+[[aggregate_budget]]
+glob = ".claude/skills/*/SKILL.md"
+max_total_lines = 2000
+max_files = 14
+
+# ---------------------------------------------------------------------------
+# Skill hygiene: unused skills become visible, then warn, then fail.
+# A skill listed in .claude/skills/RETENTION.md with a reason is exempt.
+# ---------------------------------------------------------------------------
+[skill_hygiene]
+notice_days = 30
+warn_days = 60
+fail_days = 90

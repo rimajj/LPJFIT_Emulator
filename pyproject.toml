@@ -1,0 +1,102 @@
+[project]
+name = "vegemu"
+version = "0.0.1"
+description = "A purely data-driven emulator of the LPJmL-FIT dynamic global vegetation model"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "AGPL-3.0-or-later" }
+authors = [{ name = "Jamir Priesner" }]
+
+dependencies = [
+  "numpy>=2.0",
+  "polars>=1.30",
+  "pyarrow>=19",
+  "netCDF4>=1.7",
+  "pyyaml>=6",
+  # tomllib is stdlib on 3.11+, so no toml dependency is needed for reading.
+]
+
+[project.optional-dependencies]
+# Training is a separate extra so the checkers, the binary-format layer and the corpus builders stay
+# installable without a 2.5 GB CUDA wheel. The cluster's `gpu` partition and the pinned torch build
+# are documented in docs/reference/cluster.md.
+train = ["torch>=2.5", "scipy>=1.14"]
+dev = [
+  "pytest>=8",
+  "hypothesis>=6.100",   # the binary-format round-trip is a PROPERTY test, not a fixture test
+  "ruff>=0.6",
+  "mypy>=1.11",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/vegemu"]
+
+# ---------------------------------------------------------------------------
+# Ruff. Runs over EVERY .py in the repo, not just the package.
+#
+# WHY: the predecessor gated only a 17-file subdirectory and left 131 tracked scripts linted by
+# nothing at all. Two of the rules below catch silent DATA-CORRUPTION defects rather than style, and
+# both are exactly the kind of bug an analysis script hides:
+#
+#   B905 — zip() without strict=. Silently truncates to the shorter argument, so a paired computation
+#          over two arrays that MUST have the same rows (seeds, cells, stems) quietly drops the tail
+#          instead of failing. This is the same class of silent mis-pairing as reading two grid files
+#          that disagree on cell ordering.
+#   B023 — a closure over a loop variable. Fine only while it is called inside the same iteration;
+#          breaks silently the day it is not. Bind the value as a default instead.
+#
+# These two are listed in `unfixable` and must never be added to `ignore`. The commit guard runs just
+# this subset so it stays fast and never nags about formatting.
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tools", "scripts", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "NPY", "PL"]
+ignore = [
+  "PLR0913",  # many arguments: the binary-format writers legitimately take many fields
+  "PLR2004",  # magic value: byte offsets and struct sizes ARE the specification
+]
+# Never auto-"fix" the two silent-corruption rules: the correct repair is a human decision about
+# which array is authoritative, not a mechanical rewrite.
+unfixable = ["B905", "B023"]
+
+[tool.ruff.lint.per-file-ignores]
+# Byte-offset tables and format constants read better as literals.
+"src/vegemu/binfmt/*.py" = ["PLR0915"]
+"tests/*" = ["PLR2004", "S101"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+# ---------------------------------------------------------------------------
+# mypy: strict on the package only. Scripts and tools are exempt — they are
+# cluster entry points whose value is being readable and rerunnable.
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src/vegemu"]
+warn_unreachable = true
+enable_error_code = ["redundant-expr", "truthy-bool", "ignore-without-code"]
+
+[[tool.mypy.overrides]]
+module = ["netCDF4.*", "polars.*", "pyarrow.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+markers = [
+  # Tests that need the real 119 GB restart file or the real cluster inputs. Skipped when absent, so
+  # the suite still runs on a machine without /p mounted — but the round-trip gate in CI DOES run them
+  # on the cluster runner, because a format proven only against synthetic data is not proven.
+  "needs_real_data: requires the LPJmL-FIT ground-truth files under /p",
+  "slow: takes more than a few seconds",
+]

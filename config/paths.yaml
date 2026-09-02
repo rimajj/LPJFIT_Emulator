@@ -1,0 +1,162 @@
+# paths.yaml — the ONLY place an absolute path may appear.
+#
+# Enforced: the `pathsafety` gate fails on a hardcoded /p/... or /home/... anywhere else in the repo.
+# That is not tidiness — in the predecessor, scripts that opened with a hardcoded repo root silently
+# wrote their output into the INTEGRATION worktree instead of the line's own, dirtying the one shared
+# checkout and losing the result.
+#
+# Every entry is marked [VERIFIED <date>] against the live PIK cluster, or it is absent. An unverified
+# path is worse than a missing one.
+
+meta:
+  schema_version: 1
+  verified: "2026-09-02"
+
+project:
+  root: /p/projects/open/Jamir/vegemu
+  worktrees:
+    D: /p/projects/open/Jamir/wt-D
+    T: /p/projects/open/Jamir/wt-T
+    X: /p/projects/open/Jamir/wt-X
+  # The retired predecessor. READ-ONLY archive of record: cite it, never write to it.
+  predecessor: /p/projects/open/Jamir/esm_land_emulator
+
+scratch:
+  # Everything large. Never in git.
+  root: /p/tmp/jamirp/vegemu
+  corpus: /p/tmp/jamirp/vegemu/corpus       # spin-up ensemble shards, one dir per corpus version
+  runs: /p/tmp/jamirp/vegemu/runs           # individual LPJmL-FIT run directories
+  models: /p/tmp/jamirp/vegemu/models       # checkpoints (a job that dies mid-epoch must not lose the run)
+  exp: /p/tmp/jamirp/vegemu/exp             # per-experiment metrics output
+
+# ---------------------------------------------------------------------------
+# LPJmL-FIT — the model we emulate, and the generator of every training label.
+# ---------------------------------------------------------------------------
+lpjml:
+  lpjroot: /home/jamirp/lpjml56fit                    # [VERIFIED 2026-09-02] LPJROOT
+  version: "5.6.004"                                  # [VERIFIED 2026-09-02] VERSION file
+
+  # ⚠ BINARY PROVENANCE IS LOAD-BEARING AND THE BUILDS ARE NOT INTERCHANGEABLE.
+  # `bin/lpjml` was last rebuilt 2026-08-12. The stored Historical + ssp370-seed1 ground truth was
+  # produced by the 2026-02-05 build (kept as `pristine` below); the ssp126 leg by an Aug-12 build.
+  # Two builds are never byte-identical (the build date is compiled in), so:
+  #   - generate the WHOLE corpus with ONE binary and record which in every provenance.json;
+  #   - when comparing against STORED ground truth, gate the provenance first;
+  #   - after any rebuild, run the decoded-variable equality check before quoting any number.
+  # We use `current` because it carries the two opt-in output switches we need (below), both of which
+  # are inert unless their environment variable is set.
+  binary: /home/jamirp/lpjml56fit/bin/lpjml           # [VERIFIED 2026-09-02] built 2026-08-12
+  binary_pristine: /home/jamirp/lpjml56fit/bin/lpjml.pre_dgrass.bak   # [VERIFIED] built 2026-02-05
+  lpjcheck: /home/jamirp/lpjml56fit/bin/lpjcheck      # config pre-flight; validates without running
+
+  # Opt-in switches on `binary`, both inert unless the variable is set:
+  #   LPJ_IND_ALL_HEIGHTS=1  emit stems below the writer's 5 m cut, so the per-tree table is UNCENSORED
+  #   LPJ_IND_TRUE_GPP=1     emit real gross photosynthesis instead of a copy of net (see MEMORY.md)
+  # Set the first for every corpus run; the restart target is uncensored regardless.
+
+  config_template: /home/jamirp/lpjml56fit/lpjmlfit.js       # npatch 25, individual true, nspinup 1000, nspinyear 30
+  params: /home/jamirp/lpjml56fit/param_lpjmlfit.js          # at LPJROOT ROOT, not par/ — found via -I$LPJROOT
+  pft_params: /home/jamirp/lpjml56fit/par/pft_lpjmlfit.js    # NOT par/pft.js, whose values differ
+  soil_layers: /home/jamirp/lpjml56fit/par/soil_20m.js       # 200,300,500,1000x19,3000 mm — a GLOBAL, not per-cell
+  outputvars: /home/jamirp/lpjml56fit/par/outputvars.js
+
+# ---------------------------------------------------------------------------
+# Input forcing. 0.5 deg, 67,420 cells in "orderA" ordering, 365-day noleap.
+# ---------------------------------------------------------------------------
+inputs:
+  inpath: /p/projects/waldspektrum/priesner/clustering/global
+  # ⚠ Use THIS grid/soil pair for anything orderA-indexed. A second 67,420-cell coordinate file exists
+  # elsewhere on the cluster with a DIFFERENT ordering, and pairing the two shifts every cell silently.
+  coord: /p/projects/waldspektrum/priesner/clustering/global/soil_code_test.grid.clm
+  soil: /p/projects/waldspektrum/priesner/clustering/global/soil_code_test.soil.bin
+  soildepth: /p/projects/waldspektrum/priesner/clustering/global/soil_depth_test.clm
+
+  # ⚠ The .clm format is VERSION-DEPENDENT and this set is MIXED. Always parse the header; never
+  # assume a dtype. Historical is v3 (float32, scale 1.0). In the scenario legs tas/pr/rsds/lwnet are
+  # v2 (int16, scale 0.1 => tenths of a degree) while huss is v3 (float32) — one hardcoded dtype reads
+  # four of the five wrong.
+  historical:                                        # [VERIFIED 2026-09-02] obsclim GSWP3-W5E5, 1901-2019
+    tas: /p/projects/waldspektrum/priesner/clustering/global/temperature_test.clm
+    pr: /p/projects/waldspektrum/priesner/clustering/global/precipitation_test.clm
+    lwnet: /p/projects/waldspektrum/priesner/clustering/global/long_wave_radiation_test.clm
+    rsds: /p/projects/waldspektrum/priesner/clustering/global/short_wave_radiation_test.clm
+    huss: /p/projects/waldspektrum/priesner/clustering/global/humid_test.clm
+
+  ssp370:                                            # [VERIFIED 2026-09-02] MPI-ESM1-2-HR, 2015-2100
+    tas: /p/projects/waldspektrum/priesner/clustering/global/ssp370/tas_mpi-esm1-2-hr_ssp370_2015-2100_orderA.clm
+    pr: /p/projects/waldspektrum/priesner/clustering/global/ssp370/pr_mpi-esm1-2-hr_ssp370_2015-2100_orderA.clm
+    lwnet: /p/projects/waldspektrum/priesner/clustering/global/ssp370/lwnet_mpi-esm1-2-hr_ssp370_2015-2100_orderA.clm
+    rsds: /p/projects/waldspektrum/priesner/clustering/global/ssp370/rsds_mpi-esm1-2-hr_ssp370_2015-2100_orderA.clm
+    huss: /p/projects/waldspektrum/priesner/clustering/global/ssp370/huss_mpi-esm1-2-hr_ssp370_2015-2100_orderA.clm
+
+  # The THIRD forcing leg. Recorded in no predecessor document, and it is the held-out forcing test:
+  # it warms 0.227x of ssp370 on a common baseline, its spatial pattern correlates only 0.19-0.22 with
+  # ssp370, and 15-26 % of scored cells COOL. A model that memorised the ssp370 pattern must fail it.
+  ssp126:                                            # [VERIFIED 2026-09-02] MPI-ESM1-2-HR, 2015-2100
+    tas: /p/projects/waldspektrum/priesner/clustering/global/ssp126/tas_mpi-esm1-2-hr_ssp126_2015-2100_orderA.clm
+    pr: /p/projects/waldspektrum/priesner/clustering/global/ssp126/pr_mpi-esm1-2-hr_ssp126_2015-2100_orderA.clm
+    lwnet: /p/projects/waldspektrum/priesner/clustering/global/ssp126/lwnet_mpi-esm1-2-hr_ssp126_2015-2100_orderA.clm
+    rsds: /p/projects/waldspektrum/priesner/clustering/global/ssp126/rsds_mpi-esm1-2-hr_ssp126_2015-2100_orderA.clm
+    huss: /p/projects/waldspektrum/priesner/clustering/global/ssp126/huss_mpi-esm1-2-hr_ssp126_2015-2100_orderA.clm
+
+  # CO2 is held CONSTANT from 2020 (409.63 ppm) on purpose. The emulator never sees it.
+  co2: /p/projects/waldspektrum/priesner/clustering/global/global_co2_ann_1700_2019_const_2100.txt
+
+# ---------------------------------------------------------------------------
+# Existing ground truth. Read-only. Two seeds per leg = the noise floor that
+# defines the acceptance tolerance.
+# ---------------------------------------------------------------------------
+ground_truth:
+  root: /p/projects/waldspektrum/priesner/clustering/global
+  historical_seed1: ${ground_truth.root}/Historical/ground_truth/model_output/transient_2000_2019_npatch25_nspinup1000_nspinyear30_random_seed1
+  historical_seed2: ${ground_truth.root}/Historical/ground_truth/model_output/transient_2000_2019_npatch25_nspinup1000_nspinyear30_random_seed2
+  ssp370_seed1: ${ground_truth.root}/ssp370/ground_truth/model_output/transient_2020_2100_npatch25_random_seed1
+  ssp370_seed2: ${ground_truth.root}/ssp370/ground_truth/model_output/transient_2020_2100_npatch25_random_seed2
+  ssp126_seed1: ${ground_truth.root}/ssp126/ground_truth/model_output/transient_2020_2100_npatch25_random_seed1
+  ssp126_seed2: ${ground_truth.root}/ssp126/ground_truth/model_output/transient_2020_2100_npatch25_random_seed2
+
+  # Restart files, ~119 GiB each. The distinction is load-bearing:
+  #   restart_1999 = END OF SPIN-UP  -> the reference target for the equilibrium product, and the
+  #                                     file our writer must reproduce byte-identically (rung 0)
+  #   restart_2019 = historical end  -> only the start of a scenario continuation
+  restart_spinup_end: ${ground_truth.historical_seed1}/restart/restart_1999.lpj
+  restart_historical_end: ${ground_truth.historical_seed1}/restart/restart_2019.lpj
+  restart_spinup_end_seed2: ${ground_truth.historical_seed2}/restart/restart_1999.lpj
+
+  # ⛳ The 1000-step spin-up vegetation-carbon trajectory, for BOTH seeds. Cited in no predecessor
+  # document. Reads the actual convergence time of the spin-up: if the forest is stationary well
+  # before 1000 years, every corpus budget in PLAN.md drops proportionally.
+  spinup_trajectory_seed1: ${ground_truth.historical_seed1}/output/vegc_spinup_1999.nc
+  spinup_trajectory_seed2: ${ground_truth.historical_seed2}/output/vegc_spinup_1999.nc
+
+  # The grid file that maps an orderA cell index to (lat, lon) via its `cellid(lat,lon)` variable.
+  grid_nc: ${ground_truth.historical_seed1}/output/grid_1999.nc
+
+# ---------------------------------------------------------------------------
+# Predecessor derived tables. Read-only, and CENSORED (no stems under 5 m), so
+# useful for labels on visible stems but NOT invertible to a restart file.
+# ---------------------------------------------------------------------------
+predecessor_data:
+  root: /p/tmp/jamirp/emulator_global                # [VERIFIED 2026-09-02]
+  ind_historical_seed1: /p/tmp/jamirp/emulator_global/ind_hist_seed1_all.parquet   # 246 M rows
+  ind_historical_seed2: /p/tmp/jamirp/emulator_global/ind_hist_seed2_all.parquet
+  ind_ssp370_seed1: /p/tmp/jamirp/emulator_global/ind_ssp370_seed1_all.parquet     # 1.03 G rows
+  ind_ssp370_seed2: /p/tmp/jamirp/emulator_global/ind_ssp370_seed2_all.parquet
+  cell_year_feats: /p/tmp/jamirp/emulator_global/tables/cell_year_feats.parquet
+
+cells:
+  # The prototype cell. ⚠ Index 28008 is Hainich in a DIFFERENT grid; in orderA it is the Sonoran
+  # desert. Always 42490 here.
+  hainich: 42490
+  # Biome reference cells carried over from the predecessor, for cheap five-cell smoke checks. A
+  # five-cell result is NEVER fidelity evidence — the acceptance criterion is all 54,020.
+  biome:
+    boreal_siberia: 52059
+    temperate_hainich: 42490
+    mediterranean_iberia: 33335
+    semiarid_sahel: 18371
+    tropical_amazon: 12045
+
+cluster:
+  account: waldspektrum
+  python: /home/jamirp/.conda/envs/py311_new/bin/python   # [VERIFIED 2026-09-02] 3.11.9, torch 2.5.1+cu124
