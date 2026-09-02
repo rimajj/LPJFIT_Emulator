@@ -81,7 +81,15 @@ kind = "shared"
 [[rule]]
 globs = [
   "CLAUDE.md", "MEMORY.md", "PLAN.md", "README.md", "CHANGELOG.md",
-  "config/**", ".github/**", ".claude/settings.json",
+  "config/**", ".github/**",
+  # The enforcement machinery itself. A line that could edit the hook that constrains it would make
+  # the whole scheme circular -- the same reason config/budgets.toml is here.
+  #
+  # This rule was ADDED because `unowned = "deny"` caught its absence on the very first commit that
+  # touched .claude/hooks/. That is the mechanism working exactly as intended: the predecessor's map
+  # drifted to fifteen rows and stopped being true precisely because unowned paths were allowed
+  # through silently, so an unowned path here forces a rule at the moment of first write.
+  ".claude/settings.json", ".claude/hooks/**", ".githooks/**",
   "pyproject.toml", "uv.lock", ".gitignore", ".gitattributes",
 ]
 owner = "integrator"
