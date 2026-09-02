@@ -2,10 +2,10 @@
 """Enforce the document size budgets in config/budgets.toml.
 
 WHY THIS EXISTS. In the predecessor repo, documentation was capped by prose and the prose lost. Its
-memory file carried its own documented limit of 400 lines in its own header and reached 647 (+62 %);
-its always-loaded runbook reached 1,255 lines; one line-state file reached 3,924 lines and had stopped
-being state at all. A dedicated consolidation procedure existed the whole time and never ran, because
-nothing ever made it run. The cap was never the missing piece -- the mechanism was.
+memory file carried its own documented limit of 400 lines in its own header and reached 647
+(+62 %); its always-loaded runbook reached 1,255 lines; one line-state file reached 3,924 lines and
+had stopped being state at all. A dedicated consolidation procedure existed the whole time and never
+ran, because nothing ever made it run. The cap was never the missing piece -- the mechanism was.
 
 So the same limits now fail a commit and fail CI, and raising one is an owner act:
 
@@ -20,6 +20,7 @@ So the same limits now fail a commit and fail CI, and raising one is an owner ac
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 import time
@@ -29,7 +30,7 @@ from pathlib import Path
 # importable whether this file is run as a script or imported by a test.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _common import (  # noqa: E402
+from _common import (
     Report,
     base_parser,
     config,
@@ -66,22 +67,22 @@ def check_line_budgets(rel: str, lines: list[str], budgets: list[dict], rep: Rep
             rel,
             "B01",
             f"{n} lines, budget {limit} (over by {over})",
-            hint=b.get("note", "") or f"rotate with tools/rotate_state.py, or move depth to a reference file",
+            hint=b.get("note", "")
+            or "rotate with tools/rotate_state.py, or move depth to a reference file",
         )
 
-    # Structural row format. This is what makes MEMORY.md unable to become a narrative: a row that is
-    # not a fixed-column table row is a finding, so the file's SHAPE is enforced, not just its size.
+    # Structural row format. This is what makes MEMORY.md unable to become a narrative: a row that
+    # is not a fixed-column table row is a finding, so the file's SHAPE is enforced, not just its
+    # size.
     row_format = b.get("row_format")
     if row_format:
-        import re as _re
-
-        rx = _re.compile(str(row_format))
+        rx = re.compile(str(row_format))
         for i, ln in enumerate(lines, start=1):
             s = ln.strip()
             if not s.startswith("|"):
                 continue
             # Skip the header row and the |---|---| separator.
-            if _re.fullmatch(r"\|[\s|:-]+\|", s):
+            if re.fullmatch(r"\|[\s|:-]+\|", s):
                 continue
             if s.startswith("| id ") or s.startswith("| Kind "):
                 continue
@@ -91,7 +92,10 @@ def check_line_budgets(rel: str, lines: list[str], budgets: list[dict], rep: Rep
                     "B02",
                     "table row does not match the required fixed-column format",
                     line=i,
-                    hint="rows are `| id | fact (<=200 chars) | source | YYYY-MM-DD |` — prose belongs in a skill or docs/reference/",
+                    hint=(
+                        "rows are `| id | fact (<=200 chars) | source | YYYY-MM-DD |` — prose "
+                        "belongs in a skill or docs/reference/"
+                    ),
                 )
 
 
@@ -145,8 +149,9 @@ def check_root_allowlist(files: list[str], allow: list[str], rep: Report) -> Non
                 "B04",
                 "new root-level markdown file is not in the allowlist",
                 hint=(
-                    "the predecessor accumulated seven partially-superseding root planning documents "
-                    "(~1,584 lines) that every session was told to read. Put this in docs/reference/, "
+                    "the predecessor accumulated seven partially-superseding root planning "
+                    "documents (~1,584 lines) that every session was told to read. Put this in "
+                    "docs/reference/, "
                     "a skill, or PLAN.md — or add it to [root_md].allow with owner approval"
                 ),
             )
@@ -163,7 +168,10 @@ def check_aggregates(aggregates: list[dict], rep: Report) -> None:
                 pattern,
                 "B05",
                 f"{len(matched)} files, cap {max_files}",
-                hint="merge or delete one first — a cap is what convenes the dedup pass that otherwise never happens",
+                hint=(
+                    "merge or delete one first — a cap is what convenes the dedup pass that "
+                    "otherwise never happens"
+                ),
             )
         max_total = agg.get("max_total_lines")
         if max_total is not None:
@@ -177,7 +185,10 @@ def check_aggregates(aggregates: list[dict], rep: Report) -> None:
                     pattern,
                     "B05",
                     f"{total} total lines, cap {max_total}",
-                    hint="push depth into references/, which is loaded on demand instead of inventoried every session",
+                    hint=(
+                        "push depth into references/, which is loaded on demand instead of "
+                        "inventoried every session"
+                    ),
                 )
 
 
@@ -190,16 +201,35 @@ def check_owner_trailer(files: list[str], rep: Report) -> None:
     """
     if "config/budgets.toml" not in files:
         return
-    name_status = subprocess.run(
-        ["git", "-C", str(repo_root()), "diff", "--cached", "--name-status", "--", "config/budgets.toml"],
-        capture_output=True,
-        text=True,
-        check=False,
-    ).stdout.strip()
-    # "A<TAB>config/budgets.toml" on first add; "M<TAB>..." on a real change. No staged entry at all
-    # means we are running over the tracked set (CI), where a modification is judged from the commit.
-    if name_status.startswith("A"):
-        return
+
+    def _git(*args: str) -> str:
+        return subprocess.run(
+            ["git", "-C", str(repo_root()), *args], capture_output=True, text=True, check=False
+        ).stdout
+
+    # Was budgets.toml ACTUALLY changed by the change under review?
+    #
+    # This guard is load-bearing and its first version was wrong in a way worth recording. It fired
+    # whenever "config/budgets.toml" merely appeared in the file list -- and in the default mode
+    # that
+    # list is every TRACKED file, so the check fired on every clean run of the whole repo and
+    # reported a budget change that had not happened. A gate that cries wolf gets bypassed, and a
+    # bypassed gate is worse than none.
+    staged = _git("diff", "--cached", "--name-status", "--", "config/budgets.toml").strip()
+    if staged:
+        # A fresh ADD is the bootstrap commit, not a budget change.
+        if staged.startswith("A"):
+            return
+    else:
+        # Nothing staged => judge from history. Only complain if the file differs from its state at
+        # the merge base (CI) or in the last commit (local).
+        base = (
+            _git("merge-base", "origin/main", "HEAD").strip() or _git("rev-parse", "HEAD~1").strip()
+        )
+        if not base:
+            return
+        if not _git("diff", "--name-only", base, "HEAD", "--", "config/budgets.toml").strip():
+            return
     msg = subprocess.run(
         ["git", "-C", str(repo_root()), "log", "-1", "--format=%B"],
         capture_output=True,
@@ -215,14 +245,18 @@ def check_owner_trailer(files: list[str], rep: Report) -> None:
             "config/budgets.toml",
             "B06",
             "budgets changed without owner approval",
-            hint=f"a budget is raised by the owner, not by the agent it binds. Add the trailer `{OWNER_TRAILER}`",
+            hint=(
+                "a budget is raised by the owner, not by the agent it binds. "
+                f"Add the trailer `{OWNER_TRAILER}`"
+            ),
         )
 
 
 def check_skill_hygiene(hygiene: dict, rep: Report) -> None:
     """Unused skills become visible, then warn, then fail.
 
-    Reads .claude/skill-usage.log (one `<iso8601>\t<skill>` line per invocation, appended by a hook).
+    Reads .claude/skill-usage.log (one `<iso8601>\t<skill>` line per invocation, appended by a
+    hook).
     Absent log => nothing to say; a brand-new repo must not fail this.
     """
     fail_days = int(hygiene.get("fail_days", 90))
@@ -256,7 +290,10 @@ def check_skill_hygiene(hygiene: dict, rep: Report) -> None:
                 f".claude/skills/{name}/SKILL.md",
                 "B07",
                 f"unused for {age_days:.0f} days (threshold {fail_days})",
-                hint="delete it, merge it into a neighbour, or list it in .claude/skills/RETENTION.md with a reason",
+                hint=(
+                    "delete it, merge it into a neighbour, or list it in "
+                    ".claude/skills/RETENTION.md with a reason"
+                ),
             )
 
 

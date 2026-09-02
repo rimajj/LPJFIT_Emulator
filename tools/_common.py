@@ -28,7 +28,8 @@ from pathlib import Path
 #
 # This is not style. In the predecessor several scripts opened with a literal repo path, so running
 # one from a line's worktree silently emitted its output into the shared integration checkout --
-# dirtying the one checkout every line depends on and losing the result from the branch that made it.
+# dirtying the one checkout every line depends on and losing the result from the branch that made
+# it.
 # The `pathsafety` gate exists to make that impossible; this function is what it points people at.
 # --------------------------------------------------------------------------------------------------
 
@@ -57,7 +58,8 @@ def config(name: str) -> dict:
 #
 # We translate to regex rather than using pathlib.PurePath.match or fnmatch, because we need the
 # distinction those blur and the whole ownership model rests on it:
-#     *   matches within ONE path segment  ("lines/*/STATE.md" must not match "lines/D/sub/STATE.md")
+#     *   matches within ONE path segment  ("lines/*/STATE.md" must not match
+# "lines/D/sub/STATE.md")
 #     **  matches any number of segments   ("lines/D/**" matches everything beneath lines/D)
 # fnmatch's `*` crosses `/`, which would make every exclusive ownership rule quietly too broad.
 # --------------------------------------------------------------------------------------------------
@@ -208,7 +210,9 @@ def base_parser(description: str) -> argparse.ArgumentParser:
     return p
 
 
-def iter_text_files(paths: Iterable[str], suffixes: Sequence[str]) -> Iterator[tuple[str, list[str]]]:
+def iter_text_files(
+    paths: Iterable[str], suffixes: Sequence[str]
+) -> Iterator[tuple[str, list[str]]]:
     """Yield (relpath, lines) for existing text files whose suffix is in `suffixes`."""
     for rel in paths:
         if suffixes and not rel.endswith(tuple(suffixes)):

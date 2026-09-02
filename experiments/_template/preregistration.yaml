@@ -1,0 +1,144 @@
+# ============================================================================================
+# PRE-REGISTRATION TEMPLATE — copy this to experiments/<L>-<YYYYMMDD>-<slug>/preregistration.yaml
+#
+# Fill it in, then:   tools/seal_experiment.py <exp_id>
+# Only then can a launcher submit the job. The launcher stamps this file's hash into the job, so a
+# later edit is detectable and turns CI red. That is what makes "pre-registered" a fact rather than
+# a promise.
+#
+# WHY ALL THIS CEREMONY. In the predecessor project five headline scientific claims were killed by
+# adversarial review, and every one died the same way: a skill number reported without the null it
+# should have been measured against.
+#   - a one-step forest-state operator scored 0.9824 -- against a persistence null of 0.9622, so
+#     96 % of its apparent skill was the null;
+#   - a per-cell warming-response model scored 0.748 -- against a PURE GEOGRAPHIC ADDRESS (latitude
+#     and longitude, no climate whatsoever) at 0.654.
+# Running a null is not enough either: you must DERIVE what it has to return and write that down
+# before the run, because otherwise a null that silently returned the wrong thing is indistinguishable
+# from a null that agreed with you. `expected.value` below is that number.
+# ============================================================================================
+
+schema_version: 1
+
+# <LINE>-<YYYYMMDD>-<slug>. Must equal the directory name. No number allocation, ever -- the date and
+# the line make collisions impossible, which is the whole job the predecessor's four-tier ADR
+# number-block scheme did with ~35 lines of index bookkeeping and a self-allocation rule.
+exp_id: X-20260902-example
+line: X
+
+# draft -> sealed. Nothing else is writable here. Sealing is done by the tool, not by hand.
+status: draft
+
+title: "One line, readable by someone who has never opened this repo"
+question: "One falsifiable sentence. If you cannot phrase it falsifiably, you are not ready to run it."
+
+# --------------------------------------------------------------------------------------------------
+# THE ESTIMAND. `name` is the ONLY statistic any result row or verdict line may report -- the checker
+# rejects a row reporting anything else (E05). This is deliberate: in the predecessor a
+# pre-registered THRESHOLD was evaluated against the wrong statistic, so the pre-registration was
+# satisfied by a number nobody had promised.
+# --------------------------------------------------------------------------------------------------
+estimand:
+  name: r2_oos_count
+  definition: >
+    Exactly what is computed, in enough detail that a stranger could recompute it. Name the
+    aggregation (per cell? per cell-year? pooled?) and the weighting.
+  # State the basis IN the record, because a number without its basis is not a result. Include the
+  # patch count: a tolerance derived at 25 patches largely evaporates at acceptance grade (~125-192).
+  reference_basis: >
+    LPJmL-FIT truth, which leg, which years, tree PFTs only or all, year-matched or window-mean,
+    npatch=?, binary build date.
+  units: dimensionless
+  # "level" or "ratio". A ratio over time is partly robust to a basis substitution while a level is
+  # not, so every downstream claim has to be labelled before anything is re-measured.
+  kind: level
+
+# --------------------------------------------------------------------------------------------------
+# DATA. A corpus is immutable once cited here: `corpus_sha256` is the hash of its MANIFEST, so if the
+# corpus is regenerated the hash changes and this experiment no longer refers to it.
+# --------------------------------------------------------------------------------------------------
+data:
+  corpus: /p/tmp/jamirp/vegemu/corpus/v0
+  corpus_sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+  n_rows: 0
+
+  split:
+    # kfold_by_cell        holds out SPACE, not time
+    # blocked_spatial      holds out contiguous lat/lon blocks -- REQUIRED for any spatial claim
+    # holdout_perturbation holds out entire climate-perturbation levels (extrapolation in forcing)
+    # holdout_forcing_leg  holds out a whole scenario leg
+    kind: blocked_spatial
+    k: 5
+    seed: 42
+    # For blocked_spatial only. The effective independent spatial sample here is ~161 populated
+    # 15x15 deg tiles, NOT 54,020 cells -- row counts overstate independent evidence by four orders
+    # of magnitude, and a random fold turns any spatial claim into an interpolation score.
+    block_degrees: [15, 5]
+
+  # REQUIRED and non-empty. Each entry is a claim a human can re-run.
+  leakage_checks:
+    - "No feature derived from the target year's truth: `rg 'shift\\(|_prev|_init|lag' <builder>` reviewed."
+    - "Held-out perturbation levels really are absent from training: assert on the level column."
+
+# --------------------------------------------------------------------------------------------------
+# NULLS. REQUIRED, at least one. Each carries the value it MUST return and where that came from.
+# If a null returns something else, the experiment is INVALID -- not passing, not failing (E07).
+# If any null satisfies `decision_rule.pass_if`, the metric has NO POWER and the verdict must be
+# `invalid` (E08). A metric the null also passes cannot be quoted as evidence of anything.
+# --------------------------------------------------------------------------------------------------
+nulls:
+  - id: same_cell_baseline
+    description: >
+      Predict this cell's own UNPERTURBED equilibrium, ignoring the climate perturbation entirely.
+      For the equilibrium product this is the decisive null: if a model handed a +4 K climate cannot
+      beat "this cell as it is today", there is no learnable warming response.
+    expected:
+      statistic: r2_oos_count
+      value: 0.0
+      tolerance: 0.02
+      derivation: "state it: analytic, or measured in <experiment id / record>"
+
+  - id: geographic_address
+    description: "Unit-sphere x/y/z of the cell centre. No climate at all."
+    expected:
+      statistic: r2_oos_count
+      value: 0.0
+      tolerance: 0.05
+      derivation: "measured; on the predecessor's per-cell response target this null returned 0.654"
+
+  - id: shuffled_target
+    description: "Target permuted within fold. The sanity null."
+    expected:
+      statistic: r2_oos_count
+      value: 0.0
+      tolerance: 0.02
+      derivation: analytic
+
+# --------------------------------------------------------------------------------------------------
+# THE DECISION RULE. The checker RECOMPUTES this from the result rows; the verdict may not assert it.
+# --------------------------------------------------------------------------------------------------
+decision_rule:
+  statistic: r2_oos_count      # MUST equal estimand.name
+  comparator: model_minus_best_null
+  pass_if: "> 0.020"
+  arms: [model, same_cell_baseline, geographic_address, shuffled_target]
+  multiplicity: none           # none | bonferroni | holm  (required if >1 arm is under test)
+  power_note: >
+    If any null satisfies pass_if, the estimand has no power and the outcome MUST be `invalid`.
+    Note also that a single-draw R2 on stem counts is near-saturated here: the model's own per-patch
+    Bernoulli realisation noise is ~28 % of residual variance, so an R2 floor alone cannot
+    discriminate arms and the target should be the ensemble expectation.
+
+compute:
+  launcher: scripts/sbatch_py.sh
+  tag: X-example
+  partition: standard          # `priority` starts instantly but caps at 64 CPU / 350 GB per job
+  est_core_hours: 0
+
+outputs:
+  - path: /p/tmp/jamirp/vegemu/exp/X-20260902-example/metrics.json
+    kind: metrics
+
+# Set only when this supersedes an earlier experiment. A sealed pre-registration is never edited --
+# a changed question is a NEW exp_id that names the old one here.
+# supersedes: X-20260801-earlier-attempt

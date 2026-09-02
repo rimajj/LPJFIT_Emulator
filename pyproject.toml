@@ -71,6 +71,11 @@ unfixable = ["B905", "B023"]
 # Byte-offset tables and format constants read better as literals.
 "src/vegemu/binfmt/*.py" = ["PLR0915"]
 "tests/*" = ["PLR2004", "S101"]
+# A schema validator is a flat list of independent checks, one per error code. Splitting it to
+# satisfy a branch counter would scatter the codes across helpers and make the gate harder to read
+# and harder to audit against its own docstring -- which is the artifact that explains each code's
+# rationale. The complexity is inherent to the job, not accidental.
+"tools/check_*.py" = ["PLR0912", "PLR0915"]
 
 [tool.ruff.format]
 quote-style = "double"

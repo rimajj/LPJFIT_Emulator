@@ -30,7 +30,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _common import changed_vs, glob_match, repo_root  # noqa: E402
+from _common import changed_vs, glob_match, repo_root
 
 
 def load_gates() -> tuple[list[dict], dict]:
@@ -90,7 +90,9 @@ def expected(files: list[str], branch: str) -> tuple[list[str], list[str]]:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--ref", default="origin/main", help="compare against this ref (default origin/main)")
+    ap.add_argument(
+        "--ref", default="origin/main", help="compare against this ref (default origin/main)"
+    )
     ap.add_argument("--json", action="store_true", help="machine-readable output")
     ap.add_argument("--branch", default=None, help="override the detected branch")
     args = ap.parse_args(argv)
@@ -100,7 +102,11 @@ def main(argv: list[str] | None = None) -> int:
     run, skip = expected(files, branch)
 
     if args.json:
-        print(json.dumps({"branch": branch, "files": len(files), "expected": run, "not_triggered": skip}))
+        print(
+            json.dumps(
+                {"branch": branch, "files": len(files), "expected": run, "not_triggered": skip}
+            )
+        )
         return 0
 
     print(f"diff vs {args.ref}: {len(files)} file(s) on branch {branch}")

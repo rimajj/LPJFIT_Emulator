@@ -7,7 +7,8 @@ Four defects, each of which cost the predecessor real work:
          Several predecessor scripts opened with a literal repo root, so running one from a work
          line's worktree silently wrote its output into the SHARED integration checkout -- dirtying
          the one checkout every line depends on, and losing the result from the branch that produced
-         it. Derive the root from the file: `Path(__file__).resolve().parent.parent` / `${BASH_SOURCE}`.
+         it. Derive the root from the file: `Path(__file__).resolve().parent.parent` /
+         `${BASH_SOURCE}`.
 
     P02  a shell script under scripts/ that does not self-locate its repo root
          Same defect, other language. The wrapper must submit against ITS OWN worktree.
@@ -30,13 +31,29 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _common import Report, base_parser, iter_text_files, select_files  # noqa: E402
+from _common import Report, base_parser, iter_text_files, select_files
 
 # Paths that may legitimately be absolute, anywhere.
 ALLOWED_FILES = {
     "config/paths.yaml",  # by construction the one place paths live
     "tools/check_no_abs_paths.py",  # this file names the patterns it forbids
 }
+
+# Trees where an absolute path is the POINT rather than the defect, so they are out of scope:
+#
+#   experiments/  a pre-registration must name the exact corpus it was run against, byte for byte.
+#                 That is provenance -- redirecting it through config/paths.yaml would make the
+#                 record less self-contained and less checkable, which is the opposite of the goal.
+#   config/       the one sanctioned home for paths.
+#   docs/         reference prose quotes real paths so a reader can find the data.
+#
+# This mirrors the `pathsafety` gate's own declared scope (scripts/, tools/, src/): the checker's
+# default must not be broader than the gate that enforces it, or a clean CI run and a clean local
+# disagree -- and the local one is the liar.
+EXEMPT_TREES = ("experiments/", "config/", "docs/", "changelog.d/", "lines/", "journal/")
+
+# The gate watches exactly these. Keep in step with .github/gates.toml.
+IN_SCOPE_TREES = ("scripts/", "tools/", "src/", "tests/")
 
 # Absolute cluster roots that must not be hardcoded.
 ABS_RE = re.compile(r"(?<![\w/])(/p/(?:projects|tmp)/|/home/[a-z][\w-]*)")
@@ -45,7 +62,7 @@ ABS_RE = re.compile(r"(?<![\w/])(/p/(?:projects|tmp)/|/home/[a-z][\w-]*)")
 # scratch temp file inside a single process is fine.
 TMP_RE = re.compile(r"(?<![\w/])(/tmp/|\$TMPDIR|\$\{TMPDIR\})")
 
-SELF_LOCATE_RE = re.compile(r'BASH_SOURCE\[0\]|\$\{BASH_SOURCE')
+SELF_LOCATE_RE = re.compile(r"BASH_SOURCE\[0\]|\$\{BASH_SOURCE")
 SBATCH_RE = re.compile(r"\bsbatch\b|#SBATCH")
 SENTINEL_RE = re.compile(r"===\s*JOB DONE\s+tag=")
 ACCOUNT_RE = re.compile(r"--account|#SBATCH\s+-A\b|SBATCH_ACCOUNT")
@@ -96,7 +113,10 @@ def check_file(rel: str, lines: list[str], rep: Report) -> None:
             rel,
             "P02",
             "shell script does not self-locate its repo root",
-            hint='add: REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" so a worktree copy submits against its own tree',
+            hint=(
+                'add: REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" '
+                "so a worktree copy submits against its own tree"
+            ),
         )
 
     if is_slurm:
@@ -105,23 +125,48 @@ def check_file(rel: str, lines: list[str], rep: Report) -> None:
                 rel,
                 "P03",
                 "no completion sentinel",
-                hint='the job\'s last line must be: echo "=== JOB DONE tag=<tag> exit=$rc ===" — it is how a later session harvests it',
+                hint=(
+                    'the job\'s last line must be: echo "=== JOB DONE tag=<tag> exit=$rc ===" '
+                    "— it is how a later session harvests it"
+                ),
             )
         if not ACCOUNT_RE.search(text):
             rep.add(
                 rel,
                 "P03",
                 "no --account",
-                hint="this cluster rejects a submission without an account; take it from config/paths.yaml cluster.account",
+                hint=(
+                    "this cluster rejects a submission without an account; take it from "
+                    "config/paths.yaml cluster.account"
+                ),
             )
+
+
+def in_scope(rel: str, explicit: bool) -> bool:
+    """Whether this file is subject to the path-safety rules.
+
+    An explicitly named path is always checked -- that is how the commit guard asks about exactly
+    files being committed, and how a probe is tested. Otherwise the scope matches the gate's own
+    declaration, so a clean local run and a clean CI run cannot disagree.
+    """
+    if rel in ALLOWED_FILES:
+        return False
+    if rel.startswith(EXEMPT_TREES):
+        return False
+    if explicit:
+        return True
+    return rel.startswith(IN_SCOPE_TREES)
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = base_parser(__doc__ or "")
     args = ap.parse_args(argv)
     rep = Report("check_no_abs_paths")
-    for rel, lines in iter_text_files(select_files(args), (".py", ".sh", ".jcf", ".toml", ".yaml", ".yml")):
-        if rel.startswith("config/"):
+    explicit = bool(getattr(args, "paths", None))
+    for rel, lines in iter_text_files(
+        select_files(args), (".py", ".sh", ".jcf", ".toml", ".yaml", ".yml")
+    ):
+        if not in_scope(rel, explicit):
             continue
         check_file(rel, lines, rep)
     return rep.emit()

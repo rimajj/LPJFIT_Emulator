@@ -3,7 +3,8 @@
 
 WHY `unowned = deny`. The predecessor's ownership map grew to fifteen prose rows precisely BECAUSE
 nothing enforced it: an audit found roughly 60 % of its source tree unowned, and the map was patched
-by hand every time that bit somebody. Denying the commit on an unowned path forces a rule to be added
+by hand every time that bit somebody. Denying the commit on an unowned path forces a rule to be
+added
 at the moment of the first write, which keeps the map short and -- the part that actually matters --
 keeps it TRUE.
 
@@ -12,8 +13,10 @@ keeps it TRUE.
     O03  an accepted decision record was modified rather than added
     O04  a path is integrator-only and this is a line branch
 
-The current line is resolved from the branch name (`line/D` -> D), so it is the directory you launched
-in that decides, and nobody has to declare it. On `main` the caller is the integrator and only O02/O03
+The current line is resolved from the branch name (`line/D` -> D), so it is the directory you
+launched
+in that decides, and nobody has to declare it. On `main` the caller is the integrator and only
+O02/O03
 can fire.
 """
 
@@ -25,7 +28,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _common import (  # noqa: E402
+from _common import (
     Report,
     base_parser,
     config,
@@ -61,7 +64,7 @@ def _rules(cfg: dict) -> list[tuple[str, str, str]]:
 
 
 def _match(rel: str, rules: list[tuple[str, str, str]]) -> tuple[str, str, str] | None:
-    """Most specific match wins: the longest glob, so a narrow carve-out beats a broad shared rule."""
+    """Most specific match wins: the longest glob, so a narrow carve-out beats a broad rule."""
     best: tuple[str, str, str] | None = None
     best_len = -1
     for glob, owner, kind in rules:
@@ -121,7 +124,8 @@ def main(argv: list[str] | None = None) -> int:
                     "O02",
                     "matches no ownership rule",
                     hint=(
-                        "add a rule to config/ownership.toml. This is deliberate: the predecessor's map "
+                        "add a rule to config/ownership.toml. This is deliberate: the "
+                        "predecessor's map "
                         "drifted out of truth because unowned paths were silently allowed"
                     ),
                 )
@@ -135,16 +139,27 @@ def main(argv: list[str] | None = None) -> int:
                 rel,
                 "O04",
                 f"integrator-only (rule {glob!r}), and this is line {line}",
-                hint="request the change; it lands on main. Line branches do not edit the protocol or the config",
+                hint=(
+                    "request the change; it lands on main. Line branches do not edit the protocol "
+                    "or the config"
+                ),
             )
-        elif kind == "exclusive" and owner not in ("*", "integrator") and line is not None and owner != line:
+        elif (
+            kind == "exclusive"
+            and owner not in ("*", "integrator")
+            and line is not None
+            and owner != line
+        ):
             if args.via_inbound and glob_match("lines/*/STATE.md", rel):
                 continue
             rep.add(
                 rel,
                 "O01",
                 f"belongs exclusively to line {owner} (rule {glob!r}), and this is line {line}",
-                hint="raise it as an integration point, or use tools/inbound.py to append a message to their STATE.md",
+                hint=(
+                    "raise it as an integration point, or use tools/inbound.py to append a message "
+                    "to their STATE.md"
+                ),
             )
 
     for rel in accepted_adr_modified(files):
@@ -152,7 +167,10 @@ def main(argv: list[str] | None = None) -> int:
             rel,
             "O03",
             "accepted decision record was modified",
-            hint="records are immutable once accepted — supersede it with a new one that says what changed and why",
+            hint=(
+                "records are immutable once accepted — supersede it with a new one that says what "
+                "changed and why"
+            ),
         )
 
     return rep.emit()

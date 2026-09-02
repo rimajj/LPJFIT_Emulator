@@ -7,9 +7,11 @@
     G04  a workflow's push branch list disagrees with the gate's `branches`
     G05  a workflow exists that is declared in no gate
 
-WHY. `tools/expected_gates.py` tells an agent which check-runs to wait for, computed from gates.toml.
-If a workflow's real filter drifts away from that declaration, the agent either waits for a gate that
-will never appear -- and a skipped workflow reports no status at all, so it waits forever -- or, worse,
+WHY. `tools/expected_gates.py` tells an agent which check-runs to wait for, computed from
+gates.toml.
+If a workflow's real filter drifts away from that declaration, the agent either waits for a gate
+will never appear -- and a skipped workflow reports no status at all, so it waits forever -- or,
+worse,
 merges without waiting for a gate that did run. The declaration and the reality have to be pinned
 together by a gate of their own, or the whole scheme is only advisory.
 """
@@ -22,7 +24,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _common import Report, repo_root  # noqa: E402
+from _common import Report, repo_root
 
 try:
     import yaml
@@ -67,7 +69,10 @@ def main() -> int:
                 f".github/workflows/{name}.yml",
                 "G02",
                 f"declared job {g['job']!r} is not among the workflow's jobs {jobs}",
-                hint="the job name is the check-run name an agent polls — it is an interface, keep it stable",
+                hint=(
+                    "the job name is the check-run name an agent polls — it is an interface, keep "
+                    "it stable"
+                ),
             )
 
         declared = sorted(set(g.get("paths", [])))
@@ -100,7 +105,10 @@ def main() -> int:
                 f".github/workflows/{wf.name}",
                 "G05",
                 "workflow is declared in no gate",
-                hint="add a [[gate]] entry so expected_gates.py knows about it, or delete the workflow",
+                hint=(
+                    "add a [[gate]] entry so expected_gates.py knows about it, or delete the "
+                    "workflow"
+                ),
             )
 
     return rep.emit()
