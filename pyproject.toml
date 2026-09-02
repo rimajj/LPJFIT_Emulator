@@ -75,7 +75,10 @@ unfixable = ["B905", "B023"]
 # satisfy a branch counter would scatter the codes across helpers and make the gate harder to read
 # and harder to audit against its own docstring -- which is the artifact that explains each code's
 # rationale. The complexity is inherent to the job, not accidental.
-"tools/check_*.py" = ["PLR0912", "PLR0915"]
+# Same rationale for the other CLI tools: a ledger folder and a fragment parser are flat
+# sequences of independent cases, and splitting them to satisfy a counter would scatter the
+# behaviour away from the docstring that explains it.
+"tools/*.py" = ["PLR0912", "PLR0915"]
 
 [tool.ruff.format]
 quote-style = "double"
