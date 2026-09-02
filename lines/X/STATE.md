@@ -2,7 +2,7 @@
 
 > Durable state for THIS LINE only. Shared/cross-cutting facts: `MEMORY.md`. Runbook: `CLAUDE.md` (+ §9 for
 > the parallel-line protocol). Narrative: `lines/X/JOURNAL.md` (append-only). Decisions: tier-1 block
-> **0310–0329**, opened by **ADR 0310**. **Next free number: 0312.**
+> **0310–0329**, opened by **ADR 0310**. **Next free number: 0313.**
 > **The `## NEXT` block below is what the SessionStart hook prints — the ending session MUST refresh it.**
 
 ---
@@ -84,7 +84,35 @@ and caught only by adversarial review.
 
 ## NEXT — start here
 
-### 0✦ 💬 THE OPEN CONVERSATION, ROUND 2 IS MEASURED AND HALF-FINISHED (owner, 2026-08-19 → 2026-09-02; **ADR 0311**)
+### 0✦ 💬 NEW OWNER QUESTION, ANSWERED — where does the ORIGINAL model's time go? (owner, 2026-09-02; **ADR 0312**)
+
+Owner, verbatim: *"find out which parts of the original model consume most computational time (e.g.
+photosysntesis or other processes). we can use this as basis for explorign soltutions where only these
+processes are learned."* **Measured at five biome sites on the unmodified binary — no rebuild, so the oracle's
+reference basis is untouched.** Three things to carry forward:
+
+1. ⚠ **The pre-registered falsifier for that strategy FIRED at all five sites.** The largest single process
+   (the per-tree daily assimilation/conductance kernel) is **36–46 %** of runtime, so making it entirely
+   **free** buys only **1.57–1.84×** — against a requirement of **≈15–25×**. ⇒ *"learn only the expensive
+   process"* works **only as a portfolio covering ≥ 90 % of the daily loop**, which is close to a
+   whole-daily-core replacement, not a surgical one. **And every ceiling assumes the replacement is FREE; at
+   20 % of the replaced cost, 1.84× becomes 1.56×. Never quote a ceiling as a speed-up.**
+2. ⛳ **The annual demography — the whole block the learned slow component replaces — is 0.44–1.06 % of the
+   original model's runtime.** The correct reading is **not** "we learned the cheap part": it is that the
+   demography's speed value was never its own cost but that **it removes the patch tax** (cost is linear in
+   patch count, this configuration runs 25, and a component predicting the ensemble expectation converts a
+   ~25× multiplier into 1 — a bigger lever than every process combined). The reason nobody sets the patch
+   count to 1 is **fidelity, not speed**.
+3. **Two targets worth pricing, different in kind.** A quarter of the entire model (**21–27 %**) is
+   `exp`/`pow`/`log` ⇒ an **engineering** target, no learning, no fidelity risk, ceiling 1.28–1.37×. And the
+   **λ root-find** is the best-posed *learning* target in the model — smooth, deterministic, scalar output,
+   no state, unlimited training data, sitting on the largest share (33.3 % inclusive) — but the gross flux is
+   **non-monotone** in its iteration count, so its convergence cannot be assumed.
+
+**The cheapest missing number in ADR 0312: re-measure the patch-count slope on this binary.** It is cited from
+ADR 0093, not reproduced, and my own blocks disagree with its published value by a factor ~1.4–2.
+
+### 0b✦ 💬 THE OPEN CONVERSATION, ROUND 2 IS MEASURED AND HALF-FINISHED (owner, 2026-08-19 → 2026-09-02; **ADR 0311**)
 
 **Still an owner conversation, not a work item. Still nothing raised with S/M/E/O, nothing in `MEMORY.md` or
 `EXECUTION_PLAN.md`, nothing implemented.** Owner's words this round: *"continue the exploration of the

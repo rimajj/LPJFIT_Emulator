@@ -132,3 +132,62 @@ density-feedback rollout with a stochastic head, the spectrum synthesis, the com
 verifier. All queued in a resumable workflow; everything already done replays from cache. The purely
 data-driven direction is **still not refuted and still not demonstrated** — but for the first time it has a
 positive measurement on the response and a measured negative on the channel that would have to carry it.
+
+## 2026-09-02 — a second exploration line: where the ORIGINAL model's time actually goes
+
+**The owner's question, verbatim:** *"find out which parts of the original model consume most computational
+time (e.g. photosysntesis or other processes). we can use this as basis for explorign soltutions where only
+these processes are learned."* A good question and the sharpest version of the speed problem, because it turns
+"learn everything" into "learn only what is expensive".
+
+**Two decisions about method that made this cheap and safe.** First, the trap check: a partial C profile
+already existed (ADR 0093, owner-approved — four inclusive shares) and the speed-gate harness already had an
+unused `PERF=1` knob, so this was PARTLY DONE, not new. Second, and better: the **production binary already
+carries debug symbols and is not stripped**, so `perf record` needs no rebuild — which matters a great deal,
+because a rebuild moves the reference basis every C-vs-emulator number in the repo is measured against. So the
+whole measurement was done by *invoking* line O's harness unmodified, with `ROOT` pointed at line X's scratch,
+and a 108 MB profile from 14 August turned out to still be on disk — meaning the first complete answer came out
+of **existing data with no model run at all.** Four biome runs then took eight minutes each.
+
+**What the gates earned.** I wrote three pass/fail gates before looking at anything, and they caught two
+parsing bugs in my own probe that would have produced a confidently wrong table: the math-library attribution
+double-counted nested call-graph levels (inflating it from 25.4 % to 39.2 % — the completeness gate caught it),
+and the inclusive parse silently keyed every symbol with perf's trailing columns glued on, so every lookup
+missed and the agreement gate returned `n/a` at all five sites instead of PASS. A third gate — agreement with
+ADR 0093's published inclusive shares — **passed at Hainich and missed at the other four**, and that miss is
+the finding rather than an error: I had applied a Hainich-specific published number as a gate everywhere, and
+the shares are genuinely biome-dependent. Recorded as a pre-registration miss on the gate's scope.
+
+**The answer, and it is not what the framing expects.** The largest single process is the per-tree daily
+assimilation/conductance kernel at 36–46 % of runtime — so making it **entirely free** buys **1.57–1.84×**,
+against a requirement of ≈15–25×. The pre-registered falsifier for "learn only the expensive process" fired at
+all five sites. After the top two processes the profile is genuinely **flat**: nothing else is worth more than
+1.1× alone. So the strategy survives only as a portfolio covering ≥ 90 % of the daily loop — which is close to
+a whole-daily-core replacement, not a surgical one. And every one of those ceilings assumes the replacement
+costs nothing; at 20 % of the replaced cost, 1.84× becomes 1.56×.
+
+⛳ **The strategically interesting number is the small one.** The entire annual demography — allocation,
+mortality, establishment, turnover, the whole block the project's learned slow component replaces — is
+**0.44–1.06 %** of the original model's runtime, with an Amdahl ceiling of 1.01×. The tempting reading is
+"we have been learning the cheapest 0.6 % and keeping the expensive 98 % as physics". **That reading is
+wrong, and getting it right is the contribution:** the demography's speed value was never its own cost, it is
+that it **removes the patch tax**. Cost is linear in patch count, this configuration runs 25, and a component
+that predicts the ensemble expectation converts a ~25× multiplier into 1 — a larger lever than every process
+in the table combined. The reason nobody simply sets the patch count to 1 is fidelity, not speed. ⚠ I did not
+re-measure that slope; it is ADR 0093's, and my own blocks disagree with its published per-patch-year value by
+a factor ~1.4–2, unreconciled. That is the cheapest missing number in the record.
+
+**Two targets fell out that are different in kind.** A quarter of the whole model (21–27 % of self time) is
+`exp`, `pow` and `log` — an *engineering* target with no learning and no fidelity risk, and the same defect
+class as the emulator's own 26.5 % in floating-point power (ADR 0084). And the λ root-find is the
+best-posed *learning* target in the model: smooth, deterministic, scalar output, no state, no drift, unlimited
+training data, sitting on the largest share (33.3 % inclusive) because of the up-to-30 photosynthesis calls it
+makes per tree per day — with the caution that the gross flux is non-monotone in that solve's iteration count,
+so its convergence cannot be assumed.
+
+**Also worth keeping:** the marginal cost varies only 1.7× across biomes (0.1996 tropical to 0.3349 boreal
+core-seconds per cell-year at 25 patches), and — against the obvious expectation — **the tropical cell is the
+cheapest and the boreal one the most expensive.** The daily loop is 97.4–98.2 % of the run everywhere.
+
+Meanwhile the round-2 data-driven campaign hit the session usage limit for a third time; B4/B5/B6, the
+spectrum synthesis, the completeness critic and B1's verifier are still outstanding and still cached.
