@@ -2,7 +2,7 @@
 
 > Durable state for THIS LINE only. Shared/cross-cutting facts: `MEMORY.md`. Runbook: `CLAUDE.md` (+ §9 for
 > the parallel-line protocol). Narrative: `lines/X/JOURNAL.md` (append-only). Decisions: tier-1 block
-> **0310–0329**, opened by **ADR 0310**. **Next free number: 0311.**
+> **0310–0329**, opened by **ADR 0310**. **Next free number: 0312.**
 > **The `## NEXT` block below is what the SessionStart hook prints — the ending session MUST refresh it.**
 
 ---
@@ -84,7 +84,94 @@ and caught only by adversarial review.
 
 ## NEXT — start here
 
-### 0✦ 💬 THE OPEN CONVERSATION: could a PURELY data-driven emulator replace the hybrid? (owner, 2026-08-19; **ADR 0310** — the record that opened this line)
+### 0✦ 💬 THE OPEN CONVERSATION, ROUND 2 IS MEASURED AND HALF-FINISHED (owner, 2026-08-19 → 2026-09-02; **ADR 0311**)
+
+**Still an owner conversation, not a work item. Still nothing raised with S/M/E/O, nothing in `MEMORY.md` or
+`EXECUTION_PLAN.md`, nothing implemented.** Owner's words this round: *"continue the exploration of the
+feasibility of a **more** data driven emulator"* — **more**, not necessarily **purely**, and nobody has yet
+priced the middle of that spectrum.
+
+**⚠ READ `ADR 0311` BEFORE ANYTHING ELSE. It overturns ADR 0310's headline verdict.** Three
+things you must not carry forward from ADR 0310 as stated:
+
+1. **"ZERO positive evidence exists for the warming response" is NO LONGER TRUE.** A direct
+   20-yr-climatology → 20-yr-window-state map beats a coordinates-only null under **spatially blocked** folds
+   by **+0.162…+0.715** on the clean 20-vs-20-yr response, and climate *subsumes* the address rather than
+   proxying it. Its verifier attacked with three independent address nulls and the margin came out
+   **2–6× larger**. ADR 0310's kill of this claim was a hash-fold artifact on a drift-contaminated target.
+2. **"The geographic-address null was never run" is FALSE** — it was built, pre-registered, published and
+   committed sixteen days earlier (ADR 0038/0040/0042, plus `blocked_cv_folds_probe.jl`,
+   `build_slow_spatial_controls.py`, `diagnose_slow_address_prereg.py`). **Reuse it; do not rebuild it.**
+3. **"Single-draw R² cannot discriminate arms" is overstated** — the exact Bernoulli floor is ~28 % of the
+   residual variance, not all of it.
+
+**The four things that now matter most:**
+
+* ⛳ **The identification limit is the deepest result and it bounds every cross-sectional design.** Within one
+  emissions scenario a cell's warming increment is **76.4 %** predictable from its own baseline climate, so
+  "response to warming" and "sensitivity of this place" are **not separately identified**. Consistently:
+  knowing the future climate adds nothing over knowing today's on 5 of 6 targets, and a **counterfactual with
+  warming scaled to zero still reproduces 76–110 %** of the predicted per-cell change. ⇒ **the third forcing
+  leg is the only way to break it**, and the literature says only a **bracketed** design has precedent
+  (historic + ssp370 bracket ssp126 at 0.227×).
+* ⛳ **The per-tree hidden state is exactly recoverable and propagable — but UNVERIFIED** (its adversarial
+  verifier died to a usage limit; `scripts/explore_verify_b1.py` exists and was never run to completion).
+  **Finishing that verification is the single cheapest high-value action available.**
+* ⚠ **Per tree, climate adds nothing beyond the stand** (+0.0030, below the pre-registered 0.005; within noise
+  under blocking) ⇒ a free-running rollout's response can only come from state it generates itself.
+* ⚠ **The map is 7.2 % of cells on the owner's conjunctive basis and LOSES to persistence on the future state**
+  (7.35 % vs 12.96 %), and space-for-time transfer is **sign-wrong** in the 3.7 % of genuinely extrapolating
+  cells.
+
+### 1✦ THE UNFINISHED HALF — resume the campaign from cache (no new design needed)
+
+Three measurements, the spectrum synthesis and the completeness critic **did not run** (usage limit, then
+server overload). Everything that did run **replays from cache**:
+
+```
+Workflow({scriptPath: '~/.claude/projects/-p-projects-open-Jamir-esm-land-emulator-lines-X/
+  71d6fd2b-2837-45c1-9b0b-0e3e1b72c572/workflows/scripts/
+  data-driven-emulator-feasibility-round2-wf_5ba7e1aa-b45.js',
+  resumeFromRunId: 'wf_5ba7e1aa-b45'})
+```
+Restore `ITEMS` (currently `.slice(0, 3)`) and set `RUN_SYNTH = true`. What is queued in it:
+**B4** the ssp126 bracketed held-out leg (⚠ gate its Aug-12-vs-Feb-5 build provenance FIRST; it is raw CSV
+only, 186 GB/seed, and is in **no** shared table) · **B5** whether a fixed-size stand summary suffices for the
+daily fluxes · **B6** the closed density-feedback rollout with a stochastic binomial-survival/Poisson-birth
+head · **the synthesis that prices the WHOLE SPECTRUM** from the shipping hybrid to the pure learned model,
+which is what the owner's word *"more"* actually asks for · the completeness critic.
+⚠ **Add the persistence null to the pre-registration TEMPLATE, not only to the brief's prose** — ADR 0310
+§2(ii) made it a STANDING RULE and the very next campaign violated it anyway (see ADR 0311 §8).
+
+### 2✦ WHAT IS ON DISK ALREADY — look before building (all read-only, no model run needed)
+
+`/p/tmp/jamirp/X_explore/`: `prep_paired_stems.parquet` (21 785 911 × 40, year-paired per-stem on the
+**corrected** identity key) · `prep_patch_year_stand.parquet` (2 553 172 × 43) ·
+`prep_cell_window_state.parquet` (334 212 × 26, **both seeds** ⇒ a per-cell two-seed noise floor for the
+20-yr state with no model run) · `prep_cell_window_clim.parquet` (202 260 × 37, incl. unit-sphere x/y/z) ·
+`prep_cell_year_census.parquet` (11 029 804 × 9) · `prep_suspect_cell_blocks.csv` (**the exclusion list — join
+it, or you will measure five damaged blocks**) · the `b3_*`, `vb2_*`, `vb3_*` result sets.
+Probes: `scripts/explore_{prep_tables,hidden_counter,perstem_ladder,direct_window_map}.py` and
+`scripts/explore_verify_b{1,2,3}.py`. Literature: `docs/notes/exploration_data_driven_literature.md`.
+
+### 3✦ THREE CORRECTIONS OWED TO OTHER LINES — RAISED IN ADR 0311 §6, DELIBERATELY NOT PROPAGATED
+
+**Propagation is the owner's call, not this line's.** (a) **ADR 0125's per-stem identity key is WRONG** — it is
+`(Cell, Patch, PFT, ID)`; the tree number comes from a **per-PFT** counter, the documented key fails the
+identity gates on every leg, and the corrected one gives 0 violations of 20.4 M pairs on three checks.
+(b) `bm_inc_counter` **is** recoverable from the annual `ind` output, and it **is** populated into the output
+struct at `fwriteoutput_ind.c:167` with only its print line commented out at `:96`. (c) The heat/cold stress
+day count is **exactly** invertible as `round(mort_temp × 365/5)`. Plus: the two roster seeds were **never
+re-verified as a valid ADR-0041 pair**, which is an open gate on every number in ADR 0311.
+
+**Do NOT redo** ADR 0310's six investigations or ADR 0311's three measurements. Transcripts:
+`…/subagents/workflows/wf_1392bef9-337/journal.jsonl` (round 1) and `…/wf_5ba7e1aa-b45/journal.jsonl`
+(round 2 — one `{"type":"result"}` line per agent; the `/tmp` task-output files have since been cleared, so the
+journal is the only copy).
+
+---
+
+### 0a✦ 💬 ROUND 1 — the record that opened this line (**ADR 0310**; superseded in part by 0311 above)
 
 **This is an owner conversation in progress, not a work item.** Answer questions, measure, deepen it.
 **Do not implement, do not raise it with line S/M/E/O, do not write it into `MEMORY.md` or
@@ -154,6 +241,17 @@ rollout from below or from above (it changes the prior on the whole question).
 
 **X1 — the purely-data-driven direction (OPEN, owner conversation).** ADR 0310. Status: explored, adversarially
 reviewed, no decision. Awaiting the owner.
+
+**X2 — round 2: is a MORE data-driven emulator feasible? (OPEN, owner conversation, HALF-MEASURED).** ADR 0311
++ `docs/notes/exploration_data_driven_literature.md`. Status: three of six planned measurements done, two of
+them adversarially verified (both `NARROWED`, neither refuted), one unverified. **What would have to be true to
+promote it:** (a) the warming-response signal that survives blocked folds must also survive a **bracketed
+held-out forcing leg** — the only design with published precedent — because within one scenario the forcing is
+**76.4 %** predictable from the baseline climate and so is not separately identified; (b) the per-tree
+hidden-state propagation result must survive its **unrun** adversarial verifier; (c) the per-cell conjunctive
+pass rate must move from **7.2 %** toward the acceptance criterion, on a reference at acceptance-grade patch
+count, not at 25; and (d) somebody must price the **middle** of the spectrum, which is what the owner's word
+*"more"* asks about and which no record yet covers.
 
 *(Future explorations append here. One subsection each: the question, what the owner said, what was measured,
 what would have to be true to promote it.)*

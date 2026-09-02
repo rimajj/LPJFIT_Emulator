@@ -65,3 +65,70 @@ before climate is consulted), which survived review.
 **Left open on purpose:** five investigator-vs-reviewer disagreements (ADR 0310 §10), the largest being
 whether the measured −0.226 response inversion bounds a closed rollout from below or from above. Recording
 them as disagreements rather than picking a side is the point of the line.
+
+## 2026-08-19 / 2026-09-02 — round 2: the response verdict flips, and the campaign is half-finished
+
+**What the owner asked:** *"continue the exploration of the efasability of a more data driven emulator."*
+Note **more**, not **purely** — ADR 0310 had priced only the pure endpoint against the shipping hybrid, so the
+middle of the spectrum was, and still is, unpriced.
+
+**What was run.** A 16-agent campaign (`wf_5ba7e1aa-b45`): 2 scouts + 1 shared-table prep, 6 pre-registered
+measurements each pipelined into an adversarial verifier, a spectrum synthesis, a completeness critic.
+**11 agents completed** across three launches. It took three attempts — a session usage limit killed 10 of 11
+on the first, transient 529s killed the three measurements on the second, and the limit took B1's verifier on
+the third. Lesson worth keeping: **run a large campaign in waves and lean on `resumeFromRunId`** — trimming
+`ITEMS` to `.slice(0, 3)` and deferring the synthesis meant nothing completed was ever re-spent, and the
+per-call cache made the third launch cost only the three measurements plus two verifiers.
+
+**The result, in one line: ADR 0310's headline verdict on the warming response is overturned, and the reason it
+was wrong is the fold scheme.** A direct, non-autoregressive climatology → 20-year-window-state map — the
+architecture ADR 0310 §4 listed as *"never considered"* — beats a coordinates-only null under spatially
+blocked folds by **+0.162…+0.715** on a clean 20-vs-20-year response target, with climate *subsuming* the
+address rather than proxying it, and the margin got **2–6× larger** when its verifier attacked it with three
+independent address nulls instead of one. ADR 0310 had killed that claim on **hash folds** against a
+**drift-contaminated 20-vs-81-year** target. So the first positive evidence in this project for the part the
+owner actually cares about exists — while the same map sits at **7.2 %** of cells on the owner's conjunctive
+per-cell basis and **loses to persistence** on the future state.
+
+**The deepest finding was not on anyone's list.** Within a single emissions scenario, a cell's warming
+increment is **76.4 %** linearly predictable from its own baseline climate ⇒ *"response to warming"* and
+*"sensitivity of this place"* are **not separately identified**. Three independent consequences all agreed:
+knowing the future climate adds nothing over knowing today's on 5 of 6 targets; the change-only arm carries
+almost nothing; and a counterfactual with the warming scaled to **zero** still reproduces **76–110 %** of the
+predicted per-cell change, while a structurally scenario-blind control returned exactly 1.0000 in 18 of 18
+groups (so the probe was correctly wired). That single number is why the third forcing leg went from
+nice-to-have to necessary — and the literature scout had independently established that only a **bracketed**
+held-out design has ever succeeded anywhere in earth-system science.
+
+**The adversarial layer earned its cost again, and in a new way.** Round 1's reviewers killed five numbers.
+This round they *improved* one: B3's verifier found a 4-way inner join that silently dropped **4 635 cells with
+no tree today and +6.455 stems/patch in the 2080s** — the poleward treeline advance, the model's single largest
+warming response, 231× the mean of the cells that were scored. Repairing it took the response R² from 0.274 to
+**0.529**. A verifier making a finding *stronger* by fixing a survivorship defect is a mode neither round had
+seen. B2's verifier went the other way and refuted a magnitude: the growth target is one-step, and copying
+last year's own increment with **zero parameters** returns **90.7 %** of the reported R² — so the honest span
+is +0.0817, not 0.887, and the reported block decomposition understated the patch by 11× and climate by 10×.
+**The correction ran against that item's own thesis and left it standing**, because the absolute climate
+increment never moved.
+
+⚠ **The process lesson is uncomfortable and is the highest-value thing here.** ADR 0310 §2(ii) wrote the
+persistence rule down as a **STANDING RULE**, after a reviewer killed a headline on exactly it. **The very next
+campaign violated it anyway**, having been instructed to read that record. A rule living in an ADR body does
+not fire; it has to be in the pre-registration template the measuring agent fills in. Two sibling failures
+recurred the same way: three of one item's five "surprises" were stale against records it had been told to
+read, and one numbers row existed in **no log and no artifact** (the verifier reproduced most of it, found a
+label error and one unreproducible figure) ⇒ anything tagged `[MEASURED]` needs a log line.
+
+**Three corrections that belong to other lines were found and deliberately NOT propagated** (ADR 0311 §6;
+propagation is the owner's call). The largest: **ADR 0125's per-stem cross-year identity key is wrong** — it is
+`(Cell, Patch, PFT, ID)`, because the tree number is issued by a per-PFT counter. On the documented key the
+identity gates **failed on every leg**; on the corrected key, **0 violations of 20.4 million consecutive-year
+pairs on three independent checks**. The prep agent found it by taking the gate seriously instead of assuming
+the record was right, and kept the failing job log as evidence. Anyone building a per-stem model on the
+documented key would have been pairing trees that are not the same tree.
+
+**Left deliberately unfinished:** the ssp126 bracketed held-out test, flux-state sufficiency, the closed
+density-feedback rollout with a stochastic head, the spectrum synthesis, the completeness critic, and B1's
+verifier. All queued in a resumable workflow; everything already done replays from cache. The purely
+data-driven direction is **still not refuted and still not demonstrated** — but for the first time it has a
+positive measurement on the response and a measured negative on the channel that would have to carry it.
