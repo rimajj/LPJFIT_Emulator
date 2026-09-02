@@ -63,3 +63,28 @@ green, ADR 0028 — NOT the superseded main-only rule;
 `repo-commit` skill). Note in the commit body what was archived and which skills were merged/deleted.
 This skill did not exist before 2026-07-23 — the docs referenced it (`STEERING_PROMPT.md`, `repo-commit`)
 before it was written.
+
+---
+
+## ⚠ `skill-usage.log` IS PER-WORKTREE AND UNDERCOUNTS — NEVER DELETE A SKILL ON ITS ZEROS (integrator, 2026-09-02)
+
+Part B step 2 says to tally `.claude/skill-usage.log` and treat a zero-invocation skill as a deletion
+candidate. **Read the log's two defects first, or that step deletes live skills.**
+
+1. **It is per-worktree and git-ignored.** Each line's worktree keeps its own; the integrator's `main` copy
+   sees only integrator sessions. Measured 2026-09-02: `main` 9 entries, `wt-S` 22, `wt-M` 22, `wt-E` 5,
+   `wt-O` 3, `wt-X` 0 — so a tally run in `main` alone misses **85 %** of the record. Aggregate first:
+   ```bash
+   cat /p/projects/open/Jamir/{esm_land_emulator,wt-S,wt-M,wt-E,wt-O,wt-X}/.claude/skill-usage.log 2>/dev/null \
+     | python3 -c "import sys,json,collections;c=collections.Counter(json.loads(l)['skill'] for l in sys.stdin if l.strip());[print(f'{v:5d}  {k}') for k,v in c.most_common()]"
+   ```
+2. **It records only the hook's `PostToolUse` path, so it is a lower bound, not a census.** The aggregate was
+   **61 events over ~6 weeks across 5 lines** — far below the actual work, because a session that *reads* a
+   skill (or follows it from the SessionStart listing) leaves no entry.
+
+⇒ **A zero means "no evidence", not "unused".** Corroborate against the artifacts the skill names before
+touching it: on 2026-09-02 the five zero-count skills were `emulator-validation-figures`,
+`obsclim-cell-remap`, `online-coupling-env`, `provision-coupled-cell` and `python-env` — and every one of
+them covers a live recurring task whose committed outputs exist on disk (the remapped forcing fixtures, the
+`M_cells.csv` per-cell inputs, the coupled-environment project on `/p/tmp`). **No deletions were justified.**
+The honest verdict for that pass: 17 skills, 0 duplicates, 0 dead, 0 removed.

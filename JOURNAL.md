@@ -1175,3 +1175,56 @@ nothing was committed yet and the fragments were still in `HEAD`, but the genera
 path-scoped `git checkout` reverts *all* uncommitted work on that path, not just your last edit.** Caught it
 only because the next verification step printed an empty diff where 1832 insertions were expected. Verify
 after reverting, not just after changing.
+
+## 2026-09-02 — integrator: the shared MEMORY reshape, and a skill-hygiene instrument that undercounts
+
+All five line branches were at **zero unmerged commits** and `changelog.d/` held nothing but its `README.md`,
+so the outstanding integrator work was the shared state file — and it had drifted in three ways that a line
+cannot fix, because `MEMORY.md` is integrator-owned.
+
+**1. It contradicted itself and the owner-approved plan.** Its §5 frontier table still carried
+`P0★ PRODUCTION PATCH STRATEGY — 🔴 OPEN, TOP PRIORITY … strategy to be discussed WITH the owner next
+session`, written 2026-08-07. That same day the owner approved the error-attribution ladder and ADR 0093
+measured patch reduction as worth **~3× against the ~37× sitting in single-core engineering** — i.e. the
+*last* lever, scheduled as rung 5c. So the file's own priority table pointed the opposite way from
+`EXECUTION_PLAN.md`, which §0 of the same file names as the order of work. Its P2 row also read "data-bounded:
+no PLUMBER2/FLUXNET on disk" while §3, twenty lines earlier, recorded the reference **and** both new forcings
+as staged and the orderA mapping as proven. Both tables (`## 2` phase status "as of 2026-07-28" and `## 5`
+frontier) are replaced by one dated status section that defers priority to the plan.
+
+**2. It still published a retired headline.** ADR 0084 corrected the speed number four times over — the
+emulator is **4.62× slower** than the C (1.2329 vs 0.2666 core-s/cell-year, full S+F+E), not 3.8×, because
+the older harness printed "coupled S+F+E" while running **no Component S** and divided the C's whole-process
+wall time by cell-years. The 3.8×/1.096 pair was still stated first and at length. Now the corrected figure
+leads and the old one survives in one clause as explicitly retired.
+
+**3. Line X did not exist in the router.** It was created 2026-08-19 on owner instruction, and the router
+said "4 parallel lines" — invisible in the file every session reads. Adding the row is structural (it comes
+from `CLAUDE.md` §9), **not** propagation: nothing from line X's own explorations (ADR 0310–0312) was pulled
+in, which its charter reserves for the owner.
+
+**Result: 648 → 539 lines, ~16k → ~12.2k tokens**, archived to
+`docs/archive/MEMORY_2026-09-02_pre-consolidation.md`. **It is inside the token cap and ~130 lines over the
+400-line one, and I did not close that gap.** Everything removable without losing a fact was removed — the
+cuts were redundancy against documents loaded anyway (`CLAUDE.md` §3 carries the C-oracle mechanics verbatim;
+`residual-diagnosis`, 2 278 lines and ~40 named traps, already carried nearly every method rule §3 restated).
+What is left is ~50 distinct `[VERIFIED]` bullets, so the remainder is a decision — drop facts or split the
+file — recorded in the header rather than taken silently, and the token cap is the one that governs what
+onboarding actually pays. One pointer I wrote was wrong and corrected before the commit: the
+upstream-parameter relaxation-number rule lives in `plumber2-reference`, not `residual-diagnosis`.
+
+**The hygiene half produced a finding instead of a prune.** Part B of the skill says to tally
+`.claude/skill-usage.log` and treat a zero as a deletion candidate. That instrument is **per-worktree,
+git-ignored, and only records the hook's tool path**: the `main` copy holds 9 of the 61 aggregate events, so
+a tally run where the integrator actually sits misses 85 % of the record, and 61 events over six weeks across
+five lines is a lower bound rather than a census. Five skills show zero — `emulator-validation-figures`,
+`obsclim-cell-remap`, `online-coupling-env`, `provision-coupled-cell`, `python-env` — and every one covers a
+live recurring task whose committed outputs are on disk. **Nothing deleted: 17 skills, 0 duplicates, 0
+dead.** The aggregation command and the "a zero means no evidence, not unused" rule are appended to the
+`consolidate-memory` skill, since following its own step 2 literally would have deleted working skills.
+
+**One process note.** Early in the session I ran a `cd .claude/skills` for a grep and the Bash tool's working
+directory persisted, so a later `ls config/` and `git ls-files | wc -l` answered from *there* — reporting a
+missing `config/` directory and a 17-file repository. Both were artifacts of the cwd, caught by listing the
+repo root before writing either into anything. **A relative-path check is only as good as the directory it
+runs in; `pwd` first when a result is surprising.**

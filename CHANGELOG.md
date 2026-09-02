@@ -6,6 +6,33 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Changed
+
+- **The shared `MEMORY.md` is reshaped, and three drifts every session was reading are corrected
+  (integrator; `consolidate-memory`).** 648 → 539 lines, ~16k → ~12.2k tokens, previous copy archived to
+  `docs/archive/MEMORY_2026-09-02_pre-consolidation.md`. What was wrong, not just long: **(1)** its frontier
+  table still ranked the patch ensemble `🔴 OPEN, TOP PRIORITY … to be discussed with the owner next session`
+  from 2026-08-07, the same day the owner approved the error-attribution ladder and ADR 0093 measured patch
+  reduction at **~3× against the ~37× in single-core engineering** — i.e. the *last* lever (rung 5c) — so the
+  file's own priorities pointed opposite to `EXECUTION_PLAN.md`, which its §0 names as the order of work;
+  **(2)** it still led with the **retired** `3.8× / 1.096 core-s` speed headline, which ADR 0084 corrected to
+  **4.62× / 1.2329** (the old harness printed "coupled S+F+E" while running no Component S and divided the
+  C's whole-process wall time by cell-years); **(3)** the line router said "4 parallel lines" and omitted
+  **line X**, created 2026-08-19. Nothing from line X's own explorations (ADR 0310–0312) was pulled in —
+  propagation is the owner's call. The two stale status tables are replaced by one dated section that defers
+  priority to the plan, and the method-rule bullets now point at `residual-diagnosis` (which already carried
+  nearly all of them) and `CLAUDE.md` §3 instead of restating them. **Honest limitation: the file is inside
+  its 15k-token cap but ~130 lines over its 400-line one**, and the gap is left open in its header as an
+  explicit decision (drop facts or split the file) rather than closed by deleting `[VERIFIED]` state.
+- **`consolidate-memory` gains the reason its own skill-pruning step must not be followed literally.**
+  `.claude/skill-usage.log` is **per-worktree, git-ignored, and records only the hook's tool path**, so the
+  integrator's copy holds **9 of the 61** aggregate events (85 % of the record lives in the line worktrees)
+  and the total is a lower bound, not a census. Five skills read zero — `emulator-validation-figures`,
+  `obsclim-cell-remap`, `online-coupling-env`, `provision-coupled-cell`, `python-env` — and every one covers
+  a live recurring task with committed outputs on disk, so **a zero means "no evidence", not "unused"**. The
+  skill now carries the cross-worktree aggregation command and that rule. Hygiene verdict for this pass: 17
+  skills, 0 duplicates, 0 dead, **0 removed**.
+
 ### Added
 
 - **Line X, ADR 0312 — where the ORIGINAL model's runtime goes, by process, at five biome sites**, answering
