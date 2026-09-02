@@ -72,6 +72,17 @@ ACCOUNT_RE = re.compile(r"--account|#SBATCH\s+-A\b|SBATCH_ACCOUNT")
 # pointing AT config/paths.yaml is the fix, not the defect.
 POINTS_AT_CONFIG = re.compile(r"config/paths\.ya?ml")
 
+# An explicit, self-documenting escape for the one legitimate case: a file that must NAME a
+# forbidden pattern in order to enforce it. The SLURM wrapper matches "/tmp/*" precisely so it can
+# refuse a job path there, and flagging it for doing so is the checker mistaking the guard for the
+# breach. Mark such a line:
+#
+#     case "$arg" in /tmp/*) ... ;;   # pathsafety: allow (this line IS the /tmp refusal)
+#
+# A marker is better than adding the file to ALLOWED_FILES, because it exempts one line rather than
+# a whole file -- so a genuine hardcoded path elsewhere in the same wrapper is still caught.
+ALLOW_MARK = re.compile(r"#\s*pathsafety:\s*allow")
+
 
 def check_file(rel: str, lines: list[str], rep: Report) -> None:
     if rel in ALLOWED_FILES:
@@ -86,7 +97,7 @@ def check_file(rel: str, lines: list[str], rep: Report) -> None:
     is_slurm = (is_shell or rel.endswith(".jcf")) and bool(SBATCH_RE.search(text))
 
     for i, ln in enumerate(lines, start=1):
-        if POINTS_AT_CONFIG.search(ln):
+        if POINTS_AT_CONFIG.search(ln) or ALLOW_MARK.search(ln):
             continue
         m = ABS_RE.search(ln)
         if m:
