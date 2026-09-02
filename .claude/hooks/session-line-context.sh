@@ -32,9 +32,9 @@ fragments, MEMORY.md, config/, and cross-cutting decision records. Feature work 
 here -- config/ownership.toml enforces that, and the commit guard will refuse it.
 
 To work a line, launch a session in ITS worktree:
-  cd /p/projects/open/Jamir/wt-D   # line D — data: binary formats, corpus generation, provenance
-  cd /p/projects/open/Jamir/wt-T   # line T — training: models, GPU, inference
-  cd /p/projects/open/Jamir/wt-X   # line X — experiments: pre-registrations, nulls, verdicts
+  cd /p/projects/open/Jamir/vg-D   # line D — data: binary formats, corpus generation, provenance
+  cd /p/projects/open/Jamir/vg-T   # line T — training: models, GPU, inference
+  cd /p/projects/open/Jamir/vg-X   # line X — experiments: pre-registrations, nulls, verdicts
 TXT
   exit 0
 fi

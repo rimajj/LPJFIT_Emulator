@@ -64,9 +64,9 @@ Rotation is mechanical: `tools/rotate_state.py <L>`, `tools/rotate_memory.py`.
 
 | Line | Branch · worktree | Scope |
 |---|---|---|
-| **D** | `line/D` · `/p/projects/open/Jamir/wt-D` | data: the binary formats, corpus generation, provenance |
-| **T** | `line/T` · `/p/projects/open/Jamir/wt-T` | training: models, GPU, inference |
-| **X** | `line/X` · `/p/projects/open/Jamir/wt-X` | experiments: pre-registrations, nulls, verdicts |
+| **D** | `line/D` · `/p/projects/open/Jamir/vg-D` | data: the binary formats, corpus generation, provenance |
+| **T** | `line/T` · `/p/projects/open/Jamir/vg-T` | training: models, GPU, inference |
+| **X** | `line/X` · `/p/projects/open/Jamir/vg-X` | experiments: pre-registrations, nulls, verdicts |
 | — | `main` · `/p/projects/open/Jamir/vegemu` | integration only |
 
 One session per line at a time; your line is the branch of the directory you launched in. Ownership is

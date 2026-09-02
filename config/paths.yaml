@@ -14,10 +14,14 @@ meta:
 
 project:
   root: /p/projects/open/Jamir/vegemu
+  # ⚠ The `vg-` prefix is deliberate. The retired predecessor still has live worktrees at
+  # /p/projects/open/Jamir/wt-{S,M,E,O,X} -- including a line X of its own -- so a `wt-` name here
+  # would collide with a checkout of a DIFFERENT repository on a DIFFERENT branch. It nearly did:
+  # `git worktree add wt-X` failed only because that directory was already taken.
   worktrees:
-    D: /p/projects/open/Jamir/wt-D
-    T: /p/projects/open/Jamir/wt-T
-    X: /p/projects/open/Jamir/wt-X
+    D: /p/projects/open/Jamir/vg-D
+    T: /p/projects/open/Jamir/vg-T
+    X: /p/projects/open/Jamir/vg-X
   # The retired predecessor. READ-ONLY archive of record: cite it, never write to it.
   predecessor: /p/projects/open/Jamir/esm_land_emulator
 
