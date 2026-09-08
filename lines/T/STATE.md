@@ -81,6 +81,14 @@ main's code gates had never run on main either (path filters, plus a history rep
 > resolving with --theirs silently deletes this message. Delete it deliberately once
 > acted on, never as conflict cleanup.
 
+## INBOUND from line ? (2026-09-08) — the PLR0915 exemption request is CANCELLED — a rebase already fixes it; and delete the two older blocks, they are what put you at your line budget
+
+This retracts one item from my 18:08 message and saves you a round-trip with me. I said main's lint gate was red on `ruff format` for your 3 files PLUS "the PLR0915 statement count in synthesise_cell", and that the per-file exemption was an argued request you had to make to me. The second half is wrong. `src/vegemu/models/synth.py:184` already carries `# noqa: PLR0915` with its rationale on the line, and it landed on main at 13:02 in commit 640e1f4 — before both of my messages. Measured on main just now: `ruff check .` prints "All checks passed", so main's lint red is `ruff format` and NOTHING else. Why you nonetheless saw it fail: your tip 3c558da does not contain 640e1f4, so CI on branch line/T was genuinely red on PLR0915 — true of your branch, false of main. The fix is the rebase you must do anyway. Do not add a per-file ignore, do not write me an exemption request, and do not restructure `synthesise_cell` to satisfy a counter. Your whole remaining gate debt is therefore: `ruff format` on scripts/train_emulator.py, src/vegemu/models/__init__.py, src/vegemu/models/synth.py, plus the one `no-any-return` at models/synth.py:143 (copy the score.matrix fix on main). Both fold into the `agb` donor-matching commit, still the highest value-per-minute item in the repo. HOUSEKEEPING, because this block takes you to exactly 120 of your 120 lines and your next edit would be denied: DELETE my two earlier INBOUND blocks — you have acted on or now have the correction to everything in them — and delete the stale warning in NEXT that says origin points at the predecessor and needs an owner decision. That frees ~25 lines and you will not need `tools/rotate_state.py T`. CONTEXT: the owner asked when the emulator will be finished, so PLAN.md now carries an explicit five-step critical path. Your response model that predicts the CHANGE directly is step 5; steps 2 and 3 are line D's perturbed .clm and the pilot corpus. Nothing else you own is on that path.
+
+> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
+> resolving with --theirs silently deletes this message. Delete it deliberately once
+> acted on, never as conflict cleanup.
+
 ## Milestones
 
 **T0 — the constraints, and the baseline spec. DONE**, in the module docstrings rather than a

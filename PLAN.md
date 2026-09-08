@@ -116,25 +116,33 @@ interpretable baseline that can pass rung 1 cheaply; target architecture is a **
 set network with a stochastic per-tree head** (binomial-survival / Poisson-birth, conservative by
 construction). No published vegetation-model emulator reproduces trait or size distributions at all.
 
-## Now — the designed ensemble is the critical path, and that is now a measured conclusion
+## Now — the critical path, and what is actually datable
 
-Rungs 0–3 were built and run on 2026-09-08. The level map works and beats every honest competitor
-but misses its pre-registered margin; the warming response does not exist in the current model; the
-emitted restart file loads in the real model but carries the wrong carbon. Two of those three have a
-scoped one-step fix. The response does not.
+Rungs 0–3 ran on 2026-09-08. The level map beats every honest competitor and still misses its
+margin (0.0149 against 0.050); the warming response does not exist (−0.727 against 0.000 for "no
+change"); the emitted restart file loads and runs but carries half the right carbon. The first and
+third have a scoped one-step fix. The response does not: getting a response by SUBTRACTING two
+level predictions only works where the true change is large compared with the level error, and
+underneath that the corpus holds one climate per location, so climate and place are inseparable.
+The designed perturbation ensemble is therefore not an optimisation — it is the only identified
+path to a response, and it changes the target from a level to a change.
 
-**The kill test was run early, on data that already existed** — the same cell's climate for
-1970–1999 and for 2071–2100 under high emissions, differenced — and it failed at −0.727 against
-0.000 for "no change". The diagnosis is the useful part: a model that predicts a LEVEL and gets a
-response by SUBTRACTION can only succeed where the true change is large compared with its own level
-error. Stem count clears that (+0.35); soil carbon, whose change is 3.5 % of its level, does not
-(−4.02). Underneath it, the training corpus holds one climate per location, so climate and place are
-inseparable and the emulator learned where forests are rather than how they move.
+### The path to the next verdict — five line-sessions, 670 core-hours, 20 minutes of cluster
 
-So the designed climate-perturbation ensemble is no longer an optimisation that removes a nuisance
-— **it is the only identified path to a warming response**, and it changes the learning target from
-a level to a change. That is rung 1 as originally scoped, at its original budget.
+| # | line | step | blocked by |
+|---|---|---|---|
+| 1 | D | lint + types green (4 files, 16 errors); `merge.sh` now refuses a red gate | — |
+| 2 | D | **D1** delta-change perturbation design; one perturbed `.clm` the C reads | 1 |
+| 3 | D | **D2** the pilot corpus, 200 cells × 30 climates × 1 seed | 2 |
+| 4 | X | the rung-1 pre-registration on that corpus, four nulls, values derived first | — |
+| 5 | T | a response model that predicts the CHANGE directly | 3, 4 |
 
-Next: line D writes a perturbed `.clm` file (nothing blocks it), then the pilot corpus. Line T adds
-biomass to the restart synthesiser's matching objective (one line, 8-second verification). Line X
-drafts the held-out-forcing-leg pre-registration. Per-line detail is in `lines/<L>/STATE.md`.
+Unblocked in parallel: T's `agb` donor match (rung 3's halved carbon — one line, 8-second check),
+X's held-out-forcing-leg pre-registration. ⚠ **The compute is not the bottleneck and never was**:
+the pilot is 20 minutes on 2048 cores. The five sessions are.
+
+**Only step 5's verdict is datable.** A rung-1 fail on a corpus built expressly to identify the
+response stops the project, which is why it runs early. Full acceptance (rung 7) has **no
+defensible date today**: the conjunctive pass rate is 3.6 %, what closes that gap is unknown, and
+it needs the mid or full corpus. A rung-1 pass turns an unidentified problem into an ordinary
+fitting problem; only then does a completion date mean anything. Detail: `lines/<L>/STATE.md`.
