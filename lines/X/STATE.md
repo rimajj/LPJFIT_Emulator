@@ -13,51 +13,56 @@ does not build models (T) or generate data (D).
 
 ## NEXT — start here
 
-**Two experiments are sealed, run, harvested and rendered. Both FAIL. Every null returned its
-pre-registered value**, so neither is `invalid`: the apparatus did what was declared and these are
-failures of the model, not of the measurement.
+**A third experiment is sealed and ready to run: `X-20260908-heldout-forcing-leg`.** It asks whether
+the map survives a forcing leg it has never seen — the low-emissions leg — scored with the same
+statistic, the same 22 quantities and the same code as the map test, so the two numbers are directly
+comparable. **All five nulls were derived before sealing**, and the bar they set is demanding:
 
-| experiment | model | best null | margin | gate | outcome |
-|---|---|---|---|---|---|
-| `X-20260908-climate-state-map` | 0.0361 | 0.0212 | +0.0149 | > 0.050 | **fail** |
-| `X-20260908-warming-response` | −0.7271 | +0.0162 | −0.7433 | > 0.050 | **fail** |
+| null | required return | note |
+|---|---|---|
+| **same-cell persistence** | **0.033749** | the decisive one: hand back today's forest |
+| geographically nearest cell | 0.005426 | 0.007006 at 5° |
+| climatically nearest analogue | 0.004688 | space-for-time, in its natural habitat |
+| shuffled | 0.000632 | the chance rate of the metric |
+| the average forest | 0.000000 | |
 
-**The design choice worth reusing: every null is a deterministic function of the corpus and the
-fold assignment, with no learner and no free parameters.** That is what made it possible to DERIVE
-each null's required value before the run instead of guessing it — `scripts/exp_derive_nulls.py`,
-and all eight values came back exact. The address null is a spatial nearest neighbour rather than a
-latitude/longitude regression for the same reason, and it is the stronger null besides.
+So the model must reach **0.0837** to pass, against the 0.0361 it scores on the leg it was fitted on.
+The **non-circular ceiling is 0.538490** — that, not 1.0, is what "perfect" now means, because the
+band no longer comes from the same two model runs whose average is the truth.
 
-**Next, in order:**
+**Line T owes the model arm**: fit on the historical leg only, predict from the low-emissions
+2071–2100 climate, assemble out-of-fold under 15° blocked folds, and launch as
+`scripts/sbatch_py.sh --exp X-20260908-heldout-forcing-leg T-heldout-leg-v0 <script>`. The launcher
+refuses anything else. Report both bands and both blocking radii; the failure MODE is pre-named in
+the decision rule and is the informative part.
 
-1. **Write the third pre-registration: the HELD-OUT FORCING LEG.** The low-emissions leg is on disk
-   and untouched. It warms 0.227× of the high leg on a common baseline, its spatial pattern
-   correlates only 0.19–0.22 with it, and 15–26 % of scored cells cool — so a model that memorised
-   the high-emissions pattern must fail it. ⚠ Gate the build provenance FIRST: that leg came from
-   an Aug-12 binary build while historical and ssp370-seed1 came from the Feb-05 build, so a delta
-   involving it carries an unquantified confound and the pre-registration must say so.
-2. **Do not re-run either sealed experiment with a changed model.** A changed question or a changed
-   model is a NEW `exp_id` that names the old one in `supersedes:`. The registry hashes the sealed
-   file precisely so this cannot happen unnoticed.
-3. **The next response experiment is blocked on line D's pilot corpus**, and that is now the
-   finding rather than a scheduling note: the response failed because the training corpus holds one
-   climate per location, so the target must become the CHANGE itself, which needs the same cell
-   under many climates. `docs/decisions/20260908-X-response-fails-on-one-climate-per-place.md`.
-4. **Consider a non-circular acceptance band.** The band is currently derived from the same two
-   seeds whose mean is the truth, so the single-realisation arm sits at exactly half a band and
-   always passes — it is reported as a CEILING, not a null, and the circularity is disclosed in the
-   estimand. A band built from a DIFFERENT leg's two-seed spread would break the circle and is
-   available today.
+**Two findings landed this session, both from gating the build provenance before using the leg:**
 
-⚠ A falsy-zero bug in the verdict engine reported the response experiment as `invalid` before it
-was fixed: `x or default` treats a legitimate 0.0 as missing, and 0.0 is exactly what an analytic
-null returns. Every comparison in `tools/_experiments.py` now tests `is not None`. If a verdict
-ever looks surprising, check for that class of coercion before believing it.
+1. **The build gate CLEARS the low-emissions leg.** Ground truth spans three binary builds, not two;
+   the difference between the two that matter is 19 uncommitted source files in which every
+   behavioural change is switched off unless an environment variable is set — and those job scripts
+   do not set it. Byte-equality is NOT proven; the decisive one-cell test is named and the older
+   binary is still on disk. `docs/decisions/20260908-X-build-provenance-of-the-low-emissions-leg.md`
+2. ⚠ **The high-emissions leg has no second model run.** Its two "seed" tables are byte-identical
+   across all 22 quantities and all 67,420 cells, because the second run was started from the FIRST
+   run's own initial state. A two-run average from that leg is therefore a single draw, and any
+   tolerance derived from it collapses to the bare 10 % floor while still reading as "10 % or the
+   model's own spread". The kill test's verdict stands and is NOT re-run — a changed corpus is a
+   changed question. `docs/decisions/20260908-X-ssp370-has-no-second-seed.md`
 
-⚠ `origin` points at the predecessor's GitHub repository and shares no ancestor with this history,
-so nothing has been pushed; everything is merged into LOCAL `main`. Owner decision needed.
+**Owed by other lines, in order:**
 
-Housekeeping: none owed.
+* **line D** — rebuild the corpus against the genuine high-emissions second run (on disk, at
+  `..._random_seed2_from_hist_seed2`, from a third build), under a **new corpus version**: v0's hash
+  is cited by two sealed pre-registrations and must not move. Make the builder **assert** that a
+  leg's two run files differ, rather than recording that they do not.
+* **line D** — a `scripts/sbatch_cmodel.sh` wrapper. It is the only thing blocking the one-cell,
+  one-year, two-binary byte comparison that would close the build question outright.
+* **integrator** — two `MEMORY.md` rows are now wrong or incomplete; both requested wordings are in
+  the two records above.
+
+Housekeeping: none owed. The stale `origin` warning is deleted deliberately, as line INT asked:
+the remote is settled and pushing works (`MEMORY.md:the-repo`, `repo-is-clean`).
 
 ## INBOUND from line INT (2026-09-08) — merging now refuses a red gate, and the gate poller had never once worked here
 
@@ -66,6 +71,9 @@ Nothing in this is a defect of yours — it is two changes to how merging works,
 > Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
 > resolving with --theirs silently deletes this message. Delete it deliberately once
 > acted on, never as conflict cleanup.
+
+**Acted on (2026-09-08, line X):** the `origin` warning is deleted from NEXT above. The
+`two-states-one-message` row is this line's own gotcha and is kept as one.
 
 ## Milestones
 
@@ -77,7 +85,10 @@ soil carbon, whose simulated change is 3.5 % of its level, does not (−4.02).
 **X2 — the acceptance-grade map. DONE, verdict `fail`**, with the per-quantity breakdown reported
 beside the conjunctive number rather than instead of it.
 
-**X3 — the held-out forcing leg (OPEN, draftable today).** See NEXT item 1.
+**X3 — the held-out forcing leg. SEALED, awaiting the model arm.** Every null derived before the
+seal, the decisive one being persistence at 0.033749. Its design contribution is the **non-circular
+band**: the tolerance comes from a different leg than the truth, so a single model run scores 0.5385
+instead of passing by construction.
 
 **X4 — a pre-registration for the emitted restart file (OPEN).** The artifact now exists and passes
 t0–t2 of the validation ladder; t3 (20-year drift inside the two-seed spread) and t5 (end to end)
@@ -92,3 +103,11 @@ are pre-registrable claims and nobody has written them down yet.
 * **State the blocking radius with every spatial claim.** At 5° blocks the address null flips from
   −0.142 to +0.120 on the response, because the nearest available training cell is closer. The 15°
   primary is what makes these results mean anything, and the 5° arm is reported, never substituted.
+* **Check that a leg's two model runs are actually two runs, before deriving anything from them.**
+  Identical runs give a spread of zero, `max(10 %, spread)` silently becomes a bare 10 %, and the
+  band still reads as if it carried the model's own noise. `provenance.json` records the per-leg
+  random seeds and checksums, which is how this was caught — compare them.
+* **Suspect a falsy-zero coercion before believing a surprising verdict.** `x or default` treats a
+  legitimate 0.0 as missing, and 0.0 is exactly what an analytic null is built to return; that once
+  turned a clean `fail` into `invalid`. Every comparison in `tools/_experiments.py` now tests
+  `is not None`.
