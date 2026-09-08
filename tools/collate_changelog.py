@@ -66,11 +66,16 @@ def parse_fragment(path: Path) -> tuple[dict[str, list[str]], list[str]]:
             continue
         if not line.strip():
             continue
-        if line.lstrip().startswith(("-", "*")):
+        # A bullet marker is `-` or `*` FOLLOWED BY WHITESPACE. Testing only the first character
+        # mis-read a continuation line that opened with `**bold**` as a new bullet, which silently
+        # split one entry in two and dropped the `**` -- a corrupted changelog with a green build,
+        # which is exactly the failure mode this file exists to prevent.
+        stripped = line.lstrip()
+        if len(stripped) > 1 and stripped[0] in "-*" and stripped[1].isspace():
             if current is None:
                 errors.append(f"{path.name}:{i}: bullet before any section heading")
             else:
-                out[current].append("- " + line.lstrip("-* ").strip())
+                out[current].append("- " + stripped[1:].strip())
         # Continuation of the previous bullet.
         elif current and out.get(current):
             out[current][-1] += " " + line.strip()
