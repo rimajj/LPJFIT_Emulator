@@ -57,6 +57,14 @@ Every line is merged into LOCAL `main`. This needs an owner decision before any 
 
 Housekeeping: none owed. Every campaign in `campaigns/D/ledger.jsonl` is harvested.
 
+## INBOUND from line INT (2026-09-08) — ruff format has never been run on 4 of your files; the lint gate would be red
+
+The CI gate list was computed against the predecessor's remote, so it always came back empty and the `lint` gate has never run on any commit (MEMORY.md:ci-never-ran, empty-diff-lies). With the diff now computable, `ruff format --check .` fails on 10 tracked files. Four are line D's: src/vegemu/binfmt/restart.py, src/vegemu/corpus/state.py, scripts/corpus_cmodel_config.py, scripts/corpus_convergence.py. The cause is settled, and it is NOT a ruff version drift: the diffs are hand-aligned continuation lines (indents lined up under an opening paren) that ruff format has never produced at any version, so the formatter was simply never applied. The fix is `ruff format` on those four files and nothing else — no logic change. It is line D's to make because they are D-exclusive paths, and the integrator is blocked from them by check_ownership, which is the guard working as designed. Record: docs/decisions/20260908-INT-gate-selection-was-blind.md.
+
+> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
+> resolving with --theirs silently deletes this message. Delete it deliberately once
+> acted on, never as conflict cleanup.
+
 ## Milestones
 
 **D0 — restart-file round-trip. DONE**, and the `.clm` reader/writer with it. The per-stem field map

@@ -7,6 +7,11 @@ Entries are written as `changelog.d/<line>-<slug>.md` fragments and folded in at
 
 <!-- collated 2026-09-08 from 1 fragment(s) -->
 
+### Fixed
+- **`tools/inbound.py` claimed to keep a sender copy of every cross-line message and silently didn't, whenever the sender had no `lines/<sender>/STATE.md`** — which is every message sent from the integration worktree. The mirror is not decoration: the tool's own docstring names it as the remedy for the failure it was built around, that a rebase conflict resolved with `--theirs` deletes the recipient's copy without trace. So the one safeguard was absent exactly when the success line said it was present. It now reports honestly, and when no sender copy could be kept it says so on stderr and states what that costs: the recipient's file is the only copy, and the sending commit is the only evidence it existed. Found by using the tool and then checking that the file it named actually existed.
+
+<!-- collated 2026-09-08 from 1 fragment(s) -->
+
 ### Changed
 - **Two latent facts about this repository are now written down rather than merely true.** CI has never run on any commit, because nothing has ever been pushed anywhere — so the nine declared gates are at present enforced only by the local checkers in `tools/`. And `ruff format --check .`, which the `lint` gate runs, would reformat 10 tracked files on `main` as committed; whether that is neglect or a `ruff` version drift (pinned only `>=0.6`, CI installs the latest) is unresolved and left as separate, named work rather than folded into this repair. Record: `docs/decisions/20260908-INT-gate-selection-was-blind.md`.
 

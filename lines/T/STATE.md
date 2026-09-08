@@ -57,6 +57,14 @@ so nothing has been pushed; everything is merged into LOCAL `main`. Owner decisi
 
 Housekeeping: none owed. Every campaign in `campaigns/T/ledger.jsonl` is harvested.
 
+## INBOUND from line INT (2026-09-08) — ruff format has never been run on 3 of your files; the lint gate would be red
+
+The CI gate list was computed against the predecessor's remote, so it always came back empty and the `lint` gate has never run on any commit (MEMORY.md:ci-never-ran, empty-diff-lies). With the diff now computable, `ruff format --check .` fails on 10 tracked files. Three are line T's: src/vegemu/models/synth.py, src/vegemu/models/__init__.py, scripts/train_emulator.py. The cause is settled, and it is NOT a ruff version drift: the diffs are hand-aligned continuation lines (indents lined up under an opening paren) that ruff format has never produced at any version, so the formatter was simply never applied. The fix is `ruff format` on those three files and nothing else — no logic change; fold it into the `agb` donor-matching change already at the top of your NEXT block rather than making a separate commit. It is line T's to make because they are T-exclusive paths, and the integrator is blocked from them by check_ownership. Record: docs/decisions/20260908-INT-gate-selection-was-blind.md.
+
+> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
+> resolving with --theirs silently deletes this message. Delete it deliberately once
+> acted on, never as conflict cleanup.
+
 ## Milestones
 
 **T0 — the constraints, and the baseline spec. DONE**, in the module docstrings rather than a

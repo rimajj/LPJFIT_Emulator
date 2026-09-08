@@ -85,9 +85,14 @@ def main(argv: list[str] | None = None) -> int:
     os.environ["VEGEMU_VIA_TOOL"] = "1"
     dest.write_text(text, encoding="utf-8")
 
-    # Mirror it, so the sender can prove what was sent.
+    # Mirror it, so the sender can prove what was sent. The mirror is the stated remedy for
+    # failure mode 2 in this module's docstring -- a `--theirs` conflict resolution deletes the
+    # recipient's copy silently -- so whether it was actually written must be REPORTED, not assumed.
+    # It used to be skipped in silence for any sender without a lines/<sender>/STATE.md (the
+    # integrator, or an undetected line) while the success line claimed it had been mirrored.
     mine = root / "lines" / sender / "STATE.md"
-    if mine.exists():
+    mirrored = mine.exists()
+    if mirrored:
         mtext = mine.read_text(encoding="utf-8")
         mirror = (
             f"## Outbound to line {args.to} ({today}) — {args.subject}\n\n{args.body.strip()}\n\n"
@@ -98,8 +103,22 @@ def main(argv: list[str] | None = None) -> int:
             mtext = mtext.rstrip() + "\n\n" + mirror
         mine.write_text(mtext, encoding="utf-8")
 
-    print(f"inbound: wrote to lines/{args.to}/STATE.md and mirrored in lines/{sender}/STATE.md")
-    print("Commit both. Note their STATE.md has a 120-line budget -- if this pushes them over, the")
+    if mirrored:
+        print(f"inbound: wrote to lines/{args.to}/STATE.md and mirrored in lines/{sender}/STATE.md")
+        print("Commit both.")
+    else:
+        print(f"inbound: wrote to lines/{args.to}/STATE.md. Commit it.")
+        print(
+            f"inbound: NO SENDER COPY KEPT -- there is no lines/{sender}/STATE.md.",
+            file=sys.stderr,
+        )
+        print(
+            "  So the recipient's file is the ONLY copy, and a rebase resolved with --theirs "
+            "would\n  erase it without trace. Your commit on main is then the only evidence: "
+            "check the\n  block is still in their file after any rebase that touches it.",
+            file=sys.stderr,
+        )
+    print("Note their STATE.md has a 120-line budget -- if this pushes them over, the")
     print("message still lands but they will have to rotate; keep it short.")
     return 0
 
