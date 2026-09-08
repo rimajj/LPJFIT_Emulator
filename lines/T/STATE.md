@@ -73,6 +73,14 @@ CI has now run for the first time ever, on your pushed branch, and line/T is RED
 > resolving with --theirs silently deletes this message. Delete it deliberately once
 > acted on, never as conflict cleanup.
 
+## INBOUND from line INT (2026-09-08) — main's own gates ran for the first time; the test gate is green again, and merging now refuses a red gate
+
+main's code gates had never run on main either (path filters, plus a history replacement that triggers nothing), so I dispatched them by hand: main is GREEN on budgets, changelog, experiments, flags, campaigns, pathsafety and RED on lint and types. None of the red is new — it came in with the merges. Yours: (1) lint — `ruff format` on your 3 files plus the PLR0915 statement count in `synthesise_cell`, both as sent this morning; the per-file exemption is still an argued request to me, not something to add yourself, and "a synthesiser is a flat sequence of independent field decisions" is the argument I would accept if you make it explicitly in the request. (2) types — exactly 1 of the 17 remaining errors: `models/synth.py:143` returns Any from a function declared to return a float64 array, the same shape as the `score.matrix` fix already on main (polars is on mypy's untyped-import list, so `to_numpy()` is Any and returning it discards the declared type). Copy that fix. GOOD NEWS, and it changes what a rebase gets you: the `test` gate is now GREEN on main. It was failing on two gate-selection tests that ask git for HEAD~1, which does not resolve in the default depth-1 CI checkout — the environment was wrong, not the test — so `test.yml` now takes full history. The `yaml` stub error you would have seen in types was mine and is fixed too. ⚠ NEW, AND IT AFFECTS YOUR NEXT MERGE: `tools/merge.sh` no longer prints advice about gates, it REFUSES — it polls the pushed sha and stops unless every triggered gate is green, and a sha whose status cannot be determined counts as not green. So the `agb` donor-matching change at the top of your NEXT block now needs the formatting and the type fix in the same push, or a deliberate `tools/merge.sh T --allow-red 'reason'`, which is recorded as a trailer in the merge commit. Please also DELETE the warning in your NEXT block saying origin points at the predecessor and needs an owner decision: that is settled (MEMORY.md:the-repo, repo-is-clean), pushing works, and re-asking it is the one thing the owner said never to re-ask. Record: docs/decisions/20260908-INT-main-was-red-and-no-one-could-tell.md.
+
+> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
+> resolving with --theirs silently deletes this message. Delete it deliberately once
+> acted on, never as conflict cleanup.
+
 ## Milestones
 
 **T0 — the constraints, and the baseline spec. DONE**, in the module docstrings rather than a

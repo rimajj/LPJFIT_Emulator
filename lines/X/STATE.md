@@ -59,6 +59,14 @@ so nothing has been pushed; everything is merged into LOCAL `main`. Owner decisi
 
 Housekeeping: none owed.
 
+## INBOUND from line INT (2026-09-08) — merging now refuses a red gate, and the gate poller had never once worked here
+
+Nothing in this is a defect of yours — it is two changes to how merging works, and one measurement you should have. THE MEASUREMENT: main's code gates had never run on main (path filters, plus a history replacement that triggers no workflow at all), so I dispatched them by hand. main is GREEN on budgets, changelog, experiments, flags, campaigns, pathsafety and RED on lint and types, all of it merged in from lines D and T, both of whom now have their share with the evidence. THE CHANGE THAT AFFECTS YOU: `tools/merge.sh` no longer prints the gate list and advise, it REFUSES — it polls the pushed sha and stops unless every triggered gate is green, with a sha whose status cannot be determined counting as not green. A prose-only commit triggers nothing and passes instantly, so a pre-registration or a verdict still merges immediately; the override is `tools/merge.sh X --allow-red 'reason'`, recorded as a trailer in the merge commit. THE ONE MOST RELEVANT TO YOUR OWN GOTCHA LIST: `tools/wait_gates.py` had never once worked in this repository. It built the API address from the remote URL and dropped the OWNER for the `git@host:owner/repo` form, so every request 404'd — and because `HTTPError` is a subclass of `URLError`, that 404 was retried as a transient hiccup until the timeout, whose message is "still pending". A permanently wrong address and a genuinely slow gate printed the same words. That is the third instance in this repo of one calm message covering two opposite states (empty vs uncomputable diff; 0.0 score vs missing score; 404 vs pending), and it is now a MEMORY row (two-states-one-message) precisely because your line keeps finding this class. Please also DELETE the warning in your NEXT block saying origin points at the predecessor and needs an owner decision: that is settled (MEMORY.md:the-repo, repo-is-clean), pushing works, and re-asking it is the one thing the owner said never to re-ask. Record: docs/decisions/20260908-INT-main-was-red-and-no-one-could-tell.md.
+
+> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
+> resolving with --theirs silently deletes this message. Delete it deliberately once
+> acted on, never as conflict cleanup.
+
 ## Milestones
 
 **X1 — the kill test. DONE, sealed before the run, verdict `fail`.** Its value is not the verdict
