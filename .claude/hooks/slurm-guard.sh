@@ -15,6 +15,9 @@
 #   * heavy Python on the login node (train/bench/corpus/sweep/eval/probe/export, torch, nohup,
 #     backgrounding) -> overloads the shared login node and, worse, dies with the session.
 #   * a direct call to the LPJmL-FIT binary -> same, plus it needs its module environment.
+#
+# pathsafety: not-a-job (this file REFUSES submission; it must name sbatch in order to match it,
+# and was duly asked by the pathsafety gate for an --account flag and a job-completion sentinel)
 # Auto-allowed inside a job ($SLURM_JOB_ID set). Escape hatch: ALLOW_LOGIN_HEAVY=1.
 set -uo pipefail
 CMD="$(cat | python3 -c 'import json,sys;print(json.load(sys.stdin).get("tool_input",{}).get("command",""))' 2>/dev/null || true)"

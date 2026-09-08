@@ -23,12 +23,16 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 HOOK = ROOT / ".claude" / "hooks" / "slurm-guard.sh"
+sys.path.insert(0, str(ROOT / "tools"))
+
+import check_no_abs_paths as checker  # noqa: E402
 
 MUST_DENY = [
     # heavy Python on the shared login node: it dies with the session, taking the result with it
@@ -115,6 +119,29 @@ def test_the_advertised_escape_hatch_actually_opens(command: str) -> None:
     past it is to edit the guard, which is how a guard stops being trusted.
     """
     assert verdict(command) == "allow", f"the hatch the guard advertises does not open: {command}"
+
+
+def test_the_pathsafety_gate_does_not_mistake_this_guard_for_a_job_script() -> None:
+    """A file that must NAME `sbatch` in order to refuse it is not a thing that submits jobs.
+
+    The `pathsafety` gate treats any shell file mentioning `sbatch` as a job script and demands an
+    `--account` flag and a completion sentinel, which is nonsense for a hook whose purpose is to
+    deny submission. It is exempted by a declared marker rather than by inspection: telling
+    "submits" from "talks about submitting" means lexing shell, and the attempt mis-scanned the real
+    wrapper -- a comment with an apostrophe opened a quoted span that swallowed its `$(sbatch ...)`
+    line. Hence the second half of this test, which is the half that matters: the exemption must not
+    have leaked to the two scripts that DO submit.
+    """
+
+    def is_job_script(rel: str) -> bool:
+        text = (ROOT / rel).read_text(encoding="utf-8")
+        return bool(checker.SBATCH_RE.search(text)) and not checker.NOT_A_JOB_MARK.search(text)
+
+    assert not is_job_script(".claude/hooks/slurm-guard.sh"), (
+        "the guard is being checked as if it submitted jobs"
+    )
+    for wrapper in ("scripts/sbatch_py.sh", "scripts/sbatch_cmodel.sh"):
+        assert is_job_script(wrapper), f"{wrapper} SUBMITS and must stay under the SLURM checks"
 
 
 def test_the_escape_hatch_is_named_the_same_way_in_the_message_and_the_check() -> None:

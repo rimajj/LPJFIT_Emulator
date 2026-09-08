@@ -64,6 +64,17 @@ TMP_RE = re.compile(r"(?<![\w/])(/tmp/|\$TMPDIR|\$\{TMPDIR\})")
 
 SELF_LOCATE_RE = re.compile(r"BASH_SOURCE\[0\]|\$\{BASH_SOURCE")
 SBATCH_RE = re.compile(r"\bsbatch\b|#SBATCH")
+
+# A whole-file counterpart to ALLOW_MARK below, for a file that must name `sbatch` in order to
+# REFUSE it. Deciding this by inspection was tried and rejected: telling "submits a job" from
+# "talks about submitting" means knowing whether `sbatch` sits in command position, which means
+# lexing shell -- and the attempt promptly mis-scanned the real wrapper, because a comment
+# containing an apostrophe opened a quoted span that swallowed its `JOBID=$(sbatch ...)` line. A
+# false negative there is far worse than the false positive being fixed: it would silently stop
+# checking the two scripts that actually submit. So the exemption is DECLARED, in the file:
+#
+#     # pathsafety: not-a-job (this file refuses submission; it names sbatch to match it)
+NOT_A_JOB_MARK = re.compile(r"#\s*pathsafety:\s*not-a-job")
 SENTINEL_RE = re.compile(r"===\s*JOB DONE\s+tag=")
 ACCOUNT_RE = re.compile(r"--account|#SBATCH\s+-A\b|SBATCH_ACCOUNT")
 
@@ -90,11 +101,19 @@ def check_file(rel: str, lines: list[str], rep: Report) -> None:
 
     text = "\n".join(lines)
     is_shell = rel.endswith(".sh")
-    # The SLURM checks apply to job scripts only. Matching on content alone was wrong: a config or
-    # doc that merely NAMES sbatch (for instance the gate registry, which describes what the
-    # pathsafety gate blocks) is not a job script, and demanding a completion sentinel in it is
-    # nonsense. Require the file to be a shell/job file AND to mention sbatch.
-    is_slurm = (is_shell or rel.endswith(".jcf")) and bool(SBATCH_RE.search(text))
+    # The SLURM checks apply to files that SUBMIT a job. Matching on content alone was wrong: a
+    # config or doc that merely NAMES sbatch (the gate registry, which describes what the pathsafety
+    # gate blocks) is not a job script, and demanding a completion sentinel in it is nonsense. The
+    # first repair required a shell or job file AND a mention of sbatch -- and that is still too
+    # loose, because `.claude/hooks/slurm-guard.sh` is a shell file whose whole PURPOSE is to refuse
+    # raw submission, so it must name `sbatch` in its pattern and in its refusal text. It was duly
+    # asked for an `--account` flag and a job-completion sentinel. A guard is not the breach, so it
+    # declares itself exempt with the marker above -- explicitly, because guessing needs a lexer.
+    is_slurm = (
+        (is_shell or rel.endswith(".jcf"))
+        and bool(SBATCH_RE.search(text))
+        and not NOT_A_JOB_MARK.search(text)
+    )
 
     for i, ln in enumerate(lines, start=1):
         if POINTS_AT_CONFIG.search(ln) or ALLOW_MARK.search(ln):
