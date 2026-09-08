@@ -9,13 +9,20 @@ model's state prediction on the historical climate, and the response test differ
 model's answers for the historical and the high-emissions climate of each cell. Fitting twice would
 let fitting noise leak into the difference, which is the quantity the kill test is about.
 
-WHAT IS WRITTEN, and why the out-of-fold predictions are kept
-    metrics.json      every arm's blessed statistic, plus per-quantity breakdowns and the 5-degree
-                      block sensitivity check. `tools/append_result.py` turns this into result rows.
-    oof_map.parquet   the full out-of-fold prediction and truth, per cell. Kept because a verdict
-                      that cannot be re-plotted cannot be checked, and because the plots that
-                      demonstrate the emulator works are made from this and not from the summary.
-    oof_response.parquet
+WHAT IS WRITTEN, and why it is split in two
+    <scratch.exp>/<exp_id>/metrics.json
+                      the append_result-shaped file for ONE experiment, carrying the
+                      `prereg_sha256` the LAUNCHER stamped into this job. That stamp is the whole
+                      point: it proves which version of the pre-registration governed the run, so
+                      a later edit is detectable rather than invisible. The launcher stamps one
+                      hash per job, so `--only` selects which experiment this run is reporting and
+                      the script is submitted once per sealed experiment.
+    diagnostics.json  the full combined report: both experiments, per-quantity breakdowns, the
+                      5-degree block sensitivity check, feature importances. Not a result row --
+                      the material a verdict's prose and the figures are built from.
+    oof_map.parquet, oof_response.parquet
+                      the full out-of-fold prediction and truth, per cell. Kept because a verdict
+                      that cannot be re-plotted cannot be checked.
 
 The model never sees latitude, longitude, a cell id, CO2, or any state -- the pre-registrations'
 leakage checks, asserted here before fitting rather than promised.
@@ -25,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -221,12 +229,52 @@ def run(version: str, block_degrees: float, k: int, out: Path) -> dict[str, obje
     }
 
 
+def write_result_metrics(report: dict[str, object], section: str) -> Path:
+    """The append_result-shaped file for one experiment, carrying the launcher's own stamp.
+
+    `VEGEMU_PREREG_SHA256` is read from the ENVIRONMENT, never recomputed from the working tree:
+    recomputing it would make the row agree with whatever the pre-registration says now, which is
+    exactly the check it exists to perform.
+    """
+    block = dict(report[section])  # type: ignore[arg-type]
+    exp_id = str(block["exp_id"])
+    stamp = os.environ.get("VEGEMU_PREREG_SHA256", "")
+    if not stamp:
+        print(
+            f"WARNING no VEGEMU_PREREG_SHA256 in the environment, so {exp_id}'s metrics file "
+            "cannot prove which pre-registration governed this run. Submit through "
+            "scripts/sbatch_py.sh --exp <id>.",
+            file=sys.stderr,
+        )
+    dest = Path(str(paths()["scratch"]["exp"])) / exp_id
+    dest.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "prereg_sha256": stamp,
+        "statistic": block["statistic"],
+        "n": block["n_cells"],
+        "job_ids": [int(os.environ["SLURM_JOB_ID"])] if os.environ.get("SLURM_JOB_ID") else [],
+        "arms": block["arms"],
+        "reference_basis": block["basis"],
+        "per_quantity": block["per_quantity"],
+    }
+    path = dest / "metrics.json"
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True))
+    print(f"wrote {path}  (stamp {stamp[:12] or 'MISSING'})")
+    return path
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--version", default="v0")
     ap.add_argument("--k", type=int, default=5)
     ap.add_argument("--block-degrees", type=float, default=15.0)
     ap.add_argument("--sensitivity-degrees", type=float, default=5.0)
+    ap.add_argument(
+        "--only",
+        choices=("map", "response"),
+        default=None,
+        help="which sealed experiment this run reports; the launcher stamps one hash per job",
+    )
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
 
@@ -248,8 +296,20 @@ def main() -> int:
         "response_arms": sens["response"]["arms"],  # type: ignore[index]
     }
 
-    (root / "metrics.json").write_text(json.dumps(report, indent=2, sort_keys=True))
-    print(f"\nwrote {root / 'metrics.json'}")
+    (root / "diagnostics.json").write_text(json.dumps(report, indent=2, sort_keys=True))
+    print(f"\nwrote {root / 'diagnostics.json'}")
+    if args.only:
+        write_result_metrics(report, args.only)
+    else:
+        print(
+            "\nNo --only given, so no stamped result file was written. Submit once per sealed "
+            "experiment:\n"
+            "  scripts/sbatch_py.sh --exp X-20260908-climate-state-map  T-map-v0      "
+            "scripts/train_emulator.py --only map\n"
+            "  scripts/sbatch_py.sh --exp X-20260908-warming-response   T-response-v0 "
+            "scripts/train_emulator.py --only response",
+            file=sys.stderr,
+        )
     return 0
 
 
