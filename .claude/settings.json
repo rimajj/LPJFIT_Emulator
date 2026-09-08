@@ -9,8 +9,15 @@
     "unflipped for weeks), and every invariant that was a deny hook or a CI gate held. So each rule",
     "here has a triggering event, a visibility mechanism, and a failing gate.",
     "",
-    "Blocking hooks (deny/block): slurm-guard, commit-guard, path-guard, session-end-gate.",
-    "Everything else is informational and must never delay or fail a session start."
+    "Blocking hooks (deny/block): predecessor-guard, slurm-guard, commit-guard, path-guard,",
+    "session-end-gate. Everything else is informational and must never delay or fail a session",
+    "start.",
+    "",
+    "predecessor-guard runs FIRST of the Bash hooks, and is the one rule here that protects something",
+    "OUTSIDE this repo: the old hybrid project, which the owner has said must not be changed in any",
+    "way. It is a hook rather than a note because the two GitHub repository names differ by two",
+    "letters -- LPJmLFIT_Emulator is the old project, LPJFIT_Emulator is this one -- which is exactly",
+    "how a copied or mistyped push lands on the wrong repository."
   ],
   "hooks": {
     "SessionStart": [
@@ -38,6 +45,11 @@
       {
         "matcher": "Bash",
         "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/predecessor-guard.sh",
+            "timeout": 10
+          },
           {
             "type": "command",
             "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/slurm-guard.sh",

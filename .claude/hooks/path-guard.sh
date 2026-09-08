@@ -3,6 +3,10 @@
 #
 # Catches the violation at the EDIT, hours before it would surface as a rebase conflict or a red
 # gate. Each target is immutable for a stated reason:
+#   the OLD project's tree    -> owner's standing instruction: it must not be changed in any way.
+#                                Checked FIRST, because it is the only target that lies OUTSIDE this
+#                                repo, and every rule below reasons about a repo-relative path -- so
+#                                an absolute path into the old tree matched nothing and was allowed.
 #   another line's files      -> per-line files are why 5 lines x 887 commits merged without a
 #                                prose merge war in the predecessor
 #   a sealed pre-registration -> "pre-registered" means nothing if it can be edited after the run
@@ -28,6 +32,21 @@ print(json.dumps({"hookSpecificOutput":{"hookEventName":"PreToolUse",
 PY
   exit 0
 }
+
+# The OLD project's tree. Matched on the ABSOLUTE path, before REL is trusted for anything: REL is
+# only meaningful for a file inside this repo, and for a path outside it REL is still the absolute
+# path, which matched none of the patterns below and so sailed through.
+OLD_TREES='/p/projects/open/Jamir/(esm_land_emulator|wt-[SMEOX])'  # pathsafety: allow (IS the refusal)
+if [[ "$FILE" =~ ^${OLD_TREES}(/|$) ]]; then
+  deny "$FILE is in the OLD project, which must not be changed in any way (owner, standing).
+
+That tree is the hybrid emulator -- a DIFFERENT project from this one -- and it is the read-only
+archive of record: cite it, never write to it.
+
+What transfers into this project is distilled in docs/reference/inherited.md. Add what you learned
+to that file, HERE, rather than editing anything over there. Reading the old tree is fine and is
+the point."
+fi
 
 # Another line's exclusive files.
 if [[ -n "$LINE" && "$REL" =~ ^(lines|journal|campaigns)/([A-Z])/ ]]; then
