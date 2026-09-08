@@ -6,77 +6,81 @@
 
 ## Scope
 
-Line X owns the **claims**. Everything under `experiments/`:
-
-* writing pre-registrations: the estimand, the reference basis, the folds, the leakage checks, and
-  every null **with the value it must return, derived before the run**
-* sealing them, harvesting results, and rendering verdicts
-* saying plainly what a result does and does not license — including "invalid", which is not a soft
-  "fail" but a statement that the comparison licenses no conclusion either way
-
-Line X does not build models (T) or generate data (D). It decides what would count as evidence, and
-then whether the evidence arrived. That separation is the point: the line that builds a thing should
-not be the line that certifies it.
+Line X owns the **claims**: pre-registrations with every null and the value it must return, sealing,
+harvesting, and saying plainly what a result does and does not license — including "invalid", which
+is not a soft "fail" but a statement that the comparison licenses no conclusion either way. Line X
+does not build models (T) or generate data (D).
 
 ## NEXT — start here
 
-**Write rung 1's pre-registration now, before the corpus exists.** That is not premature — it is the
-whole method. A pre-registration written after the data is available is a pre-registration written
-with one eye on the answer, and the registry hashes it precisely so that cannot happen unnoticed.
+**Two experiments are sealed, run, harvested and rendered. Both FAIL. Every null returned its
+pre-registered value**, so neither is `invalid`: the apparatus did what was declared and these are
+failures of the model, not of the measurement.
 
-**Rung 1 is THE KILL TEST for the project.** Its question, in one sentence: *given a cell's climate
-shifted by +4 K, can a model beat "predict this cell exactly as it is today"?* If not, there is no
-learnable warming response and the project stops — in roughly week 3, for ~670 core-hours.
+| experiment | model | best null | margin | gate | outcome |
+|---|---|---|---|---|---|
+| `X-20260908-climate-state-map` | 0.0361 | 0.0212 | +0.0149 | > 0.050 | **fail** |
+| `X-20260908-warming-response` | −0.7271 | +0.0162 | −0.7433 | > 0.050 | **fail** |
 
-```
-cp -r experiments/_template experiments/X-<YYYYMMDD>-rung1-kill-test
-```
+**The design choice worth reusing: every null is a deterministic function of the corpus and the
+fold assignment, with no learner and no free parameters.** That is what made it possible to DERIVE
+each null's required value before the run instead of guessing it — `scripts/exp_derive_nulls.py`,
+and all eight values came back exact. The address null is a spatial nearest neighbour rather than a
+latitude/longitude regression for the same reason, and it is the stronger null besides.
 
-**The four nulls, and why the first one is decisive.** Read `docs/reference/inherited.md` §2 before
-writing them — it explains why the predecessor could not construct the first null at all.
+**Next, in order:**
 
-| null | what it is | why it is here |
-|---|---|---|
-| **same-cell baseline** | this cell's own *unperturbed* equilibrium, ignoring the perturbation | THE one that matters. If the model cannot beat it, there is no response, only geography. |
-| geographic address | unit-sphere x/y/z, no climate at all | the null that killed the predecessor's response claim (0.654 against a reported 0.748) |
-| nearest-analogue cell | the observed equilibrium of the most climatically similar training cell | this is the space-for-time null; it is the honest competitor |
-| shuffled target | permuted within fold | the sanity check |
+1. **Write the third pre-registration: the HELD-OUT FORCING LEG.** The low-emissions leg is on disk
+   and untouched. It warms 0.227× of the high leg on a common baseline, its spatial pattern
+   correlates only 0.19–0.22 with it, and 15–26 % of scored cells cool — so a model that memorised
+   the high-emissions pattern must fail it. ⚠ Gate the build provenance FIRST: that leg came from
+   an Aug-12 binary build while historical and ssp370-seed1 came from the Feb-05 build, so a delta
+   involving it carries an unquantified confound and the pre-registration must say so.
+2. **Do not re-run either sealed experiment with a changed model.** A changed question or a changed
+   model is a NEW `exp_id` that names the old one in `supersedes:`. The registry hashes the sealed
+   file precisely so this cannot happen unnoticed.
+3. **The next response experiment is blocked on line D's pilot corpus**, and that is now the
+   finding rather than a scheduling note: the response failed because the training corpus holds one
+   climate per location, so the target must become the CHANGE itself, which needs the same cell
+   under many climates. `docs/decisions/20260908-X-response-fails-on-one-climate-per-place.md`.
+4. **Consider a non-circular acceptance band.** The band is currently derived from the same two
+   seeds whose mean is the truth, so the single-realisation arm sits at exactly half a band and
+   always passes — it is reported as a CEILING, not a null, and the circularity is disclosed in the
+   estimand. A band built from a DIFFERENT leg's two-seed spread would break the circle and is
+   available today.
 
-**Four things the pre-registration must get right, each of which the predecessor got wrong once:**
+⚠ A falsy-zero bug in the verdict engine reported the response experiment as `invalid` before it
+was fixed: `x or default` treats a legitimate 0.0 as missing, and 0.0 is exactly what an analytic
+null returns. Every comparison in `tools/_experiments.py` now tests `is not None`. If a verdict
+ever looks surprising, check for that class of coercion before believing it.
 
-1. **`split.kind: blocked_spatial`, not `kfold_by_cell`.** Random folds turn any per-cell score into
-   a spatial-interpolation score; the effective independent sample is ~161 tiles, not 54,020 cells.
-2. **Hold out entire perturbation LEVELS as well as cells.** Interpolating between +2 K and +4 K is a
-   different and much easier question than extrapolating to +6 K, and only the second one is the
-   question. `holdout_perturbation` exists for this.
-3. **Derive each null's `expected.value` and say where it came from.** Not "we will see what it
-   returns" — the registry rejects that (E02), because a null that silently misbehaves is otherwise
-   indistinguishable from a null that agreed with you.
-4. **Do not guard it on an R² floor.** The Bernoulli realisation noise is ~28 % of residual variance,
-   so a single-draw R² is near-saturated and cannot discriminate arms. Score the ensemble
-   expectation, and state the patch count (25 in all existing data; acceptance grade is ~125–192).
+⚠ `origin` points at the predecessor's GitHub repository and shares no ancestor with this history,
+so nothing has been pushed; everything is merged into LOCAL `main`. Owner decision needed.
 
-Then `tools/seal_experiment.py <id>` and commit. It cannot be launched until it is sealed and
-committed, and any later edit turns CI red. When line D's pilot corpus lands, fill in
-`data.corpus_sha256` — **which means you seal AFTER the corpus manifest exists**, so the sequence is:
-draft now, corpus lands, set the hash, seal, launch.
-
-Housekeeping: none owed. Refresh this block before you end.
+Housekeeping: none owed.
 
 ## Milestones
 
-**X1 — rung 1's pre-registration (OPEN, draftable today).** The kill test. Draft it now; seal it when
-the pilot corpus manifest exists.
+**X1 — the kill test. DONE, sealed before the run, verdict `fail`.** Its value is not the verdict
+but the diagnosis: the response is obtained by DIFFERENCING two level predictions, which only works
+where the true change is large compared with the level error. Stem count clears that bar (+0.35);
+soil carbon, whose simulated change is 3.5 % of its level, does not (−4.02).
 
-**X2 — rung 2: does the equilibrium map meet the acceptance bar? (blocked on X1).** Per-cell counts
-AND trait distributions AND trait medians, conjunctively, within `max(10 %, the two-seed spread)`.
-Report the fraction of cells inside the band, never a mean.
+**X2 — the acceptance-grade map. DONE, verdict `fail`**, with the per-quantity breakdown reported
+beside the conjunctive number rather than instead of it.
 
-**X3 — rung 5: the held-out forcing leg (blocked on X2).** The low-emissions scenario is the test a
-memorised warming pattern must fail: it warms 0.227× of the high leg on a common baseline, its
-spatial pattern correlates only 0.19–0.22 with it, and 15–26 % of scored cells *cool*. ⚠ Gate its
-binary build provenance first — it was produced by a different build from the other legs.
+**X3 — the held-out forcing leg (OPEN, draftable today).** See NEXT item 1.
+
+**X4 — a pre-registration for the emitted restart file (OPEN).** The artifact now exists and passes
+t0–t2 of the validation ladder; t3 (20-year drift inside the two-seed spread) and t5 (end to end)
+are pre-registrable claims and nobody has written them down yet.
 
 ## Line X gotchas
 
-*(none yet)*
+* **A metric a null also passes has no power** — and the check that enforces it is sensitive to how
+  the nulls are chosen. Two nulls of similar strength protect each other from the no-power flag;
+  one strong null beside several weak ones trips it. That is not a loophole, it is the rule working:
+  it says the metric cannot separate the model from a thing that knows nothing.
+* **State the blocking radius with every spatial claim.** At 5° blocks the address null flips from
+  −0.142 to +0.120 on the response, because the nearest available training cell is closer. The 15°
+  primary is what makes these results mean anything, and the 5° arm is reported, never substituted.
