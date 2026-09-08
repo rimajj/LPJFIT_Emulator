@@ -1,0 +1,230 @@
+schema_version: 1
+
+exp_id: X-20260908-heldout-forcing-leg
+line: X
+
+status: sealed
+
+title: "Does the climate-to-state map survive a forcing leg it has never seen?"
+question: >
+  A map fitted on the 1970-1999 climate and the 1999 forest is handed the 2071-2100 climate of the
+  LOW-emissions leg -- a leg whose state it has never seen, in any cell -- and asked for the year-2100
+  forest. Does it land inside the acceptance band on stem count AND every scored trait median AND
+  both tails of every scored trait distribution, simultaneously, in more held-out cells than
+  PERSISTENCE does: that is, than simply handing back the same cell's own present-day forest?
+
+  Persistence is the competitor that matters, and it is why this rung exists. The emulator's whole
+  claim is that it maps climate to state; if a changed climate cannot be told from the present one on
+  this metric, then what has been measured is the band, not the model.
+
+estimand:
+  name: band_frac_conjunctive
+  definition: >
+    The fraction of scored cells in which EVERY one of 22 quantities lands inside its own acceptance
+    band -- the same statistic, the same 22 quantities and the same code as
+    X-20260908-climate-state-map, deliberately unchanged so that the two numbers are directly
+    comparable: that experiment scored the leg the map was fitted on, this one scores a leg it never
+    saw. The 22 are: stems per patch; above-ground biomass, leaf area index and soil carbon; the
+    median of each of wood density, specific leaf area, fine-root conductivity, the 95th-percentile
+    rooting depth, leaf longevity and stem height; and the 10th and 90th percentile of each of those
+    six traits. Aggregation is per cell, unweighted, computed once over the assembled out-of-fold
+    prediction -- every cell is held out exactly once. A NaN on either side counts as a MISS.
+
+    THE BAND IS NOT DERIVED FROM THE SEEDS IT SCORES, and that is the one deliberate difference from
+    the map experiment. The truth is the mean of the ssp126 leg's two seeds; the band is
+    max(10 %, the HISTORICAL leg's own two-seed relative spread for that cell and quantity) times
+    |truth|. Taking the tolerance from a different leg breaks the circularity disclosed in the map
+    experiment, where the same two seeds set both the truth and the tolerance so that a single
+    realisation sat at exactly half a band and could not fail. Here it can: one draw of the real
+    model scores 0.538490 against this band rather than 1.000000, and that 0.538490 -- NOT 1.0 -- is
+    what perfect means on this metric. The transfer is licensed by measurement, not convenience: over
+    these 56,950 cells the two legs' relative two-seed spreads agree to within 6 % on every summary
+    (median 0.03027 vs 0.03207, p90 0.16350 vs 0.16529, 19.30 % vs 20.01 % of cell-quantities above
+    the 10 % floor). The same-leg band is the pre-declared sensitivity arm; it is reported, never
+    substituted.
+
+    DISCLOSED DEGENERACY: fine-root conductivity at all three percentiles is inside the band for
+    every arm in 100 % of cells -- it varies less across cells and legs than a 10 % tolerance -- so
+    the conjunctive test is in practice over 19 informative quantities, not 22. The 22 are kept
+    anyway, because changing the quantity set would forfeit comparability with the map experiment,
+    which is the main reason to run this one. The binding quantities are the stocks and the count:
+    persistence passes above-ground biomass in 32.8 %, leaf area index in 40.7 % and stems per patch
+    in 39.2 % of cells, against 83-100 % for most trait percentiles.
+  reference_basis: >
+    LPJmL-FIT 5.6.004. Training truth = the historical leg's state at 1999 from restart_1999.lpj
+    (1000-year spin-up plus the 1901-1999 transient -- NOT a converged equilibrium, see
+    docs/decisions/20260908-D-spinup-is-not-converged.md), climate window 1970-1999, produced by the
+    2026-02-05 binary build. Scored truth = the ssp126 leg's state at 2100 from restart_2100.lpj,
+    climate window 2071-2100, produced by the Aug-12-2026 build; truth is the mean of
+    random_seed1 and random_seed2, which for this leg are two GENUINE realisations (they start from
+    the historical leg's seed-1 and seed-2 restarts respectively and their state tables differ in
+    63,586 of 67,420 cells). npatch=25, tree PFTs only, constant CO2 throughout by design. 56,950
+    cells tree-bearing (>= 0.5 stems per patch) in both seeds of both legs; the historical
+    tree-bearing set is a strict subset of the ssp126 one (56,950 of 59,202), so no cell is lost by
+    requiring both. Dimensionless fraction, a level not a ratio.
+
+    BUILD PROVENANCE, GATED BEFORE THIS WAS WRITTEN. The two legs come from different binary builds,
+    so this comparison crosses a build boundary and says so. What that boundary contains is no longer
+    unquantified: the model's tracked history has no commit between the two builds, so the difference
+    is exactly 19 modified working-tree files, and every behavioural change in them is gated behind a
+    rung-2 environment variable that the ssp126 job scripts do not set. The two added tree-struct
+    fields are deliberately absent from the restart serialisation, so the restart layout is
+    unchanged; the random-deviate generator changed only by hoisting a function-scope static to file
+    scope; the remaining changes add output accumulators. Compiler flags are unchanged
+    (Makefile.inc predates both builds). What is NOT proven is byte-equality: the decisive test --
+    one cell, one year, one restart, both binaries, byte-compare -- has not been run, because the
+    Feb-05 binary is preserved but no wrapper exists yet to run it. Full record:
+    docs/decisions/20260908-X-build-provenance-of-the-low-emissions-leg.md.
+  units: dimensionless
+  kind: level
+
+data:
+  corpus: /p/tmp/jamirp/vegemu/corpus/v0
+  corpus_sha256: "d1230d0bc0f6fa84c44f62aeedc3920cc9c485a3eb3ba7a3ae6f79ef37cb5187"
+  n_rows: 56950
+
+  split:
+    # The forcing leg is held out BY CONSTRUCTION: the map is fitted on the historical leg only and
+    # never sees a year-2100 state, in any cell. Spatial blocking is applied ON TOP, so a scored
+    # cell is also spatially held out and every arm -- model and nulls alike -- may only copy from
+    # outside its own block. Without that, the model would be the one arm allowed to have seen the
+    # cell next door.
+    kind: holdout_forcing_leg
+    k: 5
+    seed: 42
+    # 15 degrees primary: the effective independent spatial sample is ~161 populated 15x15 deg
+    # tiles, not 56,950 cells. 5 degrees is the pre-declared sensitivity check.
+    block_degrees: [15, 5]
+
+  leakage_checks:
+    - "Training uses ONLY the historical leg's climate and state. No ssp126 state is a training target in any fold; asserted in the fitting script before fitting."
+    - "The ssp126 CLIMATE is an input at prediction time and must not appear in training: the feature matrix is built from the historical climate table for training rows and the ssp126 table for scored rows, and the two are never concatenated."
+    - "The feature set is exactly climate.CLIMATE_FEATURES: no lon, no lat, no cell id, no CO2, no state. Latitude and longitude are stored beside the features but excluded from the matrix in dataset.assemble; only the geographic_address null sees them."
+    - "No lagged or initial state: the corpus holds one state per leg, so there is nothing to lag. The same-cell historical state enters as the persistence NULL, never as a model feature -- if it were a feature the model would contain its own decisive competitor."
+    - "Folds are whole spatial blocks and no scored cell's block appears in training; asserted in tests/test_folds.py."
+    - "The nearest-analogue and nearest-geographic nulls standardise on the TRAINING fold's own mean and spread, so the scored block's distribution does not leak into them."
+    - "The band comes from the HISTORICAL leg's two seeds, not from the ssp126 pair it is applied to, so no scored realisation sets its own tolerance. The circularity that forced the map experiment's single-realisation arm to be reported as a ceiling is therefore absent here, and the ceiling is 0.538490 rather than 1.0."
+    - "The ssp370 leg is NOT used by this experiment, in any arm. Corpus v0's two ssp370 state tables are byte-identical and that leg therefore has no second realisation (docs/decisions/20260908-X-ssp370-has-no-second-seed.md); both legs used here were checked for distinctness in the same script that derived the nulls, and both passed."
+    - "Both builds involved were checked for behavioural differences on the code path these runs took, and the rung-2 environment variables that gate every such difference are absent from the job scripts and from the shell profile."
+
+nulls:
+  - id: same_cell_persistence
+    description: >
+      Hand back the same cell's own historical 1999 forest, ignoring the warmed climate entirely.
+      THE DECISIVE NULL, and the level counterpart of the no-change null that killed the sealed
+      warming-response experiment. It needs no training data and no fold structure, so its value is
+      identical under every blocking -- which also makes it the arm that cannot be blamed on the
+      apparatus. If the emulator cannot beat it, the emulator has not learned a response to climate.
+    expected:
+      statistic: band_frac_conjunctive
+      value: 0.033749
+      tolerance: 0.001
+      derivation: >
+        Computed from the truth alone by scripts/exp_derive_nulls_leg.py against corpus v0 before any
+        model was fitted; no learner is involved and there are no free parameters, so the value is a
+        deterministic function of the corpus, the cell set and the band. Output:
+        /p/tmp/jamirp/vegemu/exp/derive-leg-v0/derived_nulls_leg.json. Identical at 15 and 5 degrees,
+        as it must be. It is SMALL because the forest genuinely moves: 96.6 % of scored cells change
+        beyond the band in at least one of the 22 quantities, 5.31 quantities on average. Under the
+        same-leg sensitivity band it is 0.034627. The tolerance is tight because the computation is
+        exactly reproducible; a departure means the cell set or the band changed, which is what this
+        check is for.
+
+  - id: nearest_analogue
+    description: >
+      SPACE-FOR-TIME, in its natural habitat: find the training cell whose PRESENT-DAY climate is
+      nearest this cell's FUTURE climate, and copy that cell's present-day forest. This is the
+      substitution the whole field makes when it has no warmed run, it is the honest competitor to a
+      learned map, and unlike the within-leg version used by the map experiment it is here asked the
+      question it is actually used for. Distance is Euclidean over the eight standardised climate
+      variables fixed in advance in nulls.ANALOGUE_FEATURES.
+    expected:
+      statistic: band_frac_conjunctive
+      value: 0.004688
+      tolerance: 0.001
+      derivation: >
+        As above, from the truth, the two climates and the fold assignment alone. 0.005040 at 5
+        degrees; 0.004934 under the same-leg band. It is SEVEN TIMES WORSE than persistence, which is
+        the informative part: substituting a warm place for a warm future gets the traits roughly
+        right (48-100 % per quantity) and the stocks wrong (27.7 % on above-ground biomass, 30.0 % on
+        soil carbon), so it fails the conjunctive test almost everywhere.
+
+  - id: geographic_address
+    description: >
+      Copy the historical forest of the geographically nearest TRAINING cell. The null that killed
+      the predecessor's headline warming-response claim, in its strongest form -- a spatial nearest
+      neighbour rather than a regression on latitude and longitude, because a weak null is worse than
+      no null. Under 15-degree blocking the nearest training cell is necessarily outside the block.
+    expected:
+      statistic: band_frac_conjunctive
+      value: 0.005426
+      tolerance: 0.001
+      derivation: >
+        As above, from the truth and the coordinates alone. 0.007006 at 5 degrees -- it strengthens as
+        the blocking loosens, which is exactly why the 15-degree arm is the primary and the 5-degree
+        arm is reported beside it rather than substituted for it. 0.005075 under the same-leg band.
+
+  - id: climatological_mean
+    description: "The mean historical forest over the training folds -- the average forest, everywhere."
+    expected:
+      statistic: band_frac_conjunctive
+      value: 0.0
+      tolerance: 0.002
+      derivation: >
+        Measured at exactly 0.000000 on corpus v0 under every blocking and both bands: a single
+        global mean state cannot be inside a 10 % band on 22 quantities at once in any cell.
+        Effectively analytic given the spread of the corpus.
+
+  - id: shuffled_target
+    description: "The scored ssp126 truth, permuted across cells within the fold. The sanity null."
+    expected:
+      statistic: band_frac_conjunctive
+      value: 0.000632
+      tolerance: 0.002
+      derivation: >
+        Measured at 0.000632 with permutation seed 20260908+fold (0.000509 at 5 degrees, 0.000615
+        under the same-leg band). Not exactly zero because a permutation occasionally lands a similar
+        forest on a similar cell; that residual is the chance rate of the metric.
+
+decision_rule:
+  statistic: band_frac_conjunctive
+  comparator: model_minus_best_null
+  pass_if: "> 0.050"
+  arms: [model, same_cell_persistence, nearest_analogue, geographic_address, climatological_mean, shuffled_target]
+  multiplicity: none
+  power_note: >
+    The best null is same_cell_persistence at 0.033749 and the next is geographic_address at
+    0.005426, so persistence beats the rest by 0.028323 -- under the 0.050 threshold, and the metric
+    therefore retains power. It is not close to the threshold and not close to zero either, which is
+    the comfortable case: a null strong enough to be worth beating and weak enough to be beatable. If
+    any null came to satisfy pass_if against the others the outcome MUST be `invalid`, because a
+    metric a null also passes licenses no conclusion in either direction.
+
+    A pass therefore requires the model to reach at least 0.0837: to place every one of 22 quantities
+    inside the band in one cell in twelve, on a forcing leg it has never seen, having beaten
+    persistence by five percentage points of cells. Set against the non-circular ceiling of 0.538490
+    -- what one realisation of the real model achieves -- that asks for 15.6 % of what is attainable.
+    Set against the map experiment's own 0.0361 on the leg it was FITTED on, it asks the model to
+    more than double that score on a leg it was not. Both framings belong in the verdict.
+
+    ⚠ THE LIKELY OUTCOME IS FAILURE, AND THE INFORMATIVE PART IS WHICH KIND. Three distinguishable
+    results, all pre-named: (a) the model beats persistence but by less than 0.050 -- a real but
+    insufficient response, and the first positive evidence in this project that climate is doing any
+    work under a changed forcing; (b) the model matches persistence to within noise -- it has learned
+    the present-day map and nothing about response, which is what the one-climate-per-place
+    identification limit predicts (MEMORY.md:ident-limit) and what the sealed warming-response
+    experiment already found in the response metric; (c) the model scores BELOW persistence -- it is
+    actively harmed by a climate it has not seen, the space-for-time failure mode of
+    MEMORY.md:extrap-cells. Report which, with the per-quantity table beside the conjunctive number.
+    None of the three licenses a claim about warming response; only (a) licenses continuing to look
+    for one in this corpus rather than in the designed perturbation ensemble.
+
+compute:
+  launcher: scripts/sbatch_py.sh
+  tag: T-heldout-leg-v0
+  partition: priority
+  est_core_hours: 4
+
+outputs:
+  - path: /p/tmp/jamirp/vegemu/exp/X-20260908-heldout-forcing-leg/metrics.json
+    kind: metrics
