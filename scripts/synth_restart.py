@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Emit a restart file from the emulator's prediction, for a contiguous block of cells.
 
-    scripts/train_synth_restart.py --first-cell 42480 --ncell 20 --out-dir <dir>
+    scripts/synth_restart.py --first-cell 42480 --ncell 20 --out-dir <dir>
 
 THE DELIVERABLE. Everything upstream of this produces numbers; this produces the artifact the
 project exists for -- a state file the real model will load, so its 1000-year spin-up can be

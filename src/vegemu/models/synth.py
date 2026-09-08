@@ -52,6 +52,19 @@ from vegemu.binfmt.restart import (
     trees_of,
 )
 
+# ⚠ THE ONE FIELD A ROUND-TRIP TEST CANNOT VALIDATE. The last byte of a PFT entry, `pft->litter`,
+# is NOT a self-contained value -- it is an INDEX into that patch's own litter list, and
+# `freadpft.c:71` rejects it with ERROR195 if it is >= `patch->soil.litter.n`. Within one record
+# it is always consistent, so reading and rewriting a record byte-identically proves nothing about
+# it. It only breaks when a stem is MOVED BETWEEN PATCHES, which is exactly what a transplant does.
+#
+# Found by the validation ladder rather than by inspection: the first synthesised file failed t2
+# with `ERROR195: Invalid value 7 for litter index, must be in [0,5]` -- a donor whose home patch
+# had eight litter pools landed in a patch with six. So every transplanted stem's index is remapped
+# to the TARGET patch's slot for the same PFT, and a slot is appended if that PFT has none.
+LITTER_BYTE_IN_TREE = 553
+LITTER_ITEM_REALS = 22  # ag(10) + agsub(10) + bg(2), all Reals
+
 # The quantiles the emulator predicts, and which the transplant matches.
 QUANTILE_LEVELS: tuple[float, ...] = (0.10, 0.50, 0.90)
 # Traits matched jointly when choosing a donor. Height first: it carries the size structure, and
@@ -217,6 +230,15 @@ def synthesise_cell(
             rows = buf[grass_offs[:, None] + np.arange(PFT_GRASS_BYTES, dtype=np.int64)[None, :]]
             grass_bytes = np.ascontiguousarray(rows).tobytes()
 
+        # The target patch's litter list, copied so it can grow, and its PFT -> slot map.
+        soil = dict(patch["soil"])
+        lit = dict(soil["litter"])
+        lit["pft_ids"] = np.array(lit["pft_ids"], dtype=np.uint8, copy=True)
+        lit["items"] = np.array(lit["items"], dtype=np.float64, copy=True).reshape(
+            -1, LITTER_ITEM_REALS
+        )
+        slot = {int(p): i for i, p in enumerate(lit["pft_ids"])}
+
         parts: list[bytes] = []
         if n > 0:
             u = (np.arange(n) + 0.5) / n
@@ -230,17 +252,30 @@ def synthesise_cell(
             }
             picks = _choose_donors(pool, targets, rng)
             chosen = pool.raw[picks]
-            # FREE field: renumber `index` so two transplanted copies of one donor are distinct.
             for k in range(n):
                 row = chosen[k].copy()
+                # FREE field: renumber `index` so two copies of one donor are distinct.
                 row[325:329] = np.frombuffer(struct.pack("<i", k + 1), dtype=np.uint8)
+                # CROSS-REFERENCE field: remap the donor's litter index to THIS patch's slot for
+                # the same PFT, appending an empty slot if the PFT has none here. Zero stocks is
+                # the right initial content -- a PFT that has just arrived has shed no litter yet.
+                pft_id = int(row[0])
+                if pft_id not in slot:
+                    slot[pft_id] = int(lit["n"])
+                    lit["n"] = int(lit["n"]) + 1
+                    lit["pft_ids"] = np.append(lit["pft_ids"], np.uint8(pft_id))
+                    lit["items"] = np.vstack(
+                        [lit["items"], np.zeros((1, LITTER_ITEM_REALS), dtype=np.float64)]
+                    )
+                row[LITTER_BYTE_IN_TREE] = slot[pft_id]
                 parts.append(row.tobytes())
             placed_fields.append(pool.fields[picks])
             report.stems_placed += n
 
+        soil["litter"] = lit
         raw = struct.pack("<i", n + int(grass_offs.size)) + b"".join(parts) + grass_bytes
         new_pft = _rebuild_pftlist(raw, layout)
-        new_patches.append({**patch, "pftlist": new_pft})
+        new_patches.append({**patch, "pftlist": new_pft, "soil": soil})
 
     # DERIVED: rescale soil and litter carbon to the predicted totals, keeping the template's
     # vertical profile. A profile is not predicted, so inventing one would be a free parameter.
