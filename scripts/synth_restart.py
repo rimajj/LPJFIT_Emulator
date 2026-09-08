@@ -63,9 +63,7 @@ def main() -> int:  # noqa: PLR0915 -- one linear procedure, reported in one pla
     exp = Path(str(paths()["scratch"]["exp"])) / "map-response-v0"
     oof = pl.read_parquet(Path(args.oof) if args.oof else exp / "oof_map.parquet")
     out_dir = (
-        Path(args.out_dir)
-        if args.out_dir
-        else Path(str(paths()["scratch"]["runs"])) / "synth-v0"
+        Path(args.out_dir) if args.out_dir else Path(str(paths()["scratch"]["runs"])) / "synth-v0"
     )
     (out_dir / "restart").mkdir(parents=True, exist_ok=True)
 
@@ -145,9 +143,7 @@ def main() -> int:  # noqa: PLR0915 -- one linear procedure, reported in one pla
         "stems_requested_total": int(sum(r["stems_requested"] for r in synth)),
         "stems_placed_total": int(sum(r["stems_placed"] for r in synth)),
         "median_pool_shortfall": {
-            trait: float(
-                np.median([r["pool_shortfall"].get(trait, np.nan) for r in synth])
-            )
+            trait: float(np.median([r["pool_shortfall"].get(trait, np.nan) for r in synth]))
             for trait in MATCH_TRAITS
         },
         "roundtrip_of_emitted_file": "BYTE-IDENTICAL on every record",
@@ -161,8 +157,10 @@ def main() -> int:  # noqa: PLR0915 -- one linear procedure, reported in one pla
     (out_dir / "synth_report.json").write_text(json.dumps(summary, indent=2, sort_keys=True))
     print(f"\nwrote {dest}  ({dest.stat().st_size / 1e6:.1f} MB)")
     print(f"  {len(synth)} cells synthesised, {len(reports) - len(synth)} passed through")
-    print(f"  {summary['stems_placed_total']} stems placed of "
-          f"{summary['stems_requested_total']} requested")
+    print(
+        f"  {summary['stems_placed_total']} stems placed of "
+        f"{summary['stems_requested_total']} requested"
+    )
     for trait, value in summary["median_pool_shortfall"].items():
         print(f"  median {trait} shortfall vs the prediction: {value:+.2%}")
     print("  every emitted record round-trips byte-identically")

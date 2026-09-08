@@ -325,16 +325,45 @@ def fig_maps(frame: pl.DataFrame, quantity: str, out: Path) -> None:
 
     hi = float(np.nanpercentile(truth, 99))
     fig, axes = plt.subplots(3, 1, figsize=(8.4, 9.2))
-    draw_map(axes[0], lon, lat, truth, title="LPJmL-FIT (the truth)", cmap=SEQ, vmin=0, vmax=hi,
-             label=LABELS.get(quantity, quantity).replace("\n", " "))
-    draw_map(axes[1], lon, lat, pred, title="the emulator, on held-out spatial blocks", cmap=SEQ,
-             vmin=0, vmax=hi, label=LABELS.get(quantity, quantity).replace("\n", " "))
-    draw_map(axes[2], lon, lat, rel, title="relative error (emulator - truth) / truth",
-             cmap=DIV, norm=TwoSlopeNorm(vcenter=0.0, vmin=-1.0, vmax=1.0),
-             label="fraction of the truth")
+    draw_map(
+        axes[0],
+        lon,
+        lat,
+        truth,
+        title="LPJmL-FIT (the truth)",
+        cmap=SEQ,
+        vmin=0,
+        vmax=hi,
+        label=LABELS.get(quantity, quantity).replace("\n", " "),
+    )
+    draw_map(
+        axes[1],
+        lon,
+        lat,
+        pred,
+        title="the emulator, on held-out spatial blocks",
+        cmap=SEQ,
+        vmin=0,
+        vmax=hi,
+        label=LABELS.get(quantity, quantity).replace("\n", " "),
+    )
+    draw_map(
+        axes[2],
+        lon,
+        lat,
+        rel,
+        title="relative error (emulator - truth) / truth",
+        cmap=DIV,
+        norm=TwoSlopeNorm(vcenter=0.0, vmin=-1.0, vmax=1.0),
+        label="fraction of the truth",
+    )
     fig.suptitle(
         f"{LABELS.get(quantity, quantity).replace(chr(10), ' ')}: climate alone, no coordinates",
-        x=0.012, ha="left", fontsize=12, fontweight="semibold", color=INK,
+        x=0.012,
+        ha="left",
+        fontsize=12,
+        fontweight="semibold",
+        color=INK,
     )
     fig.tight_layout(rect=(0, 0, 1, 0.975))
     fig.savefig(out, bbox_inches="tight")
@@ -357,9 +386,18 @@ def fig_scatter(frame: pl.DataFrame, quantities: list[str], out: Path) -> None:
         t, p, b = truth[ok], pred[ok], band[ok]
         lo = float(np.nanpercentile(t, 0.5))
         hi = float(np.nanpercentile(t, 99.5))
-        ax.hexbin(t, p, gridsize=44, bins="log", cmap=SEQ, mincnt=1, xscale="log", yscale="log",
-                  extent=(np.log10(lo), np.log10(hi), np.log10(lo), np.log10(hi)),
-                  linewidths=0)
+        ax.hexbin(
+            t,
+            p,
+            gridsize=44,
+            bins="log",
+            cmap=SEQ,
+            mincnt=1,
+            xscale="log",
+            yscale="log",
+            extent=(np.log10(lo), np.log10(hi), np.log10(lo), np.log10(hi)),
+            linewidths=0,
+        )
         xs = np.geomspace(lo, hi, 60)
         ax.plot(xs, xs, color=INK_2, lw=1.2)
         rel = float(np.nanmedian(b / np.maximum(t, 1e-12)))
@@ -376,7 +414,11 @@ def fig_scatter(frame: pl.DataFrame, quantities: list[str], out: Path) -> None:
         ax.set_visible(False)
     fig.suptitle(
         "Held-out cells, one quantity per panel. Dashed lines: the median acceptance band.",
-        x=0.012, ha="left", fontsize=11.5, fontweight="semibold", color=INK,
+        x=0.012,
+        ha="left",
+        fontsize=11.5,
+        fontweight="semibold",
+        color=INK,
     )
     fig.tight_layout(rect=(0, 0, 1, 0.97))
     fig.savefig(out, bbox_inches="tight")
@@ -408,11 +450,22 @@ def fig_distributions(frame: pl.DataFrame, out: Path) -> None:
         despine(ax)
     axes[0].set_ylabel("value")
     handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc="upper right", ncols=5, fontsize=8.5, labelcolor=INK_2,
-               bbox_to_anchor=(0.995, 0.995))
+    fig.legend(
+        handles,
+        labels,
+        loc="upper right",
+        ncols=5,
+        fontsize=8.5,
+        labelcolor=INK_2,
+        bbox_to_anchor=(0.995, 0.995),
+    )
     fig.suptitle(
         "Trait distributions at five biome cells — solid: LPJmL-FIT, dashed: the emulator",
-        x=0.012, ha="left", fontsize=11.5, fontweight="semibold", color=INK,
+        x=0.012,
+        ha="left",
+        fontsize=11.5,
+        fontweight="semibold",
+        color=INK,
     )
     fig.tight_layout(rect=(0, 0, 1, 0.93))
     fig.savefig(out, bbox_inches="tight")
@@ -433,15 +486,24 @@ def fig_response(frame: pl.DataFrame, quantities: list[str], out: Path) -> None:
         ok = np.isfinite(dt) & np.isfinite(dp)
         dt, dp = dt[ok], dp[ok]
         lim = float(np.nanpercentile(np.abs(dt), 99.5))
-        ax.hexbin(dt, dp, gridsize=48, bins="log", cmap=SEQ, mincnt=1,
-                  extent=(-lim, lim, -lim, lim), linewidths=0)
+        ax.hexbin(
+            dt,
+            dp,
+            gridsize=48,
+            bins="log",
+            cmap=SEQ,
+            mincnt=1,
+            extent=(-lim, lim, -lim, lim),
+            linewidths=0,
+        )
         ax.plot([-lim, lim], [-lim, lim], color=INK_2, lw=1.2)
         ax.axhline(0, color=S2, lw=1.4, ls=(0, (4, 3)))
         denom = float((dt**2).sum())
         skill = 1 - float(((dp - dt) ** 2).sum()) / denom if denom > 0 else np.nan
         ax.set_title(
             f"{LABELS.get(q, q)}\nskill {skill:+.3f}  (predicting no change scores 0.000)",
-            loc="left", fontsize=9,
+            loc="left",
+            fontsize=9,
         )
         ax.set_xlabel("true change, 1999 → 2100")
         ax.set_ylabel("predicted change")
@@ -452,12 +514,18 @@ def fig_response(frame: pl.DataFrame, quantities: list[str], out: Path) -> None:
         ax.set_visible(False)
     fig.suptitle(
         "THE KILL TEST FAILED: the predicted change is worse than predicting no change",
-        x=0.012, ha="left", fontsize=12, fontweight="semibold", color=INK,
+        x=0.012,
+        ha="left",
+        fontsize=12,
+        fontweight="semibold",
+        color=INK,
     )
     fig.text(
-        0.012, 0.955,
+        0.012,
+        0.955,
         "Dashed orange line: the no-change null. Grey diagonal: a perfect prediction.",
-        fontsize=9, color=INK_2,
+        fontsize=9,
+        color=INK_2,
     )
     fig.tight_layout(rect=(0, 0, 1, 0.945))
     fig.savefig(out, bbox_inches="tight")
@@ -472,13 +540,33 @@ def fig_response_map(frame: pl.DataFrame, quantity: str, out: Path) -> None:
     lim = float(np.nanpercentile(np.abs(dt), 98))
     fig, axes = plt.subplots(2, 1, figsize=(8.4, 6.3))
     norm = TwoSlopeNorm(vcenter=0.0, vmin=-lim, vmax=lim)
-    draw_map(axes[0], lon, lat, dt, title="LPJmL-FIT's own change, 1999 → 2100 (high emissions)",
-             cmap=DIV, norm=norm, label=LABELS.get(quantity, quantity).replace("\n", " "))
-    draw_map(axes[1], lon, lat, dp, title="the emulator's predicted change",
-             cmap=DIV, norm=norm, label=LABELS.get(quantity, quantity).replace("\n", " "))
+    draw_map(
+        axes[0],
+        lon,
+        lat,
+        dt,
+        title="LPJmL-FIT's own change, 1999 → 2100 (high emissions)",
+        cmap=DIV,
+        norm=norm,
+        label=LABELS.get(quantity, quantity).replace("\n", " "),
+    )
+    draw_map(
+        axes[1],
+        lon,
+        lat,
+        dp,
+        title="the emulator's predicted change",
+        cmap=DIV,
+        norm=norm,
+        label=LABELS.get(quantity, quantity).replace("\n", " "),
+    )
     fig.suptitle(
         "The pattern of change is not reproduced — this is what the failed skill score looks like",
-        x=0.012, ha="left", fontsize=12, fontweight="semibold", color=INK,
+        x=0.012,
+        ha="left",
+        fontsize=12,
+        fontweight="semibold",
+        color=INK,
     )
     fig.tight_layout(rect=(0, 0, 1, 0.965))
     fig.savefig(out, bbox_inches="tight")
@@ -517,14 +605,22 @@ def fig_spinup(traj: pl.DataFrame, summary: dict[str, object], out: Path) -> Non
     ax.legend(loc="lower right", fontsize=8.5, labelcolor=INK_2)
     despine(ax)
     fig.suptitle(
-        "The 1000-year spin-up has not converged", x=0.012, ha="left", fontsize=12,
-        fontweight="semibold", color=INK,
+        "The 1000-year spin-up has not converged",
+        x=0.012,
+        ha="left",
+        fontsize=12,
+        fontweight="semibold",
+        color=INK,
     )
     ax.set_title(
         f"Still rising at {trend:+.1f} % per century at the end of the run; the two seeds "
         f"agree on it to {float(summary['global_two_seed_diff_pct']):.2f} %.\n"
         "So the stored state is what the standard spin-up protocol reaches, not an equilibrium.",
-        loc="left", fontsize=9, color=INK_2, fontweight="normal", pad=26,
+        loc="left",
+        fontsize=9,
+        color=INK_2,
+        fontweight="normal",
+        pad=26,
     )
     fig.tight_layout(rect=(0, 0, 1, 0.97))
     fig.savefig(out, bbox_inches="tight")
@@ -557,20 +653,24 @@ def fig_noise_floor(conv: pl.DataFrame, out: Path) -> None:
     ax2.set_xlabel("the acceptance band actually used")
     ax2.set_ylabel("cells")
     frac = float(np.mean(spread <= 0.10))
-    ax2.set_title(
-        f"max(10 %, that spread): the floor binds in {frac:.0%} of cells", loc="left"
-    )
+    ax2.set_title(f"max(10 %, that spread): the floor binds in {frac:.0%} of cells", loc="left")
     despine(ax2)
 
     fig.suptitle(
-        "Why the tolerance is not simply 10 %", x=0.012, ha="left", fontsize=12,
-        fontweight="semibold", color=INK,
+        "Why the tolerance is not simply 10 %",
+        x=0.012,
+        ha="left",
+        fontsize=12,
+        fontweight="semibold",
+        color=INK,
     )
     fig.text(
-        0.012, 0.925,
+        0.012,
+        0.925,
         "LPJmL-FIT is stochastic. Two runs differing only in random seed disagree by this much, so "
         "a tighter band would charge the emulator for noise no emulator can predict.",
-        fontsize=9, color=INK_2,
+        fontsize=9,
+        color=INK_2,
     )
     fig.tight_layout(rect=(0, 0, 1, 0.9))
     fig.savefig(out, bbox_inches="tight")
@@ -589,12 +689,18 @@ def fig_hits_map(frame: pl.DataFrame, quantities: list[str], out: Path) -> None:
     lon = frame["lon"].to_numpy()
     lat = frame["lat"].to_numpy()
 
-    fig, axes = plt.subplots(2, 1, figsize=(8.4, 7.2),
-                             gridspec_kw={"height_ratios": [2.1, 1.0]})
-    draw_map(axes[0], lon, lat, n_hit,
-             title="how many of the 22 land inside their band, per cell",
-             cmap=SEQ, vmin=0, vmax=len(quantities),
-             label=f"quantities inside the band (of {len(quantities)})")
+    fig, axes = plt.subplots(2, 1, figsize=(8.4, 7.2), gridspec_kw={"height_ratios": [2.1, 1.0]})
+    draw_map(
+        axes[0],
+        lon,
+        lat,
+        n_hit,
+        title="how many of the 22 land inside their band, per cell",
+        cmap=SEQ,
+        vmin=0,
+        vmax=len(quantities),
+        label=f"quantities inside the band (of {len(quantities)})",
+    )
     counts = np.bincount(n_hit.astype(int), minlength=len(quantities) + 1)
     xs = np.arange(len(counts))
     colours = [S1 if i == len(quantities) else INK_MUTED for i in xs]
@@ -607,20 +713,31 @@ def fig_hits_map(frame: pl.DataFrame, quantities: list[str], out: Path) -> None:
     axes[1].annotate(
         f"all {len(quantities)} at once:\n{frac_all:.1%} of cells",
         (len(quantities), counts[-1] / counts.sum()),
-        textcoords="offset points", xytext=(-4, 40), ha="right", fontsize=8.5, color=S1,
+        textcoords="offset points",
+        xytext=(-4, 40),
+        ha="right",
+        fontsize=8.5,
+        color=S1,
         arrowprops={"arrowstyle": "-", "color": S1, "lw": 1.0},
         bbox={"facecolor": SURFACE, "edgecolor": "none", "pad": 1.6},
     )
     despine(axes[1])
     fig.suptitle(
-        "The conjunctive acceptance test, cell by cell", x=0.012, y=0.995, ha="left", fontsize=12,
-        fontweight="semibold", color=INK,
+        "The conjunctive acceptance test, cell by cell",
+        x=0.012,
+        y=0.995,
+        ha="left",
+        fontsize=12,
+        fontweight="semibold",
+        color=INK,
     )
     fig.text(
-        0.012, 0.958,
+        0.012,
+        0.958,
         "A cell counts as accepted only if all 22 quantities land inside their own band. Most "
         "cells get most of the way there.",
-        fontsize=9, color=INK_2,
+        fontsize=9,
+        color=INK_2,
     )
     fig.tight_layout(rect=(0, 0, 1, 0.935))
     fig.savefig(out, bbox_inches="tight")
@@ -634,9 +751,11 @@ def main() -> int:
     args = ap.parse_args()
 
     style()
-    exp = Path(args.exp_dir) if args.exp_dir else Path(
-        str(paths()["scratch"]["exp"])
-    ) / "map-response-v0"
+    exp = (
+        Path(args.exp_dir)
+        if args.exp_dir
+        else Path(str(paths()["scratch"]["exp"])) / "map-response-v0"
+    )
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     corpus = Path(str(paths()["scratch"]["corpus"])) / "v0"

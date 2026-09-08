@@ -57,8 +57,15 @@ def oof_nulls(scored: object, y: npt.NDArray[np.float64]) -> dict[str, npt.NDArr
     folds = scored.folds  # type: ignore[attr-defined]
     lon, lat = scored.lon, scored.lat  # type: ignore[attr-defined]
     xa = _analogue_features(scored, null_mod.ANALOGUE_FEATURES)
-    out = {name: np.full_like(y, np.nan) for name in
-           ("climatological_mean", "geographic_address", "nearest_analogue", "shuffled_target")}
+    out = {
+        name: np.full_like(y, np.nan)
+        for name in (
+            "climatological_mean",
+            "geographic_address",
+            "nearest_analogue",
+            "shuffled_target",
+        )
+    }
     for f in np.unique(folds):
         te = folds == f
         tr = ~te
@@ -81,8 +88,12 @@ def main() -> int:
 
     report: dict[str, object] = {
         "corpus_version": args.version,
-        "split": {"kind": "blocked_spatial", "k": args.k, "block_degrees": args.block_degrees,
-                  "fold_seed": 42},
+        "split": {
+            "kind": "blocked_spatial",
+            "k": args.k,
+            "block_degrees": args.block_degrees,
+            "fold_seed": 42,
+        },
         "shuffle_seed": SHUFFLE_SEED,
     }
 
@@ -91,20 +102,26 @@ def main() -> int:
     # ---------------------------------------------------------------------------------------
     hist = load_leg("historical", args.version)
     a = assemble(hist, SCORED_CONJUNCTIVE, k=args.k, block_degrees=args.block_degrees)
-    print(f"map: {a.n} tree-bearing cells, {len(SCORED_CONJUNCTIVE)} scored quantities, "
-          f"{len(np.unique(a.folds))} folds", flush=True)
+    print(
+        f"map: {a.n} tree-bearing cells, {len(SCORED_CONJUNCTIVE)} scored quantities, "
+        f"{len(np.unique(a.folds))} folds",
+        flush=True,
+    )
 
     preds = oof_nulls(a, a.truth)
-    map_nulls = {
-        name: band_frac_conjunctive(p, a.truth, a.band) for name, p in preds.items()
-    }
+    map_nulls = {name: band_frac_conjunctive(p, a.truth, a.band) for name, p in preds.items()}
     # The CEILING, not a null: one realisation of the model, scored against the two-seed mean.
     # It always passes by construction (it sits at exactly half a band), so quoting it as a null
     # would set an unbeatable bar. It is here to say what "perfect" means on this metric.
-    seed1 = matrix(hist.seed1.filter(__import__("polars").Series(
-        (hist.seed1["stems_per_patch"].to_numpy() >= 0.5)
-        & (hist.seed2["stems_per_patch"].to_numpy() >= 0.5)
-    )), SCORED_CONJUNCTIVE)
+    seed1 = matrix(
+        hist.seed1.filter(
+            __import__("polars").Series(
+                (hist.seed1["stems_per_patch"].to_numpy() >= 0.5)
+                & (hist.seed2["stems_per_patch"].to_numpy() >= 0.5)
+            )
+        ),
+        SCORED_CONJUNCTIVE,
+    )
     ceiling = band_frac_conjunctive(seed1, a.truth, a.band)
 
     report["map"] = {
@@ -132,8 +149,11 @@ def main() -> int:
     base, _future, delta = response_pair(
         hist, ssp, RESPONSE_QUANTITIES, k=args.k, block_degrees=args.block_degrees
     )
-    print(f"\nresponse: {base.n} cells tree-bearing in both legs, "
-          f"{len(RESPONSE_QUANTITIES)} quantities", flush=True)
+    print(
+        f"\nresponse: {base.n} cells tree-bearing in both legs, "
+        f"{len(RESPONSE_QUANTITIES)} quantities",
+        flush=True,
+    )
 
     dpred = oof_nulls(base, delta)
     resp_nulls: dict[str, float] = {
@@ -157,9 +177,11 @@ def main() -> int:
             for j, q in enumerate(RESPONSE_QUANTITIES)
         },
         "per_quantity_no_response": dict(
-            zip(RESPONSE_QUANTITIES,
+            zip(
+                RESPONSE_QUANTITIES,
                 [float(v) for v in skill_vs_no_change(np.zeros_like(delta), delta)],
-                strict=True)
+                strict=True,
+            )
         ),
     }
     print("\nExperiment B -- skill_response_mean of each null:")
@@ -167,8 +189,10 @@ def main() -> int:
         print(f"  {name:30s} {v:+.6f}")
     print("\ntrue change, per quantity (historical 1999 -> ssp370 2100):")
     for q, s in report["response"]["true_delta_summary"].items():  # type: ignore[index]
-        print(f"  {q:18s} mean {s['mean']:+11.4g}  sd {s['sd']:11.4g}  "
-              f"on a level of {s['base_mean']:11.4g}  ({s['frac_positive'] * 100:.1f} % rise)")
+        print(
+            f"  {q:18s} mean {s['mean']:+11.4g}  sd {s['sd']:11.4g}  "
+            f"on a level of {s['base_mean']:11.4g}  ({s['frac_positive'] * 100:.1f} % rise)"
+        )
 
     if args.out:
         dest = Path(args.out)
