@@ -6,72 +6,83 @@
 
 ## Scope
 
-Everything that learns or predicts:
-
-* `src/vegemu/models/`, `src/vegemu/train/`, `scripts/train_*.py`, `scripts/sbatch_train.sh`
-* the state-synthesis side of the restart file: given a predicted roster and soil carbon, fill in
-  what is DERIVED (per-tree carbon pools from the pipe model, the climate buffer straight from the
-  forcing, the sapling pool from the roster) — line D owns the *bytes*, line T owns the *content*
-* inference: turning a climate summary into a state, and a state into an emitted restart file
-
-Not line T's: the binary formats and the corpus (D), pre-registrations and verdicts (X).
+Everything that learns or predicts: `src/vegemu/models/`, `scripts/train_*.py`, and the content
+side of state synthesis — given a predicted roster and soil carbon, produce a valid restart record.
+Line D owns the bytes; line T owns what goes in them. Not line T's: the formats and the corpus (D),
+pre-registrations and verdicts (X).
 
 ## NEXT — start here
 
-**You are blocked on line D's rung 0 (the restart round-trip) and on the pilot corpus. Do not start
-building a model against data that does not exist yet.** What is genuinely useful now, in order:
+**A working emulator exists, it is scored against every null, and it emits a state file the real
+LPJmL-FIT loads and runs.** Two pre-registered experiments came back FAIL. Read
+`experiments/*/verdict.md` and the two decision records below before changing anything.
 
-**1. Read the two documents that decide the architecture, and write down what they imply.**
-`docs/reference/inherited.md` — especially §2 (the identification limit), §3 (the one piece of
-positive evidence, which is for *our* estimand), and §4's paragraph on the per-tree bad-years
-counter. Then `PLAN.md`'s model-class section. The load-bearing constraints:
+**Where it stands, in numbers:**
 
-* the target is a **joint distribution over a variable-length roster** in
-  (trait × size × age × growth-failure-class) space, not a per-cell mean;
-* the correct target is the **ensemble expectation/distribution**, because ~2.4 % of next-year count
-  variance is the model's own per-patch Bernoulli noise and a single-draw R² barely discriminates
-  arms — so no arm may be guarded on an R² floor alone;
-* a state summary that averages away the per-tree bad-years counter **reverses the trait-selection
-  sign in 3–4 of the 7 tree types**. Whatever you build must be able to carry it, and it is exactly
-  recoverable from the printed table by algebra, so labels for it exist today.
+* **Level map:** 0.0361 of held-out cells inside the acceptance band on all 22 quantities at once,
+  against 0.0212 for the climatically nearest analogue and 0.0187 for the nearest cell — it beats
+  every null by 1.7×, but the pre-registered gate wanted a margin of 0.050 and it delivered 0.0149.
+  Per quantity it is much better than that number suggests: 41–100 % of cells inside the band, and
+  the distribution of "how many of the 22 hit" peaks at 17–18. The 3.6 % is the conjunction.
+* **Warming response:** **−0.727** against 0.000 for predicting no change. Stem count carries real
+  skill (+0.35) and leaf area some (+0.10); soil carbon is four times worse than nothing.
+* **The emitted restart file:** loads and runs (`-DSAFE` included), but its vegetation carbon is
+  2,561 against the control's 5,035 gC/m² — a median relative difference of 0.534.
 
-**2. Write the baseline that can pass rung 1 cheaply.** Start with the size-structured distribution
-head (integral-projection style: a learned kernel over size and trait plus a recruitment boundary
-term) rather than the set network. Reasons: it is interpretable, it is the canonical published form
-of exactly this question, and rung 1 is a *kill test* — it needs the cheapest honest model, not the
-best one. The permutation-equivariant set network with a stochastic per-tree head (binomial-survival
-/ Poisson-birth, conservative by construction) is the target architecture, not the first one.
+**Next, in order, cheapest first:**
 
-**3. Set up the GPU path and prove it, before you need it.** `scripts/sbatch_train.sh` does not exist
-yet — write it as a sibling of `scripts/sbatch_py.sh` (copy its four traps verbatim: self-location,
-the env-forward list and its mirror trap, the `/tmp` refusal, the partition envelope) plus
-`--gres=gpu:1` and a `gpu*` QOS. Checkpoint to `/p/tmp/jamirp/vegemu/models` every N steps: a job that
-dies mid-epoch must not lose the run. Then submit a two-minute job that just prints the visible
-device, so the path is proven while it is cheap to debug.
+1. **Add `agb` to `MATCH_TRAITS` in `src/vegemu/models/synth.py`.** This is the highest
+   value-per-minute item in the repo. The emulator predicts above-ground biomass to 12 % on the
+   test block, so the halved carbon is entirely a synthesis fault: donors are matched on height and
+   wood density, and a stem with the right height and density can still carry the wrong mass.
+   Verify with a 20-cell one-year subset run, which costs 8 seconds.
+   Record: `docs/decisions/20260908-T-restart-loads-but-carbon-is-halved.md`.
+2. **Widen the donor pool.** It is 6,745 stems from 10 cells. `pool_shortfall` is already reported
+   per cell, so the ceiling this imposes is measurable rather than hypothetical.
+3. **Do NOT tune the current model to chase the map gate.** The pre-registration is sealed; a
+   changed model is a new `exp_id`. Retuning against a held-out score you have already seen turns
+   the reported number into a selected maximum, which is a subtler form of the same mistake as
+   reporting a skill without its null.
+4. **The response model must predict the CHANGE directly, and is blocked on line D's pilot
+   corpus.** The current architecture obtains a response by DIFFERENCING two level predictions,
+   which only works where the true change is large compared with the level error — that is the
+   whole −0.727, and it is arithmetic rather than a hyperparameter.
+   `docs/decisions/20260908-X-response-fails-on-one-climate-per-place.md`.
+5. **T1, the GPU path, is still not built** and is still unblocked. It was not needed: the current
+   model is gradient-boosted trees on 16 CPU cores and fits in ~4 minutes. Build
+   `scripts/sbatch_train.sh` when a model actually needs a GPU, not before.
 
-⚠ Anything you score is an experiment and needs a sealed pre-registration first — the launcher
-refuses without `--exp`, and the slurm guard denies a training submission that omits it. That is
-deliberate: five of the predecessor's headline claims died to a missing null.
+⚠ `origin` points at the predecessor's GitHub repository and shares no ancestor with this history,
+so nothing has been pushed; everything is merged into LOCAL `main`. Owner decision needed.
 
-Housekeeping: none owed. Refresh this block before you end.
+Housekeeping: none owed. Every campaign in `campaigns/T/ledger.jsonl` is harvested.
 
 ## Milestones
 
-**T0 — read the constraints, write the baseline spec (OPEN).** No code required. Output: a short
-design note in `journal/T/` naming the estimand, the state content, and what the baseline cannot do.
+**T0 — the constraints, and the baseline spec. DONE**, in the module docstrings rather than a
+separate note: `src/vegemu/models/emulator.py` states why a per-quantity boosted head is the right
+FIRST model and what it cannot do (marginal quantiles predicted independently; no stochastic
+per-stem head, which is correct on purpose because the target is the ensemble expectation).
 
-**T1 — the GPU launch path (OPEN, independent of D).** `scripts/sbatch_train.sh` + a proven
-two-minute job. Do this early; it is the only thing here not blocked on the corpus.
+**T1 — the GPU launch path (OPEN, still unblocked, still not needed).**
 
-**T2 — the rung-1 baseline (blocked on D2, the pilot corpus).** Predict per-cell equilibrium tree
-count and trait medians from a climate summary. Its job is to be beaten by, or to beat, the
-same-cell-baseline null — nothing more.
+**T2 — the level model. DONE and scored.** See NEXT.
 
-**T3 — the roster model (blocked on T2).** The set network with a stochastic per-tree head.
+**T3 — the roster model (set network with a stochastic per-tree head).** Blocked on nothing
+technical, but pointless before the pilot corpus: the joint trait dependence it would add is not
+what either failure is about.
 
-**T4 — state synthesis (blocked on D0 + T3).** Fill a template restart with a predicted roster; the
-classification of every field into learned / derived / copied / relaxed / free is in `PLAN.md`.
+**T4 — state synthesis. DONE to t2 on the ladder** (format round-trip, config pre-flight, the C
+loads and runs a year), FAILING at t4 (the state distribution). t3 and t5 are not worth running
+until item 1 above is done.
 
 ## Line T gotchas
 
-*(none yet)*
+* **Fit ONE model and apply it to both climates** when scoring a response. Fitting twice lets the
+  fitting noise leak into the difference, which is the quantity under test — `fit_out_of_fold`
+  takes a LIST of feature matrices for exactly this reason.
+* **Log-transform the strictly positive stock targets.** The acceptance band is relative, so a
+  squared error on the raw scale would spend nearly all its attention on the wet tropics.
+* `k_root` comes out at 1.000 inside the band for all three of its quantiles — it is nearly
+  constant across the domain, so it contributes nothing to the conjunctive test either way. Worth
+  disclosing whenever the 22-quantity number is quoted.
