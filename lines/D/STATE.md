@@ -13,49 +13,63 @@ pre-registrations and verdicts (X).
 
 ## NEXT — start here
 
-**Rung 0 is DONE and merged.** Both binary formats round-trip byte-identically against real files
-(100 restart cells spanning 360 KB to 3.5 MB; two whole `.clm` inputs entire; the 11.7 GB forcing
-files piecewise). Spec: `docs/reference/binfmt.md`. Corpus v0 is at `scratch.corpus/v0` with
-`corpus_sha256 d1230d0b…`, covering all three legs and both seeds; two experiments are sealed
-against that hash.
+**D1 is DONE.** The `.clm` writer now writes PERTURBED files, the real model reads them, and the
+state moves far beyond the model's own noise. Design, ranges and every disclosure:
+`docs/decisions/20260908-D-perturbation-design.md`. Format rules: `docs/reference/binfmt.md` §3–4.
 
-**Two measurements changed the plan, both already recorded:**
+Built and proved: a five-axis delta-change design (`vegemu.corpus.perturb`) whose per-cell seasonal
+*shapes* come from a within-leg climate-model contrast and whose coefficients are free; relative
+humidity held EXACTLY fixed under the model's own definition; a **one-cell `.clm` is legal and
+44 KB**, so the pilot corpus is ~1.3 GB not ~450 GB; and a **neutral design point is byte-identical
+to the source slice** on all five real variables — invariant 7, as a test. 30 spin-ups of 1000
+years ran, 25 of them in one 6-minute job.
 
-* **The 1000-year spin-up has NOT converged** — 890 Pg C at year 1000 against 735 at year 500,
-  still rising at +6.5 %/century, both seeds agreeing to 0.07 %. So the hoped-for 3.3× cut to every
-  corpus budget is refuted, and "equilibrium" is the wrong word for the target: it is the state the
-  standard spin-up protocol reaches. `docs/decisions/20260908-D-spinup-is-not-converged.md`.
-* **The noise floor, measured:** the two-seed spread of end-of-spin-up vegetation carbon is 3.41 %
-  at the median, 13.6 % at p90, 42.4 % at p99 across 61,700 vegetated cells. The 10 % floor binds
-  in most cells; the two-seed term binds in the tail.
+**The direction result, honestly: three of five cells match the expectation written down before the
+runs, two do not.** At +4 K vs each cell's own control, stable across 30/100/300-year windows:
+boreal Siberia −14…−33 % (expected up); Hainich −4…−19 % (unpredicted); Iberia −53…−64 % and
+monotone (expected down); **Sahel +48…+53 %** (expected down); **Amazon −97 %, forest never
+establishes** (expected down).
+
+⚠ **This is not our design doing it.** An attribution arm warmed the same +4 K but left humidity
+alone, so relative humidity fell instead of holding: the answer moves 1–2 points at four of five
+cells (−32.5→−31.0 boreal, −52.7→−51.4 Iberia, −187→−187 Amazon). The responses are LPJmL-FIT's own.
+
+**Two results nobody has explained, and line X needs them before rung 1:**
+
+1. **The Amazon is non-monotone**: −36 % at +2 K, −97 % at +4 K (flat and dead from year one,
+   667 gC/m²), back to ~35 % of control at +6 K. The three forcing files differ ONLY in the
+   temperature increment (29.2 / 31.2 / 33.2 °C, everything else identical) and the +6 K run
+   provably opened the +6 K file — so it is the model, not a wiring error.
+2. **The Sahel gains carbon**, and its arms are on different transients: the control still climbs
+   at year 1000 (303 → 953 gC/m² over the ten 100-year blocks) while +4 K peaked early and falls
+   (1706 → 1636). At year 1000 we compare two states each still moving — the non-converged spin-up.
 
 **Next, in order:**
 
-1. **D1 — the `.clm` writer round-trips but has never written a PERTURBED file.** That is the next
-   real step and nothing blocks it. Build the delta-change perturbation design (the five axes in
-   `PLAN.md`, relative humidity held fixed under warming, constant CO₂ always) and generate ONE
-   perturbed 30-year forcing set for a handful of cells. Then run the C model on it and confirm the
-   state moves in the expected direction. A perturbed file the model reads without complaint is the
-   whole of D1.
-2. **D2 — the pilot corpus, now MANDATORY rather than an optimisation.** The kill test failed on
-   existing data precisely because it holds one climate per location, so 200 cells × 30 climates ×
-   1000 years is the only identified path to a warming response
-   (`docs/decisions/20260908-X-response-fails-on-one-climate-per-place.md`). Budget unchanged at
-   ~670 core-hours; the spin-up cannot be shortened.
-   ⚠ Build every run config with `scripts/corpus_cmodel_config.py`, which patches the ground
-   truth's own saved configuration and ASSERTS every replacement. A fresh config would be a second,
-   unvalidated configuration whose differences from the truth nobody has enumerated. That assertion
-   already fired once, on the one key with a trailing comment and no comma.
+1. **D2 — the pilot corpus. Nothing blocks it**, and every piece it needs now exists and is proven:
+   `pilot_design(30)`, `corpus_perturb_clm.py`, `corpus_spinup_config.py`, and the `--manifest`
+   task farm. 6,000 single-cell spin-ups at ~6 min each, ~670 core-hours, ~1.3 GB of forcing.
+   ⚠ Split the manifests: `priority` is capped at 64 CPU per job.
+   ⚠ Build every config with the two patching scripts, which start from the ground truth's own
+   saved configuration and ASSERT every replacement. A fresh config would be a second, unvalidated
+   configuration whose differences from the truth nobody has enumerated.
+2. **Hand the two unexplained results to line X** before it pre-registers rung 1. A bioclimatic
+   cliff and a non-monotone response change what "beats the same-cell baseline" has to mean.
 3. **A cheap fix already scoped:** the emitted restart file loads and runs in the real model but
    carries about half the right carbon, because donors are matched on height and wood density only.
-   The change is line T's; line D owns the verification run, and a 20-cell one-year subset run
-   costs 8 seconds.
+   The change is line T's; line D owns the verification run, and a 20-cell one-year run costs 8 s.
 
 ⚠ **`origin` points at the PREDECESSOR's GitHub repository** (`rimajj/LPJFIT_Emulator`) and shares
 no common ancestor with this history, so `tools/merge.sh` cannot run and nothing has been pushed.
 Every line is merged into LOCAL `main`. This needs an owner decision before any line pushes.
 
-Housekeeping: none owed. Every campaign in `campaigns/D/ledger.jsonl` is harvested.
+⚠ **`D-corpus-v0` and `D-d1-spinup2` cannot be closed from a line session — a hook bug, not stale
+jobs.** Both are verified complete. But `slurm-guard.sh` denies any command holding a `.py` *and* a
+word like `corpus`/`spinup`, which every `campaigns.py harvest --tag D-corpus-v0` does, and its
+escape hatch does not work: it tests the HOOK's environment for `ALLOW_LOGIN_HEAVY`, so the
+documented `ALLOW_LOGIN_HEAVY=1 <cmd>` prefix never reaches it. `.claude/hooks/**` is
+integrator-owned. Ask for either fix, then run the two `harvest --exit 0` calls; `--check` passes
+meanwhile. Everything else in `campaigns/D/ledger.jsonl` is harvested or closed.
 
 ## INBOUND from line INT (2026-09-08) — ruff format has never been run on 4 of your files; the lint gate would be red
 
@@ -92,9 +106,11 @@ above the per-tree writer's 5 m cut, against ~47 % measured independently in the
 (the byte-exact control arm). A 20-cell one-year run from the real restart completes in 8 seconds
 and prints the model's own completion line.
 
-**D1 — the perturbed `.clm` writer (OPEN, unblocked).** See NEXT.
+**D1 — the perturbed `.clm` writer. DONE.** See NEXT. `src/vegemu/corpus/perturb.py`,
+`scripts/corpus_perturb_clm.py`, `scripts/corpus_spinup_config.py`, `scripts/corpus_d1_forcing.py`,
+`scripts/corpus_d1_direction.py`; `tests/test_perturb.py` is 40 tests including the byte identity.
 
-**D2 — the pilot corpus (OPEN, blocked on D1).** 200 cells × 30 climates.
+**D2 — the pilot corpus (OPEN, unblocked).** 200 cells × 30 climates.
 
 **D3 — provenance. PARTLY DONE.** Every corpus table ships a `provenance.json` with each source
 file's size, mtime and decoded header, plus the `corpus_sha256` a pre-registration cites.
@@ -111,3 +127,7 @@ file's size, mtime and decoded header, plus the `corpus_sha256` a pre-registrati
   ledger row as the harvest command.
 * The `.clm` size check the C only warns about (`WARNING032`) is a hard refusal here: a size
   mismatch means the dtype or the year count is wrong and every value read is silently shifted.
+* **`srun` forwards its stdin to the task**, and inside `while read … done < manifest` that stdin
+  IS the manifest. It swallowed 18 of 25 lines: seven members ran, eighteen never started, the job
+  exited 0 and the log said "7 of 7" because the counter came from the same starved loop. Redirect
+  the member from `/dev/null`, and take the expected count straight off the file.
