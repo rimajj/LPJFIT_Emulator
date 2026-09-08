@@ -7,81 +7,83 @@
 ## Scope
 
 Everything that reads or writes LPJmL-FIT's own file formats, and the corpus that comes out of them:
-
-* the **restart-file** reader and writer (`src/vegemu/binfmt/`) — the project's central deliverable
-* the `.clm` forcing reader and **writer** (the writer is what makes a perturbed climate possible)
-* the NetCDF and per-tree-table output writers
-* corpus generation: the perturbation design, the spin-up campaigns, provenance
-* `scripts/corpus_*.py`, `scripts/sbatch_cmodel.sh`
-
-Not line D's: models and training (T), pre-registrations and verdicts (X).
+the restart reader/writer, the `.clm` reader/writer, the output writers, corpus generation, the
+perturbation design, the spin-up campaigns, provenance. Not line D's: models and training (T),
+pre-registrations and verdicts (X).
 
 ## NEXT — start here
 
-**Rung 0. Nothing else in the project can proceed until this passes, and it needs no model, no
-science and no cluster job. Read `PLAN.md` and `docs/reference/inherited.md` §4 first.**
+**Rung 0 is DONE and merged.** Both binary formats round-trip byte-identically against real files
+(100 restart cells spanning 360 KB to 3.5 MB; two whole `.clm` inputs entire; the 11.7 GB forcing
+files piecewise). Spec: `docs/reference/binfmt.md`. Corpus v0 is at `scratch.corpus/v0` with
+`corpus_sha256 d1230d0b…`, covering all three legs and both seeds; two experiments are sealed
+against that hash.
 
-**The task: round-trip a real LPJmL-FIT restart file byte-identically.** Read one cell out of the
-real 119 GiB file, write it back, `cmp`. Then 100 cells spanning the size range.
+**Two measurements changed the plan, both already recorded:**
 
-```
-target  config/paths.yaml -> ground_truth.restart_spinup_end        (restart_1999.lpj, 119 GiB)
-build   src/vegemu/binfmt/restart.py   +  docs/reference/binfmt.md  +  tests/test_restart_roundtrip.py
-```
+* **The 1000-year spin-up has NOT converged** — 890 Pg C at year 1000 against 735 at year 500,
+  still rising at +6.5 %/century, both seeds agreeing to 0.07 %. So the hoped-for 3.3× cut to every
+  corpus budget is refuted, and "equilibrium" is the wrong word for the target: it is the state the
+  standard spin-up protocol reaches. `docs/decisions/20260908-D-spinup-is-not-converged.md`.
+* **The noise floor, measured:** the two-seed spread of end-of-spin-up vegetation carbon is 3.41 %
+  at the median, 13.6 % at p90, 42.4 % at p99 across 61,700 vegetated cells. The 10 % floor binds
+  in most cells; the two-seed term binds in the tail.
 
-The format is already fully reverse-engineered and verified against that file — **the spec is in the
-approved plan, transcribed into `docs/reference/binfmt.md` as your first act.** Key points:
+**Next, in order:**
 
-* magic `"LPJRESTART"`, version **33**, `Real` = float64, `Bool` = int32, little-endian native
-* a 40-byte generic header, then a 30-byte restart header **whose disk order differs from the C
-  struct declaration order**, then `int64[ncell]` of **absolute byte offsets**, then the cell records
-* per cell: 25 patches, each a 23-layer soil block + a litter list + a PFT list in which — because
-  this configuration runs `individual: true` — **every single tree is its own 554-byte PFT entry**;
-  then a 20-year climate buffer (containing *variable-length* ring buffers), then the sapling pool
-* measured sizes: min 360,183 B (a vegetation-free cell), median 2,216,864, max 3,546,287
+1. **D1 — the `.clm` writer round-trips but has never written a PERTURBED file.** That is the next
+   real step and nothing blocks it. Build the delta-change perturbation design (the five axes in
+   `PLAN.md`, relative humidity held fixed under warming, constant CO₂ always) and generate ONE
+   perturbed 30-year forcing set for a handful of cells. Then run the C model on it and confirm the
+   state moves in the expected direction. A perturbed file the model reads without complaint is the
+   whole of D1.
+2. **D2 — the pilot corpus, now MANDATORY rather than an optimisation.** The kill test failed on
+   existing data precisely because it holds one climate per location, so 200 cells × 30 climates ×
+   1000 years is the only identified path to a warming response
+   (`docs/decisions/20260908-X-response-fails-on-one-climate-per-place.md`). Budget unchanged at
+   ~670 core-hours; the spin-up cannot be shortened.
+   ⚠ Build every run config with `scripts/corpus_cmodel_config.py`, which patches the ground
+   truth's own saved configuration and ASSERTS every replacement. A fresh config would be a second,
+   unvalidated configuration whose differences from the truth nobody has enumerated. That assertion
+   already fired once, on the one key with a trailing comment and no comma.
+3. **A cheap fix already scoped:** the emitted restart file loads and runs in the real model but
+   carries about half the right carbon, because donors are matched on height and wood density only.
+   The change is line T's; line D owns the verification run, and a 20-cell one-year subset run
+   costs 8 seconds.
 
-**Do it in this order, and stop at the first thing that fails:**
+⚠ **`origin` points at the PREDECESSOR's GitHub repository** (`rimajj/LPJFIT_Emulator`) and shares
+no common ancestor with this history, so `tools/merge.sh` cannot run and nothing has been pushed.
+Every line is merged into LOCAL `main`. This needs an owner decision before any line pushes.
 
-1. Header only. Decode the 84-byte prefix and the index array; assert `index[0] == 84 + 8*ncell` and
-   `ncell == 67420`, `nbands == 22`, `individual == 1`, `datatype == 4`. Cheap, and it validates the
-   whole framing before you touch a record.
-2. One cell, read → write → `cmp`. Use the index to seek; never scan.
-3. 100 cells across the size range. A vegetation-free cell and the densest cell exercise different
-   branches (empty PFT list; a long one).
-4. A property-based round-trip over *synthetic* records (`hypothesis`) for the variable-length parts —
-   the ring buffers and the tree list are where an off-by-one hides. Mark the real-file tests
-   `needs_real_data` so the suite still runs where `/p` is not mounted.
-
-**Two measurements to take while you are in there**, both cheap and both change the corpus budget:
-
-* the **real per-spin-up cost**, so `PLAN.md`'s 0.4 core-s/cell-year assumption stops being an
-  assumption;
-* the **actual convergence time of the spin-up**, from `ground_truth.spinup_trajectory_seed1`
-  (`vegc_spinup_1999.nc`, a 1000-step global vegetation-carbon trajectory that is recorded in no
-  predecessor document). If the forest is stationary well before 1000 years, every corpus tier in
-  `PLAN.md` drops proportionally. This is the single highest-leverage number available right now.
-
-**Do not** start the `.clm` writer, the perturbation design or any corpus run until the round-trip
-passes. A corpus generated before the format is proven is a corpus that has to be regenerated.
-
-Housekeeping: none owed — the line was bootstrapped complete. Refresh this block before you end;
-a `Stop` hook blocks once if you commit without it.
+Housekeeping: none owed. Every campaign in `campaigns/D/ledger.jsonl` is harvested.
 
 ## Milestones
 
-**D0 — restart-file round-trip (OPEN, not started).** The gate above. Blocks everything.
+**D0 — restart-file round-trip. DONE**, and the `.clm` reader/writer with it. The per-stem field map
+is cross-checked against a number this repo did not produce: `height` puts 51.4 % of Hainich's stems
+above the per-tree writer's 5 m cut, against ~47 % measured independently in the predecessor.
 
-**D1 — the `.clm` writer (blocked on D0).** Mirror of the header-driven reader. Round-trip every real
-input file byte-identically before generating a single perturbed one; the format is version-dependent
-and the scenario set is mixed (see `docs/reference/inherited.md` §4).
+**D0b — the C-model launch path. DONE.** `scripts/sbatch_cmodel.sh` (pre-flight and run),
+`scripts/corpus_cmodel_config.py` (asserted config patching), `scripts/corpus_restart_subset.py`
+(the byte-exact control arm). A 20-cell one-year run from the real restart completes in 8 seconds
+and prints the model's own completion line.
 
-**D2 — the perturbation design and the pilot corpus (blocked on D1).** 200 cells × 30 climates,
-~670 core-hours. Delta-change directions calibrated on the real scenario legs; relative humidity held
-fixed under warming; constant CO₂ always. Cells stratified by the ~161 independent 15° tiles.
+**D1 — the perturbed `.clm` writer (OPEN, unblocked).** See NEXT.
 
-**D3 — provenance.** Per-shard `provenance.json` incl. the C binary's build date, and the corpus
-manifest hash that a pre-registration cites. A corpus is immutable once cited.
+**D2 — the pilot corpus (OPEN, blocked on D1).** 200 cells × 30 climates.
+
+**D3 — provenance. PARTLY DONE.** Every corpus table ships a `provenance.json` with each source
+file's size, mtime and decoded header, plus the `corpus_sha256` a pre-registration cites.
 
 ## Line D gotchas
 
-*(none yet — add them here, or promote a procedure to a skill)*
+* **A byte-identical round-trip validates a LAYOUT, not a CROSS-REFERENCE.** The last byte of a PFT
+  entry is an index into that patch's litter list; it is self-consistent inside any one record, so a
+  round-trip cannot see it, and it breaks only when a stem moves between patches. The only test that
+  found it was running the real model. Any field that indexes into another part of the same record
+  needs its own check.
+* **Never judge a C run by its exit code**; require the model's own line `lpjml successfully
+  terminated, <n> grid cells processed.` in a non-empty log. The wrapper writes that grep into the
+  ledger row as the harvest command.
+* The `.clm` size check the C only warns about (`WARNING032`) is a hard refusal here: a size
+  mismatch means the dtype or the year count is wrong and every value read is silently shifted.
