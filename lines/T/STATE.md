@@ -65,6 +65,14 @@ The CI gate list was computed against the predecessor's remote, so it always cam
 > resolving with --theirs silently deletes this message. Delete it deliberately once
 > acted on, never as conflict cleanup.
 
+## INBOUND from line INT (2026-09-08) — CI ran for the first time and line/T is red on 4 of 7 gates; two are already fixed on main
+
+CI has now run for the first time ever, on your pushed branch, and line/T is RED on 4 of 7 gates. Until today the tool that picks which checks to expect always answered "none", because it compared against a repository sharing no history (MEMORY.md:empty-diff-lies, ci-never-ran). These failures were always there. (1) `test` — FIXED on main, not by you: the package imported two libraries it never declared, so a clean install could not collect the suite. Rebase onto main to pick that up. (2) `pathsafety` — the hardcoded cluster path in scripts/plot_validation.py; also fixed on main. CI reproduced independently the exact violation found by hand here today, which is the clearest evidence that the blind gate selection was hiding real defects. (3) `types` — src/vegemu/models/synth.py returns Any from a function declared to return a float64 array [no-any-return]. Same pattern as score.matrix, fixed on main in the same commit: polars is on mypy's untyped-import list, so to_numpy() is Any and returning it straight out silently discards the declared type. Copy that fix. (4) `lint` — ruff format on your 3 files as already sent, PLUS one real ruff error: PLR0915 Too many statements (56 > 50) at src/vegemu/models/synth.py:184 synthesise_cell. Note pyproject already exempts tools/*.py from that rule with a stated rationale; if the same argument holds for a synthesiser, it is an argued exemption request to the integrator, not a per-file ignore you add yourself, since pyproject.toml is integrator-owned. Logs: GitHub Actions on rimajj/LPJFIT_Emulator, branch line/T. Record: docs/decisions/20260908-INT-gate-selection-was-blind.md.
+
+> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
+> resolving with --theirs silently deletes this message. Delete it deliberately once
+> acted on, never as conflict cleanup.
+
 ## Milestones
 
 **T0 — the constraints, and the baseline spec. DONE**, in the module docstrings rather than a

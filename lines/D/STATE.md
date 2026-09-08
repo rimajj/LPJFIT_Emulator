@@ -65,6 +65,14 @@ The CI gate list was computed against the predecessor's remote, so it always cam
 > resolving with --theirs silently deletes this message. Delete it deliberately once
 > acted on, never as conflict cleanup.
 
+## INBOUND from line INT (2026-09-08) — CI ran for the first time and line/D is red: a real no-redef defect and 14 clm.py errors
+
+CI has now run for the first time ever, on your pushed branch, and line/D is RED. Until today the tool that picks which checks to expect always answered "none", because it compared against a repository sharing no history (MEMORY.md:empty-diff-lies, ci-never-ran). These failures were always there. Ranked by what they mean, not by gate: (1) `types` — src/vegemu/corpus/state.py: `Name "out" already defined on line 139` [no-redef]. That is a real defect, not a style complaint: a name is bound twice and one binding is dead. Read it before assuming mypy is being pedantic. (2) `types` — src/vegemu/binfmt/clm.py, 14 errors, all `"ClmHeader" gets multiple values for keyword argument ...` at lines 150, 153, 164, 174 (datatype, scalar, cellsize_lon, cellsize_lat, nstep, timestep). Worth looking at closely given rung 0 rests on that writer: mypy thinks a keyword can arrive twice, which is the shape of a bug that a byte-identical round-trip cannot see because it would produce a consistent-but-wrong header. (3) `lint` — ruff format on your 4 files, as already sent. Rebase onto main first: main now declares the two libraries src/ imports but never declared, without which the test gate cannot even collect the suite. Logs: GitHub Actions on rimajj/LPJFIT_Emulator, branch line/D. Record: docs/decisions/20260908-INT-gate-selection-was-blind.md.
+
+> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
+> resolving with --theirs silently deletes this message. Delete it deliberately once
+> acted on, never as conflict cleanup.
+
 ## Milestones
 
 **D0 — restart-file round-trip. DONE**, and the `.clm` reader/writer with it. The per-stem field map
