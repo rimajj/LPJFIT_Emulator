@@ -34,3 +34,5 @@
 {"event": "harvest", "exit": 0, "line": "D", "tag": "D-d1-forcing2", "ts": "2026-09-08T22:11:16Z"}
 {"event": "harvest", "exit": 0, "line": "D", "tag": "D-d1-nofixrh", "ts": "2026-09-08T22:11:16Z"}
 {"event": "harvest", "exit": 0, "line": "D", "tag": "D-d1-direction3", "ts": "2026-09-08T22:11:16Z"}
+{"array": "", "cmd": "scripts/sbatch_py.sh  D-d1-recheck scripts/corpus_d1_direction.py ", "code_commit": "21f48427ab4718ce2d46a7475802e9111ecf6126", "cpus": 1, "est_core_hours": 0.0, "event": "launch", "exp_id": "", "expect_outputs": [], "harvest_by": "", "harvest_cmd": "", "job_ids": ["2093525"], "line": "D", "log_glob": "logs/D-d1-recheck.2093525.out", "partition": "priority", "prereg_sha256": "", "sentinel": "=== JOB DONE tag=D-d1-recheck exit=", "tag": "D-d1-recheck", "ts": "2026-09-08T22:15:37Z"}
+{"event": "harvest", "exit": 0, "line": "D", "tag": "D-d1-recheck", "ts": "2026-09-08T22:16:34Z"}

@@ -258,37 +258,40 @@ def calibrate_cell(
     t_early, t_late = (_monthly(a, reduce_sum=False) for a in got["tas"])
     dtemp_m = t_late - t_early
     dtemp_ann = _day_weighted_mean(dtemp_m)
+    tshape: npt.NDArray[np.float64] = np.ones(NMONTH, dtype=np.float64)
     if abs(dtemp_ann) < MIN_CALIB_DTEMP_K:
-        tshape = np.ones(NMONTH)
         flags.append(f"tshape_flat: |dtemp_gcm|={abs(dtemp_ann):.2f}K < {MIN_CALIB_DTEMP_K}K")
     else:
-        tshape = np.clip(dtemp_m / dtemp_ann, *SHAPE_CLIP)
-        tshape = tshape / _day_weighted_mean(tshape)
+        clipped = np.clip(dtemp_m / dtemp_ann, SHAPE_CLIP[0], SHAPE_CLIP[1])
+        tshape = np.asarray(clipped / _day_weighted_mean(clipped), dtype=np.float64)
 
     p_early, p_late = (_monthly(a, reduce_sum=True) for a in got["pr"])
     ann_early, ann_late = float(p_early.sum()), float(p_late.sum())
     fprec_gcm = ann_late / ann_early if ann_early > 0 else 1.0
     frac_ann = fprec_gcm - 1.0
-    wet = base_pr_monthly > 0
-    if abs(frac_ann) < MIN_CALIB_FPREC or not wet.any():
-        pshape = np.ones(NMONTH)
+    pshape: npt.NDArray[np.float64] = np.ones(NMONTH, dtype=np.float64)
+    if abs(frac_ann) < MIN_CALIB_FPREC or float(base_pr_monthly.sum()) <= 0.0:
         flags.append(f"pshape_flat: |fprec_gcm-1|={abs(frac_ann):.3f} < {MIN_CALIB_FPREC}")
     else:
         with np.errstate(divide="ignore", invalid="ignore"):
             frac_m = np.where(p_early > 0, (p_late - p_early) / np.maximum(p_early, 1e-12), 0.0)
-        pshape = np.clip(frac_m / frac_ann, *SHAPE_CLIP)
+        clipped = np.clip(frac_m / frac_ann, SHAPE_CLIP[0], SHAPE_CLIP[1])
         # Precipitation-weighted so that pr * (1 + (fprec-1)*pshape) has annual total exactly
         # fprec x the baseline total. An unweighted normalisation would silently change the total.
-        norm = float(np.average(pshape, weights=base_pr_monthly)) if base_pr_monthly.sum() else 1.0
-        pshape = pshape / norm if abs(norm) > 1e-9 else np.ones(NMONTH)
+        norm = float(np.average(clipped, weights=base_pr_monthly))
+        if abs(norm) > 1e-9:
+            pshape = np.asarray(clipped / norm, dtype=np.float64)
+        else:
+            flags.append("pshape_flat: the precipitation-weighted normaliser came out zero")
 
     l_early, l_late = (_monthly(a, reduce_sum=False) for a in got["lwnet"])
+    lwnet_per_k: npt.NDArray[np.float64] = np.zeros(NMONTH, dtype=np.float64)
     if abs(dtemp_ann) < MIN_CALIB_DTEMP_K:
-        lwnet_per_k = np.zeros(NMONTH)
         flags.append("lwnet_tie_off: calibration warming too small to divide by")
     else:
-        lwnet_per_k = np.clip(
-            (l_late - l_early) / dtemp_ann, -LWNET_PER_K_CLIP, LWNET_PER_K_CLIP
+        lwnet_per_k = np.asarray(
+            np.clip((l_late - l_early) / dtemp_ann, -LWNET_PER_K_CLIP, LWNET_PER_K_CLIP),
+            dtype=np.float64,
         )
 
     return CellPattern(
