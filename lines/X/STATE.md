@@ -56,8 +56,11 @@ the decision rule and is the informative part.
   `..._random_seed2_from_hist_seed2`, from a third build), under a **new corpus version**: v0's hash
   is cited by two sealed pre-registrations and must not move. Make the builder **assert** that a
   leg's two run files differ, rather than recording that they do not.
-* **line D** — a `scripts/sbatch_cmodel.sh` wrapper. It is the only thing blocking the one-cell,
-  one-year, two-binary byte comparison that would close the build question outright.
+* **line D** — run the one-cell, one-year, two-binary byte comparison that would close the build
+  question outright. ⚠ The sealed pre-registration says no wrapper exists for it; that was true of
+  this 29-commit-stale worktree and FALSE of main, which already has `scripts/sbatch_cmodel.sh`.
+  Nothing blocks the test. A sealed file cannot be edited, so the correction is
+  `docs/decisions/20260908-X-build-gate-correction-the-wrapper-exists.md`.
 * **integrator** — two `MEMORY.md` rows are now wrong or incomplete; both requested wordings are in
   the two records above.
 
