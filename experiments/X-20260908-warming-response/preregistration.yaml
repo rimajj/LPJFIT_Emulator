@@ -1,0 +1,152 @@
+schema_version: 1
+
+exp_id: X-20260908-warming-response
+line: X
+
+status: sealed
+
+title: "THE KILL TEST: can the emulator predict how a cell's forest CHANGES under warming?"
+question: >
+  A model trained only on the historical leg is shown the same cell's climate twice -- 1970-1999,
+  and 2071-2100 under the high-emissions scenario -- and asked for a state each time. Does the
+  DIFFERENCE between its two answers explain more of the model's own simulated change than
+  predicting no change at all, than giving every cell the average change, and than copying the
+  change of the geographically nearest cell?
+
+  If it cannot, there is no learnable warming response and the project stops. That is the whole
+  point of putting this rung this early.
+
+estimand:
+  name: skill_response_mean
+  definition: >
+    For each of seven quantities -- stems per patch, above-ground biomass, leaf area index, soil
+    carbon, and the medians of stem height, wood density and specific leaf area -- compute
+    1 - SUM((dpred - dtrue)^2) / SUM(dtrue^2) over the scored held-out cells, where
+    dtrue = truth(ssp370, 2100) - truth(historical, 1999) and both truths are the MEAN of that
+    leg's two seeds. The statistic is the unweighted mean of the seven. Denominator SUM(dtrue^2),
+    not the variance of dtrue: that pins the decisive null analytically at exactly 0.0 -- predicting
+    no change scores zero by construction, a perfect prediction scores 1, and a prediction
+    uncorrelated with the truth scores about -1. Unweighted so no single quantity's variance
+    dominates. A conjunctive band test is deliberately NOT used here: a relative band around a
+    change that is near zero is itself near zero, so the acceptance band is the right test for a
+    LEVEL and the wrong test for a CHANGE.
+  reference_basis: >
+    LPJmL-FIT 5.6.004. Base = restart_1999.lpj of the historical leg (spin-up plus the 1901-1999
+    transient); future = restart_2100.lpj of the ssp370 leg. Both seed 1 and seed 2, both legs
+    produced by the SAME 2026-02-05 binary build, so this pair is build-matched -- which is why
+    ssp370 and not ssp126 is the primary leg here. npatch=25, tree PFTs only, climate windows
+    1970-1999 and 2071-2100, 56,950 cells tree-bearing in BOTH legs and BOTH seeds. Constant CO2
+    throughout, by design. Dimensionless; a ratio of sums of squares, i.e. a ratio not a level.
+  units: dimensionless
+  kind: ratio
+
+data:
+  corpus: /p/tmp/jamirp/vegemu/corpus/v0
+  corpus_sha256: "d1230d0bc0f6fa84c44f62aeedc3920cc9c485a3eb3ba7a3ae6f79ef37cb5187"
+  n_rows: 56950
+
+  split:
+    # The forcing leg is held out BY CONSTRUCTION: the model is fitted on the historical leg only
+    # and never sees a warmed state, in any cell. Spatial blocking (15 deg, k=5) is applied on top,
+    # so a held-out cell is also spatially held out.
+    kind: holdout_forcing_leg
+    k: 5
+    seed: 42
+    block_degrees: [15, 5]
+
+  leakage_checks:
+    - "Training uses ONLY the historical leg's climate and state. The ssp370 state is never a training target in any fold; asserted in scripts/train_emulator.py before fitting."
+    - "The same fitted model produces both ends of the predicted change, so any constant per-cell bias cancels in the difference -- which is why this is a response test and not a level test."
+    - "Geography is held fixed by construction: the change is WITHIN a cell, so the 76.4 %-predictable-from-baseline-climate confound that made the response unidentifiable in the predecessor's data cannot operate here."
+    - "The feature set excludes lon, lat, cell id, CO2 and any state; only the geographic_address_response null sees coordinates."
+    - "Both legs' seed 1 came from the 2026-02-05 binary build, checked against the mtimes recorded in the corpus provenance.json, so the change is not a build artifact."
+    - "dtrue is a difference of two-seed MEANS, not of two single draws, so it carries one unit of realisation noise rather than two."
+
+nulls:
+  - id: no_response
+    description: >
+      Predict no change at all: dpred = 0 in every cell. THE DECISIVE NULL. This is the
+      same-cell baseline of PLAN.md rung 1, transplanted onto data that already exists -- the
+      emulator is handed a warmer climate and asked whether it does anything better than saying
+      the forest stays as it was.
+    expected:
+      statistic: skill_response_mean
+      value: 0.0
+      tolerance: 0.000001
+      derivation: >
+        ANALYTIC and exact. With dpred = 0 the numerator SUM((0 - dtrue)^2) equals the denominator
+        SUM(dtrue^2), so the statistic is 1 - 1 = 0 for every quantity and hence for their mean.
+        The statistic was chosen for exactly this property. Confirmed at 0.000000 by
+        scripts/exp_derive_nulls.py on corpus v0.
+
+  - id: mean_response
+    description: >
+      Give every held-out cell the mean change of the training folds -- "everywhere warms the same
+      way". This is the null that separates knowing the PATTERN of the response from knowing only
+      its global size.
+    expected:
+      statistic: skill_response_mean
+      value: 0.016215
+      tolerance: 0.002
+      derivation: >
+        Computed from the truth alone by scripts/exp_derive_nulls.py on corpus v0 before any model
+        was fitted. It is small because the simulated change is dominated by spatial pattern rather
+        than by a global shift: above-ground biomass changes by -194 gC/m2 on average with a
+        standard deviation of 2,059, and 56 % of cells rise while 44 % fall.
+
+  - id: geographic_address_response
+    description: >
+      Copy the change of the geographically nearest TRAINING cell. The address null, applied to the
+      response -- the arm whose 0.654 killed the predecessor's reported 0.748.
+    expected:
+      statistic: skill_response_mean
+      value: -0.142351
+      tolerance: 0.02
+      derivation: >
+        Measured from the truth and the coordinates alone on corpus v0. It is NEGATIVE, which is
+        informative: under 15-degree blocked folds the nearest available neighbour is far enough
+        away that copying its change is worse than predicting no change. That is the blocking doing
+        its job, and it is why the same null was so strong in the predecessor's randomly folded
+        setup and is weak here.
+
+  - id: shuffled_response
+    description: "The true change, permuted across held-out cells within the fold. The sanity null."
+    expected:
+      statistic: skill_response_mean
+      value: -0.912870
+      tolerance: 0.2
+      derivation: >
+        Near -1 by construction: for a permutation independent of the target,
+        SUM((dshuf - dtrue)^2) tends to 2*SUM(dtrue^2) - 2*N*mean(dtrue)^2, so the statistic tends
+        to -1 plus a small term in the squared mean. Measured at -0.912870 with permutation seed
+        20260908+fold.
+
+decision_rule:
+  statistic: skill_response_mean
+  comparator: model_minus_best_null
+  pass_if: "> 0.050"
+  arms: [model, no_response, mean_response, geographic_address_response, shuffled_response]
+  multiplicity: none
+  power_note: >
+    The best null is mean_response at 0.0162; the next is no_response at exactly 0.0, so
+    mean_response beats the rest by 0.0162, well under the 0.050 threshold, and the metric retains
+    power. If any null came to satisfy pass_if against the others the outcome MUST be `invalid`.
+    A pass therefore means the model reaches at least 0.066 -- it must explain more than a fifteenth
+    of the total squared change, having never seen a warmed forest. That threshold is set low ON
+    PURPOSE: this is a kill test, and the question is whether a learnable response exists at all,
+    not whether it is already good enough for the acceptance criterion. Passing here licenses
+    nothing about fidelity; failing here stops the project.
+    ⚠ A NEGATIVE result is a real outcome, not a bug to be debugged away. The predecessor's
+    autoregressive operator inverted the sign of the aggregate warming response (+0.707 to -0.226),
+    so a model scoring below the no-response null here would be reproducing that failure and must
+    be reported as such.
+
+compute:
+  launcher: scripts/sbatch_py.sh
+  tag: T-response-v0
+  partition: priority
+  est_core_hours: 4
+
+outputs:
+  - path: /p/tmp/jamirp/vegemu/exp/X-20260908-warming-response/metrics.json
+    kind: metrics

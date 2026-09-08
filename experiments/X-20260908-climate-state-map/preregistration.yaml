@@ -1,0 +1,143 @@
+schema_version: 1
+
+exp_id: X-20260908-climate-state-map
+line: X
+
+status: sealed
+
+title: "Can a 30-year climate summary alone reproduce LPJmL-FIT's forest state, cell by cell?"
+question: >
+  Given only a cell's 30-year climate summary -- and no knowledge of where the cell is -- can a
+  learned map put the model's own forest state inside the acceptance band on stem count AND every
+  scored trait median AND both tails of every scored trait distribution, simultaneously, in more
+  held-out cells than the geographically nearest forest or the climatically nearest analogue does?
+
+estimand:
+  name: band_frac_conjunctive
+  definition: >
+    The fraction of scored cells in which EVERY one of 22 quantities lands inside its own
+    acceptance band. The 22 are: stems per patch; above-ground biomass, leaf area index and soil
+    carbon; the median of each of wood density, specific leaf area, fine-root conductivity, the
+    95th-percentile rooting depth, leaf longevity and stem height; and the 10th and 90th percentile
+    of each of those six traits. A cell's band for a quantity is
+    max(10 %, |seed1-seed2| / |mean|) * |mean| -- the project's acceptance tolerance, i.e. ten per
+    cent or the model's own two-seed spread, whichever is larger. The truth is the MEAN of the two
+    seeds, because ~28 % of residual variance is the model's own realisation noise and the correct
+    target is therefore the ensemble expectation, not a single draw. Aggregation is per cell,
+    unweighted, computed once over the assembled out-of-fold prediction -- every cell is held out
+    exactly once -- rather than averaged over folds, which would give a fold containing the Amazon
+    the same weight as one containing Patagonia. A NaN on either side counts as a MISS.
+  reference_basis: >
+    LPJmL-FIT 5.6.004, historical leg, state read from restart_1999.lpj (the end of the 1000-year
+    spin-up plus the 1901-1999 historical transient -- NOT a converged equilibrium, see
+    docs/decisions/20260908-D-spinup-is-not-converged.md), npatch=25, tree PFTs only, climate
+    window 1970-1999, truth = mean of random_seed1 and random_seed2, both produced by the
+    2026-02-05 LPJmL-FIT binary build, 56,950 cells that are tree-bearing (>= 0.5 stems per patch)
+    in BOTH seeds out of 67,420. Dimensionless fraction.
+  units: dimensionless
+  kind: level
+
+data:
+  corpus: /p/tmp/jamirp/vegemu/corpus/v0
+  corpus_sha256: "d1230d0bc0f6fa84c44f62aeedc3920cc9c485a3eb3ba7a3ae6f79ef37cb5187"
+  n_rows: 56950
+
+  split:
+    kind: blocked_spatial
+    k: 5
+    seed: 42
+    # 15 degrees primary. The effective independent spatial sample is ~161 populated 15x15 deg
+    # tiles, NOT 56,950 cells, so random folds by cell would turn this into a spatial-interpolation
+    # score. 5 degrees is the pre-declared sensitivity check; it is reported, never substituted.
+    block_degrees: [15, 5]
+
+  leakage_checks:
+    - "The feature set is exactly climate.CLIMATE_FEATURES: no lon, no lat, no cell id, no CO2, no state."
+    - "Latitude and longitude are stored in the table but excluded from the feature matrix in dataset.assemble; the geographic_address null is the only arm that sees them."
+    - "No lagged or initial state: the corpus has one state per leg, so there is nothing to lag. `rg 'shift\\(|_prev|_init|lag' src/vegemu/corpus src/vegemu/dataset.py` reviewed, no hits."
+    - "Folds are assigned from whole spatial blocks and the assertion that no test cell's block appears in training is checked in tests/test_folds.py."
+    - "The nearest-analogue and nearest-geographic nulls standardise on the TRAINING fold's own mean and spread, so the held-out block's distribution does not leak into them."
+    - "The band is derived from the two seeds of the SAME leg being scored; the resulting circularity is disclosed in the estimand and is why the single-realisation arm is reported as a ceiling and not as a null."
+
+nulls:
+  - id: nearest_analogue
+    description: >
+      Copy the state of the climatically nearest TRAINING cell -- the space-for-time null, and the
+      honest competitor. Distance is Euclidean over eight standardised climate variables
+      (annual mean temperature, annual precipitation, coldest- and warmest-month temperature,
+      growing-degree days above 5 C, precipitation seasonality, vapour-pressure deficit, and the
+      precipitation-to-radiation ratio), fixed in advance in nulls.ANALOGUE_FEATURES.
+    expected:
+      statistic: band_frac_conjunctive
+      value: 0.021247
+      tolerance: 0.001
+      derivation: >
+        Computed from the truth alone by scripts/exp_derive_nulls.py against corpus v0 before any
+        model was fitted; no learner is involved, so the value is a deterministic function of the
+        corpus and the fold assignment. Output: /p/tmp/jamirp/vegemu/exp/derive-v0/derived_nulls.json.
+        The tolerance is tight because the computation is exactly reproducible; a departure means
+        the fold assignment, the cell set or the band changed, which is precisely what this check
+        is for.
+
+  - id: geographic_address
+    description: >
+      Copy the state of the geographically nearest TRAINING cell. This is the null that killed the
+      predecessor's headline warming-response claim, in its strongest form: a spatial nearest
+      neighbour rather than a regression on latitude and longitude, because a weak null is worse
+      than no null. Under 15-degree blocked folds the nearest training cell is necessarily outside
+      the held-out block.
+    expected:
+      statistic: band_frac_conjunctive
+      value: 0.018683
+      tolerance: 0.001
+      derivation: >
+        As above, from the truth and the coordinates alone. Deterministic given the folds.
+
+  - id: climatological_mean
+    description: "The mean state over the training folds -- the average forest, everywhere."
+    expected:
+      statistic: band_frac_conjunctive
+      value: 0.0
+      tolerance: 0.002
+      derivation: >
+        Measured at 0.000000 on corpus v0: a single global mean state cannot be inside a 10 % band
+        on 22 quantities at once in any cell. Effectively analytic given the spread of the corpus.
+
+  - id: shuffled_target
+    description: "The held-out truth permuted across cells within the fold. The sanity null."
+    expected:
+      statistic: band_frac_conjunctive
+      value: 0.00072
+      tolerance: 0.002
+      derivation: >
+        Measured at 0.000720 with permutation seed 20260908+fold. Not exactly zero because a
+        permutation occasionally lands a similar forest on a similar cell; that residual is the
+        chance rate of the metric and is what the tolerance covers.
+
+decision_rule:
+  statistic: band_frac_conjunctive
+  comparator: model_minus_best_null
+  pass_if: "> 0.050"
+  arms: [model, nearest_analogue, geographic_address, climatological_mean, shuffled_target]
+  multiplicity: none
+  power_note: >
+    The two strongest nulls are within 0.0026 of each other (0.0212 and 0.0187), so under the
+    model_minus_best_null comparator neither exceeds the 0.050 threshold against the other and the
+    metric retains power. If either null were to move far enough that it satisfies pass_if against
+    the rest, the outcome MUST be `invalid`: a metric a null also passes licenses no conclusion.
+    A margin of 0.050 over a best null of 0.021 asks the model to more than triple the best
+    reference, which is a deliberate choice -- the conjunctive band over 22 quantities is a strict
+    statistic and a small margin on it would not be worth reporting.
+    Note this is NOT an R2 and is deliberately not guarded on one: a single-draw R2 on stem counts
+    is near-saturated because the model's own per-patch Bernoulli noise is ~28 % of residual
+    variance, so it cannot discriminate arms.
+
+compute:
+  launcher: scripts/sbatch_py.sh
+  tag: T-map-v0
+  partition: priority
+  est_core_hours: 4
+
+outputs:
+  - path: /p/tmp/jamirp/vegemu/exp/X-20260908-climate-state-map/metrics.json
+    kind: metrics
