@@ -18,7 +18,7 @@ TWO BANDS, BOTH REPORTED. `own` takes the tolerance from the scored leg's own tw
 the sealed map experiment does -- circular, because those same two seeds also define the truth.
 `transferred` takes it from the HISTORICAL leg's two seeds for the same cell and quantity, which
 breaks the circle: nothing about the scored realisation pair sets its own tolerance. The transfer is
-licensed by measurement, not convenience -- the two legs' spread distributions agree to within 5 %
+licensed by measurement, not convenience -- the two legs' spread distributions agree to within 6 %
 on every summary -- and this script prints that comparison so the claim travels with the number.
 
 ⚠ BUILD PROVENANCE. The historical leg came from the 2026-02-05 LPJmL-FIT build and the ssp126 leg
@@ -165,11 +165,13 @@ def main() -> int:
             args.test_leg: spread_summary(f1, f2),
         },
     }
-    print(f"scored cells (tree-bearing in both seeds of both legs): {report['n_cells']}", flush=True)
+    print(f"scored cells, tree-bearing in both seeds of both legs: {report['n_cells']}", flush=True)
     print(f"seed pairs distinct: {report['seed_pairs_are_distinct']}")
     for leg, s in report["spread"].items():  # type: ignore[union-attr]
-        print(f"  relative two-seed spread, {leg:11s}: median {s['median']:.6f} "
-              f"p90 {s['p90']:.6f} frac>floor {s['frac_above_floor']:.4f}")
+        print(
+            f"  relative two-seed spread, {leg:11s}: median {s['median']:.6f} "
+            f"p90 {s['p90']:.6f} frac>floor {s['frac_above_floor']:.4f}"
+        )
 
     truth_future, band_own = acceptance_band_transferred(f1, f2, f1, f2)
     _, band_transferred = acceptance_band_transferred(f1, f2, h1, h2)
@@ -186,9 +188,11 @@ def main() -> int:
             "frac_cells_all_quantities": float(moved.all(axis=1).mean()),
             "mean_quantities_moved": float(moved.sum(axis=1).mean()),
         }
-        print(f"  cells whose forest moved beyond the {bname} band in >=1 of "
-              f"{len(SCORED_CONJUNCTIVE)} quantities: "
-              f"{report[f'changed_beyond_band_{bname}']['frac_cells_any_quantity']:.4f}")
+        print(
+            f"  cells whose forest moved beyond the {bname} band in >=1 of "
+            f"{len(SCORED_CONJUNCTIVE)} quantities: "
+            f"{report[f'changed_beyond_band_{bname}']['frac_cells_any_quantity']:.4f}"
+        )
 
     results: dict[str, object] = {}
     for degrees in (15.0, 5.0):
@@ -202,7 +206,9 @@ def main() -> int:
         }
         for bname, band in bands.items():
             block[bname] = {
-                "nulls": {n: band_frac_conjunctive(p, truth_future, band) for n, p in preds.items()},
+                "nulls": {
+                    n: band_frac_conjunctive(p, truth_future, band) for n, p in preds.items()
+                },
                 # The CEILING, not a null: one realisation of the model scored against the two-seed
                 # mean. Under the OWN band it sits at exactly half a band and passes by
                 # construction; under the TRANSFERRED band it does not, which is the whole reason
@@ -215,8 +221,7 @@ def main() -> int:
             print(f"\n{degrees:g} deg blocking, {bname} band -- band_frac_conjunctive:")
             for n, v in sorted(block[bname]["nulls"].items(), key=lambda kv: -kv[1]):  # type: ignore[index]
                 print(f"  {n:24s} {v:.6f}")
-            print(f"  {'(ceiling: one seed)':24s} "
-                  f"{block[bname]['single_realisation_ceiling']:.6f}")  # type: ignore[index]
+            print(f"  {'(ceiling: one seed)':24s} {block[bname]['single_realisation_ceiling']:.6f}")  # type: ignore[index]
 
         # Per-quantity pass rates for the two arms most likely to be the best null, reported beside
         # the conjunctive number and never instead of it.
@@ -229,9 +234,7 @@ def main() -> int:
     report["results"] = results
     report["floored_spread_note"] = {
         "floor": FLOOR,
-        "median_floored_relative_spread_historical": float(
-            np.median(relative_spread(h1, h2))
-        ),
+        "median_floored_relative_spread_historical": float(np.median(relative_spread(h1, h2))),
         "median_floored_relative_spread_future": float(np.median(relative_spread(f1, f2))),
     }
 

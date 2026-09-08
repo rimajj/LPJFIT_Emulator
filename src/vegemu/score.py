@@ -96,7 +96,10 @@ def relative_spread(
     denom = np.abs(mean)
     with np.errstate(divide="ignore", invalid="ignore"):
         spread = np.where(denom > 0, np.abs(seed1 - seed2) / denom, np.nan)
-    return np.maximum(floor, np.nan_to_num(spread, nan=floor))
+    # Annotated rather than returned directly: a numpy ufunc's `__call__` is typed `Any` in the
+    # stubs, so `return np.maximum(...)` defeats the declared return type under mypy `strict`.
+    out: npt.NDArray[np.float64] = np.maximum(floor, np.nan_to_num(spread, nan=floor))
+    return out
 
 
 def acceptance_band(
