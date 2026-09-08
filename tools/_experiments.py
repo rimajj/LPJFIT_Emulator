@@ -213,14 +213,22 @@ def _powerless_nulls(null_arms: list[ArmValue], rule: PassRule, comparator: str)
     A null is judged on the SAME comparator as the model, so the comparison is like for like: under
     `model_absolute` that is its own value; under `model_minus_best_null` it is the null minus the
     best OTHER null, which is exactly the quantity the model is scored on.
+
+    ⚠ EVERY comparison here tests `is not None`, never truthiness. `x or default` treats a
+    legitimate 0.0 as missing -- and 0.0 is exactly what an ANALYTIC null is designed to return:
+    the no-change null of a response experiment returns precisely 0.0 by construction. With
+    `b.value or float("-inf")` that null dropped out of the `others` list, the next null's margin
+    was measured against a NEGATIVE arm instead of against zero, and a clean `fail` came out as
+    `invalid`. Measured on X-20260908-warming-response: a margin of 0.0162 was computed as 0.1586.
     """
     out: list[ArmValue] = []
     for a in null_arms:
+        own = a.value if a.value is not None else 0.0
         if comparator == "model_absolute":
-            candidate = a.value or 0.0
+            candidate = own
         else:
-            others = [b.value or float("-inf") for b in null_arms if b.arm != a.arm]
-            candidate = (a.value or 0.0) - (max(others) if others else 0.0)
+            others = [b.value for b in null_arms if b.arm != a.arm and b.value is not None]
+            candidate = own - (max(others) if others else 0.0)
         if rule.holds(candidate):
             out.append(a)
     return out
@@ -291,14 +299,19 @@ def evaluate(exp: Experiment) -> Evaluation:
         )
 
     null_arms = [a for a in arms if a.arm != "model" and a.value is not None]
-    best = max(null_arms, key=lambda a: a.value or float("-inf")) if null_arms else None
+    # `is not None`, never truthiness: a null returning exactly 0.0 must rank as 0.0.
+    best = (
+        max(null_arms, key=lambda a: a.value if a.value is not None else float("-inf"))
+        if null_arms
+        else None
+    )
 
     margin: float | None = None
     if model is not None:
         if comparator == "model_absolute":
             margin = model
         elif best is not None:
-            margin = model - (best.value or 0.0)
+            margin = model - (best.value if best.value is not None else 0.0)
 
     if rule is None:
         outcome, reasons = "invalid", ["pass_if could not be parsed"]
