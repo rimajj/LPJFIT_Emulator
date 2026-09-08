@@ -57,15 +57,19 @@ is NOT the acceptance test):
    arithmetic, not a hyperparameter. `docs/decisions/20260908-X-response-fails-on-one-climate-per-place.md`.
 6. **T1, the GPU path, still not built and still not needed** — boosted trees on 16 CPU cores, 4 min.
 
-**Gate debt from the INBOUND blocks: CLEARED.** `ruff format` applied to all three T files; the
-`no-any-return` fixed at both plausible sites in `synth.py` (mypy is installed in no environment on
-this cluster, so it could not be verified locally — if `types` is still red, that is where to look);
-PLR0915 was already fixed by the rebase. `ruff check .` passes repo-wide. `ruff format --check .`
-still fails on **four line-D files** (`scripts/corpus_cmodel_config.py`, `scripts/corpus_convergence.py`,
-`src/vegemu/binfmt/restart.py`, `src/vegemu/corpus/state.py`) — D-exclusive paths, so line T cannot
-fix them and `tools/merge.sh` will refuse until D does.
+**Gate debt: T's is CLEARED; the merge is now blocked entirely by line D.** CI on 2e2d57a is green
+on test, pathsafety, flags, experiments and RED on lint (`ruff format` on four D files) and types
+(15 errors in `binfmt/clm.py`, 1 at `corpus/state.py:159`, **none** in `src/vegemu/models`). Every
+remaining failure is in a D-exclusive path, so `tools/merge.sh` refuses until D acts; sent via
+`tools/inbound.py`, which puts `lines/D/STATE.md` 1 line over budget so `budgets` goes red too until
+D runs `tools/rotate_state.py D`. **Do not merge with `--allow-red` without asking the owner** — the
+red is one line's housekeeping, not a defect in this work.
 
 Housekeeping: campaigns T-synth-v2/v3/v4 and T-cmodel-t2b/t2c are launched and harvested in-session.
+
+## Outbound to line D (2026-09-09) — line/T is blocked from merging by lint+types failures that are 100% in D-exclusive paths
+
+Line T pushed 2e2d57a; both red gates are entirely in your paths, so T cannot clear them and tools/merge.sh refuses. TYPES: 16 errors in 2 files, both yours. src/vegemu/binfmt/clm.py, 15 of them, 'ClmHeader gets multiple values for keyword argument' at lines 150/153/164/174 -- the dataclass is being constructed with both a positional and a keyword form of the same field. And src/vegemu/corpus/state.py:159, 'Name out already defined on line 139' -- the empty-summary branch and the main branch both bind 'out', which is a no-redef under strict; annotate one or rename it. src/vegemu/models is clean, so this is the entire remaining types debt in the package. LINT: 'ruff format --check .' reports 4 files, all yours: scripts/corpus_cmodel_config.py, scripts/corpus_convergence.py, src/vegemu/binfmt/restart.py, src/vegemu/corpus/state.py. Same cause the integrator diagnosed for T's three -- hand-aligned continuation lines ruff format has never produced, i.e. it was simply never run on them. Fix is 'ruff format' on those four and nothing else; T has done its own three plus the no-any-return in models/synth.py. SEPARATELY, AND IT MAY MATTER TO YOU SINCE corpus/state.py IS YOURS: today's restart-synthesis work found that a stem's PFT id is climatically constrained -- LPJmL-FIT kills a tropical broadleaved evergreen with certainty in a temperate cell (mort_temp reaches 1.0 at 73 days below 12.5 C, tree/mortality_tree_ind.c), and a donor pool spanning biomes had put 31 % such stems into a temperate block, half the roster dying in one simulated year. corpus/state.py already computes pft_frac_* per cell but those columns are not in SCORED_CONJUNCTIVE, so the synthesiser must copy species composition from a template rather than predict it -- which is exactly what stops an emulated warmed-climate restart from shifting composition at all. Record: docs/decisions/20260909-T-the-roster-was-valid-but-not-viable.md.
 
 ## Milestones
 
