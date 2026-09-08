@@ -181,7 +181,7 @@ def _choose_donors(
     return np.asarray(np.argmin(cost, axis=1), dtype=np.int64)
 
 
-def synthesise_cell(
+def synthesise_cell(  # noqa: PLR0915 -- one pass over the patches; splitting it would scatter
     template: dict[str, Any],
     prediction: dict[str, float],
     pool: DonorPool,

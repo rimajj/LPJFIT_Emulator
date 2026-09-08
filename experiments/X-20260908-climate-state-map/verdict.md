@@ -8,9 +8,35 @@ outcome: fail
 
 ## What this means
 
-<!-- Two or three sentences in plain language. State what was measured, against what, and what is
-     still unknown. If the outcome is `invalid`, say plainly which null misbehaved and why that
-     voids the comparison rather than merely weakening it. -->
+**Climate alone does predict the forest, and it beats every honest competitor — but not by the
+margin that was demanded in advance.** Given only a 30-year climate summary, and told nothing about
+where the cell is, the emulator got the whole forest right at once — stem count, three carbon and
+leaf stocks, six trait medians and both tails of six trait distributions, all 22 inside the
+model's own reproducibility band — in 3.6 % of held-out cells. Copying the forest from the
+climatically most similar training cell manages 2.1 %; copying from the geographically nearest
+training cell, 1.9 %. So the emulator is 1.7× the best alternative, and the gate asked for it to be
+roughly 3.4× that. It is a fail on the pre-registered terms, and those terms were sealed before the
+model was fitted.
+
+**3.6 % sounds much worse than the emulator actually is, and both numbers matter.** The test is
+conjunctive on purpose: a cell counts only if all 22 quantities land inside their band
+simultaneously. Taken one at a time the emulator puts 41–100 % of cells inside the band, and the
+distribution of "how many of the 22 hit" peaks at 17–18 out of 22. Most cells get most of the way
+there and are stopped by one or two quantities — above-ground biomass (41 %) and leaf area (48 %)
+most often. Neither number should be quoted without the other.
+
+**What the band is.** Not a flat 10 %. LPJmL-FIT is stochastic, so the tolerance is ten per cent or
+the disagreement between two runs of the model that differ only in their random seed, whichever is
+larger — 3.4 % at the median but 42 % in the noisiest cells. A tighter band would charge the
+emulator for noise no emulator can predict.
+
+**What is still unknown.** This measures the forest under one climate. It says nothing about how
+the forest RESPONDS to a different climate — that is the companion experiment
+`X-20260908-warming-response`, and it failed. Two honest disclosures travel with the number above:
+one of the 22 quantities (fine-root conductivity) is nearly constant across the globe and so passes
+everywhere for free; and the band is derived from the same two model runs whose average is the
+target, which makes the "one run of the model against the average of two" reference trivially
+perfect and therefore a ceiling rather than a comparison.
 
 ## Metrics
 

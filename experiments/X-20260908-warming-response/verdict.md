@@ -9,9 +9,34 @@ If it cannot, there is no learnable warming response and the project stops. That
 
 ## What this means
 
-<!-- Two or three sentences in plain language. State what was measured, against what, and what is
-     still unknown. If the outcome is `invalid`, say plainly which null misbehaved and why that
-     voids the comparison rather than merely weakening it. -->
+**The emulator's answer to "how does this forest change when the climate warms" is worse than
+answering "it does not change".** It scored −0.727 where predicting no change scores exactly 0.000
+and giving every cell the world-average change scores +0.016. This is a clean failure, not a broken
+measurement: all four comparison arms returned precisely the values written down before the run.
+
+**The failure is arithmetic, and it is diagnosed.** The emulator predicts a forest, not a change;
+the change is obtained by asking it twice and subtracting. Subtracting two predictions does not
+cancel their error — it roughly doubles it — so this only works where the real change is large
+compared with how far off the emulator is in the first place. Stem count clears that bar and
+carries real skill (+0.35); leaf area partly does (+0.10). Soil carbon does not: the model's own
+simulated change in it is 3.5 % of its level, far smaller than the emulator's error, and there
+subtraction returns −4.02. The unweighted average of the seven is what was pre-registered, so that
+is the number reported.
+
+**What is still unknown, and it is the important part.** This does NOT show that a data-driven
+emulator cannot capture a warming response. It shows that one trained on **a single climate per
+location** cannot — which is the identification limit, measured here for the first time on the
+actual target rather than argued from feature importances. In the training data, climate and place
+are inseparable, so the emulator learned where forests are, not how they move. Whether the response
+is learnable at all is answered by data that does not exist yet: the same cells spun up under many
+different climates, so the training target can be the change itself.
+
+**One caveat that is not a footnote.** The pre-declared 5°-block sensitivity arm shows that the
+"copy the nearest cell" comparison flips from −0.142 to +0.120 when the held-out blocks are made
+smaller, because the nearest available neighbour is then closer. At that radius this experiment
+would have measured spatial interpolation. The 15° result is the one that means anything.
+
+Full reasoning: `docs/decisions/20260908-X-response-fails-on-one-climate-per-place.md`.
 
 ## Metrics
 

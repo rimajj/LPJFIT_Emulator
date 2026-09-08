@@ -33,20 +33,25 @@ Each rung is a pre-registered experiment. Status is updated here when a verdict 
 
 | rung | question | kills if it fails | status |
 |---|---|---|---|
-| **0** | Does our reader/writer round-trip a real restart file byte-identically? | the restart deliverable entirely | **not started** |
-| **1** | **THE KILL TEST.** Given a cell's climate shifted by +4 K, can a model beat "predict this cell as it is today"? | the whole project, in ~week 3 for ~670 core-hours | not started |
-| **2** | Does the equilibrium map meet `max(10 %, two-seed spread)` conjunctively per cell? | the science, not the engineering | not started |
-| **3** | Is a synthesised restart file valid and stable in the real model? | the restart deliverable | not started |
-| **4** | **End-to-end.** Emulated restart → real transient vs real restart → real transient. | the deliverable as a whole | not started |
-| **5** | Does the response survive a **held-out forcing leg**? | the warming claim | not started |
+| **0** | Does our reader/writer round-trip a real restart file byte-identically? | the restart deliverable entirely | **PASSED 2026-09-08** |
+| **1** | **THE KILL TEST.** Given a cell's climate shifted by +4 K, can a model beat "predict this cell as it is today"? | the whole project, in ~week 3 for ~670 core-hours | **FAILED on existing data (−0.727 vs 0.000); now MANDATORY on a designed corpus** |
+| **2** | Does the map meet `max(10 %, two-seed spread)` conjunctively per cell? | the science, not the engineering | **FAILED: 0.036 against a best null of 0.021, gate 0.071** |
+| **3** | Is a synthesised restart file valid and stable in the real model? | the restart deliverable | **valid (the C loads and runs it); NOT yet right (carbon off by 0.53)** |
+| **4** | **End-to-end.** Emulated restart → real transient vs real restart → real transient. | the deliverable as a whole | blocked on rung 3's state fidelity |
+| **5** | Does the response survive a **held-out forcing leg**? | the warming claim | draftable now; the low-emissions leg is untouched |
 | **6** | Product B, and stage-2 output reconstruction. | product B only | not started |
 | **7** | All 54,020 tree-bearing cells, both scenarios, at acceptance-grade patch count. | acceptance | not started |
 
-### Rung 0 — format round-trip (line D)
-No model, no science. Read one cell out of the real 119 GB restart file, write it back, byte-compare;
-then 100 cells spanning 360 KB → 3.5 MB. Also measures the real per-spin-up cost, and reads the
-convergence time out of the existing 1000-step spin-up carbon trajectory (`vegc_spinup_1999.nc`) — if
-the forest is stationary by ~300 years rather than 1000, every corpus budget below drops 3.3×.
+### Rung 0 — format round-trip (line D). PASSED.
+100 real cells spanning 360,183 B → 3,546,287 B round-trip byte-identically, plus both whole `.clm`
+input files. Spec: `docs/reference/binfmt.md`.
+
+⚠ **The convergence question came back NO, and in the opposite direction to the hope.** The
+1000-year spin-up has not converged: global vegetation carbon is 719 Pg C at year 200, 735 at 500
+and 890 at 1000, still rising at +6.5 %/century with both seeds agreeing to 0.07 %. So **no budget
+below drops** — a 300-year run would differ by 22 % — and "equilibrium" is the wrong word for the
+target: it is the state the model's standard protocol reaches, which is exactly what a model user
+gets and what skipping it saves. Record: `docs/decisions/20260908-D-spinup-is-not-converged.md`.
 
 ### Rung 1 — the kill test (line X, corpus from line D)
 Pilot corpus: **200 cells × 30 climates × 1 seed = 6,000 spin-ups ≈ 670 core-hours, ~20 min on 2048
@@ -111,7 +116,25 @@ interpretable baseline that can pass rung 1 cheaply; target architecture is a **
 set network with a stochastic per-tree head** (binomial-survival / Poisson-birth, conservative by
 construction). No published vegetation-model emulator reproduces trait or size distributions at all.
 
-## Now
+## Now — the designed ensemble is the critical path, and that is now a measured conclusion
 
-Phase A of the bootstrap: the self-enforcing skeleton. See `docs/decisions/` for the operating-system
-record and `docs/reference/inherited.md` for what carries over from the predecessor.
+Rungs 0–3 were built and run on 2026-09-08. The level map works and beats every honest competitor
+but misses its pre-registered margin; the warming response does not exist in the current model; the
+emitted restart file loads in the real model but carries the wrong carbon. Two of those three have a
+scoped one-step fix. The response does not.
+
+**The kill test was run early, on data that already existed** — the same cell's climate for
+1970–1999 and for 2071–2100 under high emissions, differenced — and it failed at −0.727 against
+0.000 for "no change". The diagnosis is the useful part: a model that predicts a LEVEL and gets a
+response by SUBTRACTION can only succeed where the true change is large compared with its own level
+error. Stem count clears that (+0.35); soil carbon, whose change is 3.5 % of its level, does not
+(−4.02). Underneath it, the training corpus holds one climate per location, so climate and place are
+inseparable and the emulator learned where forests are rather than how they move.
+
+So the designed climate-perturbation ensemble is no longer an optimisation that removes a nuisance
+— **it is the only identified path to a warming response**, and it changes the learning target from
+a level to a change. That is rung 1 as originally scoped, at its original budget.
+
+Next: line D writes a perturbed `.clm` file (nothing blocks it), then the pilot corpus. Line T adds
+biomass to the restart synthesiser's matching objective (one line, 8-second verification). Line X
+drafts the held-out-forcing-leg pre-registration. Per-line detail is in `lines/<L>/STATE.md`.
