@@ -17,6 +17,17 @@ from the diff, never guessed -- and if the answer is "nothing", the merge can pr
 
     $ tools/expected_gates.py --json      # for tools/wait_gates.py
     {"branch": "line/D", "files": 4, "expected": ["budgets"], "not_triggered": [...]}
+
+⚠ "EXPECTED GATES: (none)" IS A CLAIM ABOUT THE DIFF, so it is only worth anything when the diff
+could be computed. If the comparison base is unusable this exits 2 and says so instead, because the
+two situations print the same empty list and mean opposite things:
+
+    a real empty diff       nothing to verify -- merge
+    an uncomputable diff    nothing was verified -- and CI never saw this commit at all
+
+That is not a defensive hypothetical. `origin` here pointed at the predecessor's repository, which
+shares no ancestor with this history, so every commit on every branch got the first message while
+the second was true. See `diff_base()` in `_common.py`.
 """
 
 from __future__ import annotations
@@ -30,7 +41,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _common import changed_vs, glob_match, repo_root
+from _common import BASE_OK, changed_vs, diff_base, glob_match, repo_root, tracked_files
 
 
 def load_gates() -> tuple[list[dict], dict]:
@@ -88,6 +99,24 @@ def expected(files: list[str], branch: str) -> tuple[list[str], list[str]]:
     return run, skip
 
 
+def unusable_base_message(ref: str, status: str, branch: str) -> list[str]:
+    """What to print when the diff could not be computed. Says what is UNKNOWN, not what is fine."""
+    why = {
+        "unknown": f"{ref!r} does not resolve here (fresh clone, or nothing pushed yet)",
+        "unrelated": f"{ref!r} exists but shares NO commit with this history",
+    }.get(status, f"{ref!r} is unusable ({status})")
+    all_run, _ = expected(tracked_files(), branch)
+    return [
+        f"expected_gates: CANNOT COMPUTE the diff -- {why}.",
+        "  So the gate list is UNKNOWN, which is not the same as empty. Nothing has been verified",
+        "  by CI, and on this commit CI may never have run at all.",
+        "  Gates that the whole tracked tree would trigger, as the conservative answer:",
+        f"    {', '.join(all_run) or '(none)'}",
+        "  To get a real answer, pass a ref that shares history:  --ref <ref>",
+        "  Until then the LOCAL checkers in tools/ are the only evidence you have.",
+    ]
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument(
@@ -98,13 +127,43 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     branch = args.branch or current_branch()
+    _, status = diff_base(args.ref)
+
+    if status != BASE_OK:
+        lines = unusable_base_message(args.ref, status, branch)
+        if args.json:
+            all_run, all_skip = expected(tracked_files(), branch)
+            print(
+                json.dumps(
+                    {
+                        "branch": branch,
+                        "base_status": status,
+                        "files": None,
+                        "expected": None,
+                        "not_triggered": None,
+                        "conservative_expected": all_run,
+                        "conservative_not_triggered": all_skip,
+                        "error": lines[0],
+                    }
+                )
+            )
+        else:
+            print("\n".join(lines), file=sys.stderr)
+        return 2
+
     files = changed_vs(args.ref)
     run, skip = expected(files, branch)
 
     if args.json:
         print(
             json.dumps(
-                {"branch": branch, "files": len(files), "expected": run, "not_triggered": skip}
+                {
+                    "branch": branch,
+                    "base_status": status,
+                    "files": len(files),
+                    "expected": run,
+                    "not_triggered": skip,
+                }
             )
         )
         return 0

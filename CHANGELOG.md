@@ -5,6 +5,16 @@ Entries are written as `changelog.d/<line>-<slug>.md` fragments and folded in at
 
 ## [Unreleased]
 
+<!-- collated 2026-09-08 from 1 fragment(s) -->
+
+### Changed
+- **Two latent facts about this repository are now written down rather than merely true.** CI has never run on any commit, because nothing has ever been pushed anywhere — so the nine declared gates are at present enforced only by the local checkers in `tools/`. And `ruff format --check .`, which the `lint` gate runs, would reformat 10 tracked files on `main` as committed; whether that is neglect or a `ruff` version drift (pinned only `>=0.6`, CI installs the latest) is unresolved and left as separate, named work rather than folded into this repair. Record: `docs/decisions/20260908-INT-gate-selection-was-blind.md`.
+
+### Fixed
+- **The tool that decides which CI checks to expect was answering "none" for every commit ever made in this repo, on every branch.** It computed the change list from `git merge-base origin/main HEAD`, and `origin` points at the predecessor's GitHub repository — which resolves, but shares no commit with this history, so there is no merge base. That empty result was read as "the ref is unknown, use the staged set", which on a clean tree is empty, so no gate ever matched and the tool printed *"no check-run will appear for this commit. Do not poll. Merge when ready."* every time. `tools/wait_gates.py` inherited the same empty list and reported nothing to wait for, never reaching its own careful "cannot poll — do not assume they passed" path.
+- **The proof it mattered:** a hardcoded absolute cluster path in `scripts/plot_validation.py` reached `main` and stayed there. It is precisely the defect the `pathsafety` gate exists to block, and the question "will `pathsafety` run?" had been answered no on every commit that touched it. Fixed, and the local checker is clean again.
+- **An empty change list is no longer reachable by accident.** `_common.diff_base()` now reports *why* there is no base: `unknown` (a fresh clone — keep the staged fallback, so the bootstrap still works) or `unrelated` (a wrong remote). On `unrelated` the change list falls back to **every tracked file**, because the honest answer is "cannot tell" and the safe reading of that is all of them, never none — the same reasoning already written into the branch-name fallback beside it. `expected_gates.py` exits 2 and says what is unknown instead of printing the word "merge"; `wait_gates.py` refuses before polling. `tests/test_gate_selection.py` pins the distinction against a purpose-built orphan-branch repository, and collapsing the two causes back together fails it.
+
 <!-- collated 2026-09-08 from 2 fragment(s) -->
 
 ### Added

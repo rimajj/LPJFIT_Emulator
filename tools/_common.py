@@ -130,16 +130,55 @@ def tracked_files() -> list[str]:
     return [ln.strip() for ln in _git("ls-files").splitlines() if ln.strip()]
 
 
+# The three states a comparison base can be in. They must stay distinguishable, because two of them
+# produce an EMPTY change list for opposite reasons -- see diff_base().
+BASE_OK = "ok"
+BASE_UNKNOWN = "unknown"
+BASE_UNRELATED = "unrelated"
+
+
+def diff_base(ref: str = "origin/main") -> tuple[str | None, str]:
+    """The merge base with `ref`, and why there isn't one when there isn't.
+
+    Returns `(base, status)`:
+
+        BASE_OK         `base` is the merge base; a diff against it means what it says.
+        BASE_UNKNOWN    `ref` does not resolve -- a fresh clone, or before the first push.
+        BASE_UNRELATED  `ref` resolves but shares NO commit with HEAD, so there is no base and
+                        `git diff` against it cannot be computed at all.
+
+    THE DISTINCTION IS THE POINT, and it is not hypothetical: this repo's `origin` pointed at the
+    PREDECESSOR's GitHub repository, which shares no ancestor with this history. A single "no base"
+    answer collapsed that case into the bootstrap one, every caller read the resulting empty list as
+    "nothing changed", and `expected_gates.py` therefore printed "no gate will run -- merge when
+    ready" for every commit on every branch. A latent `pathsafety` violation sat on `main` behind
+    that for as long as it was true. An empty diff must never be reachable by accident.
+    """
+    if not _git("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}").strip():
+        return None, BASE_UNKNOWN
+    base = _git("merge-base", ref, "HEAD").strip()
+    if not base:
+        return None, BASE_UNRELATED
+    return base, BASE_OK
+
+
 def changed_vs(ref: str = "origin/main") -> list[str]:
     """Repo-relative paths changed against `ref`, via the merge base.
 
     Falls back to the staged set when the ref is unknown, which is what happens in a fresh clone or
     before the first push -- a checker that crashed there would block the bootstrap.
+
+    When the ref exists but shares no history, falls back to EVERY TRACKED FILE. That direction is
+    deliberate: the honest answer to "which files changed" is then "cannot tell", and the safe
+    reading of "cannot tell" is all of them, never none of them. Under-checking is the failure mode
+    that lets a violation reach `main`; over-checking only costs seconds.
     """
-    base = _git("merge-base", ref, "HEAD").strip()
-    if not base:
+    base, status = diff_base(ref)
+    if status == BASE_UNKNOWN:
         return staged_files()
-    out = _git("diff", "--name-only", "--diff-filter=ACMR", base, "HEAD")
+    if status == BASE_UNRELATED:
+        return tracked_files()
+    out = _git("diff", "--name-only", "--diff-filter=ACMR", str(base), "HEAD")
     return [ln.strip() for ln in out.splitlines() if ln.strip()]
 
 

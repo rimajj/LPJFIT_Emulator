@@ -31,7 +31,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import expected_gates
-from _common import repo_root
+from _common import BASE_OK, diff_base, repo_root
 
 TOKEN_PATH = Path.home() / ".config" / "gh" / "hosts.yml"
 
@@ -83,6 +83,16 @@ def main(argv: list[str] | None = None) -> int:
 
     root = repo_root()
     branch = expected_gates.current_branch()
+
+    # Ask FIRST whether the diff can be computed at all. "No gate will run" and "I cannot tell which
+    # gates would run" both produce an empty list, and only the first of them licenses a merge.
+    _, base_status = diff_base("origin/main")
+    if base_status != BASE_OK:
+        for line in expected_gates.unusable_base_message("origin/main", base_status, branch):
+            print(line, file=sys.stderr)
+        print("  Do NOT read this as green. Nothing was polled.", file=sys.stderr)
+        return 2
+
     files = expected_gates.changed_vs("origin/main")
     want, skip = expected_gates.expected(files, branch)
 

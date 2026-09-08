@@ -1,7 +1,10 @@
 #!/usr/bin/env python
 """Every figure that says what the emulator does and does not do.
 
-    scripts/plot_validation.py --exp-dir /p/tmp/jamirp/vegemu/exp/map-response-v0 --out figures/
+    scripts/plot_validation.py --exp-dir "$EXP_ROOT/map-response-v0" --out figures/
+
+where `$EXP_ROOT` is `scratch.exp` in config/paths.yaml — spelling the cluster path out here would
+be a second copy of it, free to go stale, which is exactly what the path-safety gate forbids.
 
 The figures are the argument, so they are built to be read rather than to look busy. Rules applied
 throughout, from the project's data-visualisation guidance:
