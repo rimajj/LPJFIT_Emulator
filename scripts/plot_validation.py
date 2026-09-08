@@ -200,39 +200,65 @@ def fig_arms(
     values = [v for _, v in order]
     colours = [S1 if k == "model" else INK_MUTED for k, _ in order]
 
+    gate = best_null + threshold
     fig, ax = plt.subplots(figsize=(7.6, 0.52 * len(order) + 2.1))
     ax.barh(names, values, color=colours, height=0.6)
-    span = max(values) - min(*values, 0.0)
+
+    # Explicit limits with room for the labels, computed from the data rather than left to the
+    # autoscaler: a label placed outside a bar that ends at the axis edge lands on the tick
+    # labels, which is exactly what the first render of this figure did.
+    left = min(*values, 0.0)
+    right = max(*values, gate)
+    span = right - left
+    ax.set_xlim(left - 0.10 * span, right + 0.22 * span)
+    pad = 0.012 * span
+
     for y, (k, v) in enumerate(order):
-        offset = 0.012 * span if v >= 0 else -0.012 * span
+        # A long bar carries its label INSIDE, in the surface colour: outside, it would either
+        # overrun the axis or cross the pre-registered-gate line.
+        if abs(v) > 0.28 * span:
+            x, ha, colour = v - np.sign(v) * pad, ("right" if v >= 0 else "left"), SURFACE
+        else:
+            x = v + np.sign(v if v != 0 else 1.0) * pad
+            ha = "left" if v >= 0 else "right"
+            colour = INK if k == "model" else INK_2
         ax.text(
-            v + offset,
+            x,
             y,
             f"{v:+.4f}" if zero_line else f"{v:.4f}",
             va="center",
-            ha="left" if v >= 0 else "right",
+            ha=ha,
             fontsize=8.5,
-            color=INK if k == "model" else INK_2,
+            color=colour,
             fontweight="semibold" if k == "model" else "normal",
+            zorder=4,
+            # A surface-coloured plate behind the number, so a label that happens to sit over the
+            # gate line or a gridline still reads. Legibility, not decoration: without it the
+            # dashed gate line runs through the digits of the near-zero labels.
+            bbox=None
+            if colour == SURFACE
+            else {"facecolor": SURFACE, "edgecolor": "none", "pad": 1.2},
         )
-    gate = best_null + threshold
-    ax.axvline(gate, color=S2, lw=1.6, ls=(0, (4, 3)))
-    ax.text(
-        gate,
-        len(order) - 0.35,
-        f"  pre-registered gate {gate:.3f}\n  (best null + {threshold:.3f})",
+    ax.axvline(gate, color=S2, lw=1.6, ls=(0, (4, 3)), zorder=1)
+    ax.annotate(
+        f"pre-registered gate {gate:.3f}\n(best null + {threshold:.3f})",
+        (gate, len(order) - 0.42),
+        textcoords="offset points",
+        xytext=(5, 6),
         color=S2,
         fontsize=8,
-        va="top",
+        va="bottom",
+        ha="left",
+        annotation_clip=False,
     )
     if zero_line:
-        ax.axvline(0.0, color=INK_MUTED, lw=1.0)
+        ax.axvline(0.0, color=INK_MUTED, lw=1.0, zorder=1)
     ax.set_xlabel(xlabel)
     ax.grid(axis="y", visible=False)
     despine(ax, ("bottom",))
     ax.tick_params(axis="y", length=0)
     fig.suptitle(title, x=0.012, ha="left", fontsize=12, fontweight="semibold", color=INK)
-    ax.set_title(subtitle, loc="left", fontsize=9, color=INK_2, fontweight="normal", pad=26)
+    ax.set_title(subtitle, loc="left", fontsize=9, color=INK_2, fontweight="normal", pad=40)
     fig.tight_layout(rect=(0, 0, 1, 0.98))
     fig.savefig(out, bbox_inches="tight")
     plt.close(fig)
@@ -560,9 +586,11 @@ def fig_hits_map(frame: pl.DataFrame, quantities: list[str], out: Path) -> None:
     lon = frame["lon"].to_numpy()
     lat = frame["lat"].to_numpy()
 
-    fig, axes = plt.subplots(2, 1, figsize=(8.4, 6.6),
+    fig, axes = plt.subplots(2, 1, figsize=(8.4, 7.2),
                              gridspec_kw={"height_ratios": [2.1, 1.0]})
-    draw_map(axes[0], lon, lat, n_hit, title="", cmap=SEQ, vmin=0, vmax=len(quantities),
+    draw_map(axes[0], lon, lat, n_hit,
+             title="how many of the 22 land inside their band, per cell",
+             cmap=SEQ, vmin=0, vmax=len(quantities),
              label=f"quantities inside the band (of {len(quantities)})")
     counts = np.bincount(n_hit.astype(int), minlength=len(quantities) + 1)
     xs = np.arange(len(counts))
@@ -572,24 +600,26 @@ def fig_hits_map(frame: pl.DataFrame, quantities: list[str], out: Path) -> None:
     axes[1].set_ylabel("share of cells")
     axes[1].set_xticks(xs[::2])
     frac_all = counts[-1] / counts.sum()
+    axes[1].set_ylim(0, float(counts.max() / counts.sum()) * 1.42)
     axes[1].annotate(
-        f"all {len(quantities)} at once: {frac_all:.1%} of cells",
+        f"all {len(quantities)} at once:\n{frac_all:.1%} of cells",
         (len(quantities), counts[-1] / counts.sum()),
-        textcoords="offset points", xytext=(-8, 26), ha="right", fontsize=8.5, color=S1,
+        textcoords="offset points", xytext=(-4, 40), ha="right", fontsize=8.5, color=S1,
         arrowprops={"arrowstyle": "-", "color": S1, "lw": 1.0},
+        bbox={"facecolor": SURFACE, "edgecolor": "none", "pad": 1.6},
     )
     despine(axes[1])
     fig.suptitle(
-        "The conjunctive acceptance test, cell by cell", x=0.012, ha="left", fontsize=12,
+        "The conjunctive acceptance test, cell by cell", x=0.012, y=0.995, ha="left", fontsize=12,
         fontweight="semibold", color=INK,
     )
     fig.text(
-        0.012, 0.955,
+        0.012, 0.958,
         "A cell counts as accepted only if all 22 quantities land inside their own band. Most "
         "cells get most of the way there.",
         fontsize=9, color=INK_2,
     )
-    fig.tight_layout(rect=(0, 0, 1, 0.945))
+    fig.tight_layout(rect=(0, 0, 1, 0.935))
     fig.savefig(out, bbox_inches="tight")
     plt.close(fig)
 
