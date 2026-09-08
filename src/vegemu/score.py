@@ -201,7 +201,12 @@ def blocked_spatial_folds(
 
 def matrix(frame: pl.DataFrame, columns: Sequence[str]) -> npt.NDArray[np.float64]:
     """A (rows, len(columns)) float64 matrix, in the given column order."""
-    return frame.select(list(columns)).to_numpy().astype(np.float64)
+    # Annotated rather than returned directly: polars is in mypy's ignore_missing_imports list, so
+    # `to_numpy()` is typed Any and returning it straight out defeats the declared return type
+    # under `strict`. `.astype` is kept over `np.asarray` because it always copies, so a caller
+    # cannot end up aliasing polars' own buffer.
+    out: npt.NDArray[np.float64] = frame.select(list(columns)).to_numpy().astype(np.float64)
+    return out
 
 
 def describe_basis(

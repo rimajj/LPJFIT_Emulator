@@ -7,6 +7,17 @@ Entries are written as `changelog.d/<line>-<slug>.md` fragments and folded in at
 
 <!-- collated 2026-09-08 from 1 fragment(s) -->
 
+### Changed
+- **CI ran for the first time in this project's history** — on `line/D` and `line/T`, which are the two branch names free on the repository — and it is red. That is the point of the previous two commits: the failures were always there, and the tool that decides which checks to expect had been answering "none" for every commit. What it found, with each failure now owned: `pathsafety` on `line/T` reproduced independently the exact hardcoded-path violation found by hand earlier today; `lint` fails on both lines for the seven unformatted files already handed to them; `test` failed for the undeclared dependencies fixed above; and `types` reported **21 errors in 7 files**, of which 15 are in line D's binary-format and corpus code — including a variable redefined on the line above it, which is a real defect and not a style complaint — and 1 in line T's synthesiser.
+- **This project's history cannot be pushed to `main`.** That branch on the repository holds the predecessor project, and the two histories share no commit, so the push is refused as non-fast-forward; the same is true of `line/X`, whose name the predecessor's own line X already occupies. `line/D` and `line/T` were free and are now pushed. Resolving the other two means overwriting or moving branches that hold another project's work, which is not a change to make unasked.
+
+### Fixed
+- **The package imported `scipy` and `lightgbm` without declaring either where a normal install would get them**, so `pip install -e ".[dev]"` — exactly what CI does — produced an installation whose own test suite could not even be collected (`ModuleNotFoundError: No module named 'scipy'`). `scipy` was parked in the optional `train` extra although `nulls.py` imports it at module level for the nearest-neighbour nulls; `lightgbm`, which the entire level model is built on, was in no dependency group at all. Both are now base dependencies: the extra exists to keep a 2.5 GB CUDA wheel optional, and these are ordinary CPU wheels. A dependency the package imports is not optional.
+- **`types-PyYAML` added**, which mypy had been naming itself, and `scipy`/`lightgbm` added to the existing untyped-import list with the cost stated: calls into those libraries are unchecked, so a wrong argument reaches a test or nothing.
+- **`score.matrix` returned `Any` from a function declared to return a float64 array.** polars is on mypy's untyped-import list, so `to_numpy()` is `Any` and returning it straight out silently discarded the declared return type under `strict`.
+
+<!-- collated 2026-09-08 from 1 fragment(s) -->
+
 ### Fixed
 - **`tools/inbound.py` claimed to keep a sender copy of every cross-line message and silently didn't, whenever the sender had no `lines/<sender>/STATE.md`** — which is every message sent from the integration worktree. The mirror is not decoration: the tool's own docstring names it as the remedy for the failure it was built around, that a rebase conflict resolved with `--theirs` deletes the recipient's copy without trace. So the one safeguard was absent exactly when the success line said it was present. It now reports honestly, and when no sender copy could be kept it says so on stderr and states what that costs: the recipient's file is the only copy, and the sending commit is the only evidence it existed. Found by using the tool and then checking that the file it named actually existed.
 

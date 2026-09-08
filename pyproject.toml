@@ -14,18 +14,34 @@ dependencies = [
   "netCDF4>=1.7",
   "pyyaml>=6",
   # tomllib is stdlib on 3.11+, so no toml dependency is needed for reading.
+  #
+  # scipy and lightgbm are BASE dependencies because `src/vegemu/` imports them at module level:
+  # `nulls.py` uses scipy.spatial for the nearest-neighbour nulls, and `models/emulator.py` is
+  # built on lightgbm. Both were undeclared here -- scipy sat in the `train` extra and lightgbm in
+  # no group at all -- so `pip install -e ".[dev]"`, which is exactly what CI does, produced an
+  # installation whose own test suite could not be collected. That is not hypothetical: it is the
+  # first failure CI reported the first time it ever ran (see
+  # docs/decisions/20260908-INT-gate-selection-was-blind.md).
+  #
+  # Neither is heavy: the extra below exists to keep a 2.5 GB CUDA wheel optional, and these two
+  # are ordinary CPU wheels. A dependency that the package imports is not optional.
+  "scipy>=1.14",
+  "lightgbm>=4.5",
 ]
 
 [project.optional-dependencies]
 # Training is a separate extra so the checkers, the binary-format layer and the corpus builders stay
 # installable without a 2.5 GB CUDA wheel. The cluster's `gpu` partition and the pinned torch build
 # are documented in docs/reference/cluster.md.
-train = ["torch>=2.5", "scipy>=1.14"]
+train = ["torch>=2.5"]
 dev = [
   "pytest>=8",
   "hypothesis>=6.100",   # the binary-format round-trip is a PROPERTY test, not a fixture test
   "ruff>=0.6",
   "mypy>=1.11",
+  # mypy runs with `strict = true`, and it names this stub package itself: without it every
+  # `import yaml` is an `import-untyped` error and the `types` gate cannot pass.
+  "types-PyYAML>=6",
 ]
 
 [build-system]
@@ -95,7 +111,10 @@ warn_unreachable = true
 enable_error_code = ["redundant-expr", "truthy-bool", "ignore-without-code"]
 
 [[tool.mypy.overrides]]
-module = ["netCDF4.*", "polars.*", "pyarrow.*"]
+# These ship no type information mypy can use, so `strict` would otherwise fail on the import line
+# alone. The cost is real and worth naming: calls INTO these libraries are unchecked, so a wrong
+# argument to a scipy or lightgbm function is caught by a test or not at all.
+module = ["netCDF4.*", "polars.*", "pyarrow.*", "scipy.*", "lightgbm.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
