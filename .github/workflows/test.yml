@@ -31,7 +31,15 @@ jobs:
     name: test
     runs-on: ubuntu-latest
     steps:
+      # FULL history, not the default depth-1 clone. tests/test_gate_selection.py asks git for a real
+      # comparison base (`HEAD~1`) because the tool under test classifies "no diff" against "cannot
+      # compute a diff" -- the confusion that hid a pathsafety violation on main. On a shallow
+      # checkout `HEAD~1` does not resolve, so the tool correctly answers "cannot compute" and the
+      # test correctly fails: the environment was wrong, not the test. Depth 2 would satisfy today's
+      # assertions; 0 is the honest answer for a repo whose tooling reasons about history.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"

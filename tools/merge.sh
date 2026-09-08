@@ -8,7 +8,7 @@
 # procedure is a script that was never written -- and the one chore inside it that had no code
 # (collating changelog fragments) is the one that rotted for 13 days across 56 fragments.
 #
-# ─── FIVE THINGS HERE ARE LOAD-BEARING ─────────────────────────────────────────────────────────
+# ─── SIX THINGS HERE ARE LOAD-BEARING ──────────────────────────────────────────────────────────
 # 1. flock the integration worktree. It is the one shared checkout; without the lock, concurrent
 #    lines interleave pull/merge/push in it and reintroduce exactly the contention that separate
 #    worktrees were adopted to remove.
@@ -21,9 +21,25 @@
 #    moment; skipping it reds the `changelog` gate on main, and it is one command.
 # 5. Refuse to merge past an overdue open campaign. A launched job nobody harvested is debt, and
 #    main is where debt becomes everyone's.
+# 6. Refuse to merge past a NON-GREEN gate, and verify main's own gates after the push. Both of
+#    those used to be printed advice ("if any of those are not green, stop now" / "now check main's
+#    own CI run"), and both were skipped -- three lines were merged while their gates had never run
+#    at all, so main sat red on lint, types and test with nothing in the repository able to say so.
+#    Advice that is followed only when convenient is not a guard.
 set -euo pipefail
 
-LINE="${1:?usage: tools/merge.sh <LINE>}"
+LINE="${1:?usage: tools/merge.sh <LINE> [--allow-red \"<reason>\"]}"
+shift
+ALLOW_RED=""
+while (($#)); do
+  case "$1" in
+    --allow-red)
+      ALLOW_RED="${2:?--allow-red needs a reason: it is written into the merge commit}"
+      shift 2
+      ;;
+    *) echo "merge: unknown argument $1" >&2; exit 2 ;;
+  esac
+done
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INT="$(python3 "$REPO/tools/_paths.py" project.root)"
 LOCK="$INT/.git/vegemu-integrate.lock"
@@ -62,9 +78,29 @@ if ! python3 "$REPO/tools/campaigns.py" --check; then
   exit 1
 fi
 
-echo "merge: expected CI gates for this diff:"
+echo "merge: CI gates for this diff, on the pushed sha $LOCAL:"
 python3 "$REPO/tools/expected_gates.py" | sed 's/^/  /'
-echo "merge: (if any of those are not green on $LOCAL, stop now)"
+
+# ENFORCED, not advised. wait_gates.py polls exactly the triggered gates and nothing else, so this
+# does not hang on a prose-only commit: it exits 0 at once when the diff triggers nothing. Its exit
+# 2 ("cannot tell which gates would run, or no API token") is a refusal too -- an unverifiable sha
+# is not a green one.
+if python3 "$REPO/tools/wait_gates.py" --timeout "${MERGE_GATE_TIMEOUT:-900}"; then
+  :
+else
+  rc=$?
+  echo >&2
+  if [[ -z "$ALLOW_RED" ]]; then
+    echo "merge: REFUSING -- the gates above are not green on $LOCAL (wait_gates exit $rc)." >&2
+    echo "  Fix them on line/$LINE and push again. If the failure is not yours to fix, hand it to" >&2
+    echo "  the owning line with tools/inbound.py rather than merging around it." >&2
+    echo "  To merge anyway, say why -- it is recorded in the merge commit:" >&2
+    echo "    tools/merge.sh $LINE --allow-red 'why this red gate is acceptable'" >&2
+    exit 1
+  fi
+  echo "merge: PROCEEDING PAST A NON-GREEN GATE ON PURPOSE (wait_gates exit $rc)" >&2
+  echo "  reason: $ALLOW_RED" >&2
+fi
 
 # --- the locked section -------------------------------------------------------------------------
 exec 9>"$LOCK"
@@ -73,7 +109,21 @@ flock 9
 
 git -C "$INT" fetch origin --quiet
 git -C "$INT" pull --ff-only origin main
-git -C "$INT" merge --no-ff --no-edit "origin/line/$LINE"
+
+# main's pre-push sha, captured BEFORE the merge. It is the base GitHub filters the coming push on,
+# and it is the only base from which main's own gate list can be computed: on main, a diff against
+# origin/main is empty by construction, so asking the default question of main answers "no gate will
+# run" forever. That is exactly how main came to sit red on three gates unnoticed.
+PREV_MAIN="$(git -C "$INT" rev-parse HEAD)"
+
+if [[ -n "$ALLOW_RED" ]]; then
+  # Record the override where it cannot be lost: in the merge commit itself, as a trailer.
+  git -C "$INT" merge --no-ff "origin/line/$LINE" \
+    -m "Merge remote-tracking branch 'origin/line/$LINE'" \
+    -m "Merged-with-red-gates: $ALLOW_RED"
+else
+  git -C "$INT" merge --no-ff --no-edit "origin/line/$LINE"
+fi
 
 # Chore (4). You hold the lock => you are the integrator for this moment. Editing CHANGELOG.md here
 # does not violate "never edit it from a line": this is main, in the integration worktree.
@@ -87,7 +137,23 @@ fi
 git -C "$INT" push origin main
 echo "merge: line/$LINE is on main."
 echo
-echo "Now check main's OWN latest CI run. Green branch gates do not guarantee a green main: some"
-echo "gates are whole-repo, and only the NEWEST main sha carries a verdict (a rapid follow-up push"
-echo "can cancel an intermediate run). If the merge touched no gate-watched path, main runs nothing"
-echo "either and there is nothing to check -- ask tools/expected_gates.py, do not guess."
+
+# Green branch gates do not guarantee a green main: several gates are whole-repo, two lines can be
+# individually green and jointly red, and only the NEWEST main sha carries a verdict. So verify
+# main, from the base the push is filtered on. This cannot refuse anything -- main is already
+# pushed -- but it makes main's status a REPORTED fact instead of a paragraph of advice, and the
+# non-zero exit is what tells the session it owns a repair.
+echo "merge: verifying main's own gates (base $PREV_MAIN)..."
+if python3 "$INT/tools/wait_gates.py" --ref "$PREV_MAIN" --timeout "${MERGE_GATE_TIMEOUT:-900}"; then
+  echo "merge: main is green on every gate this push triggered."
+else
+  rc=$?
+  echo >&2
+  echo "merge: ⚠ MAIN IS NOT GREEN (wait_gates exit $rc). line/$LINE is merged; the repair is now" >&2
+  echo "  yours to make or to hand over. A gate that is red on main blocks nobody automatically," >&2
+  echo "  which is precisely why it must not be left silent:" >&2
+  echo "    - the failing file is yours      -> fix it on line/$LINE and merge again" >&2
+  echo "    - it belongs to another line     -> tools/inbound.py, with the failing output quoted" >&2
+  echo "    - it is the gate's own setup     -> it is integrator-owned; say so in MEMORY.md" >&2
+  exit 1
+fi
