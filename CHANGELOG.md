@@ -5,6 +5,15 @@ Entries are written as `changelog.d/<line>-<slug>.md` fragments and folded in at
 
 ## [Unreleased]
 
+<!-- collated 2026-09-08 from 1 fragment(s) -->
+
+### Added
+- **Two sealed pre-registrations.** `X-20260908-climate-state-map` asks whether a 30-year climate summary alone reproduces LPJmL-FIT's forest state inside the acceptance band on 22 quantities conjunctively — stem count, three stocks, six trait medians and both tails of each of those six trait distributions. `X-20260908-warming-response` is **the kill test**: a model fitted on the historical leg only, shown the same cell's climate for 1970–1999 and for 2071–2100 under high emissions, must explain the model's own simulated change better than predicting no change at all.
+- **Every null is computable from the data with no learner** (`src/vegemu/nulls.py`), which is what makes it possible to pre-derive the value each one MUST return. The map test's nulls come out at 0.0212 (climatically nearest analogue), 0.0187 (geographically nearest cell), 0.0007 (shuffled) and 0.0000 (the average forest); the response test's at +0.0162 (everywhere changes by the average amount), exactly 0.0 (no change, analytic), −0.142 (copy the nearest cell's change) and −0.913 (shuffled).
+- **The address null is a spatial nearest neighbour rather than a latitude/longitude regression**, because a weak null is worse than no null — and because a nearest neighbour has no free parameters, so its required value can be derived before any model exists.
+- `src/vegemu/dataset.py` — one loader, so the nulls line X derives are the nulls line T measures.
+- `tests/test_folds.py` — the pre-registrations' leakage checks as executable assertions: no spatial block is split across folds, the feature matrix contains no address/state/CO₂ column, and every null is exactly reproducible.
+
 <!-- collated 2026-09-08 from 3 fragment(s) -->
 
 ### Added
