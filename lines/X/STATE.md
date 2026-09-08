@@ -38,17 +38,15 @@ the decision rule and is the informative part.
 
 **Two findings landed this session, both from gating the build provenance before using the leg:**
 
-1. **The build gate CLEARS the low-emissions leg.** Ground truth spans three binary builds, not two;
-   the difference between the two that matter is 19 uncommitted source files in which every
-   behavioural change is switched off unless an environment variable is set — and those job scripts
-   do not set it. Byte-equality is NOT proven; the decisive one-cell test is named and the older
-   binary is still on disk. `docs/decisions/20260908-X-build-provenance-of-the-low-emissions-leg.md`
+1. **The build gate CLEARS the low-emissions leg.** Three builds, not two; the difference between
+   the two that matter is 19 uncommitted source files whose every behavioural change is switched
+   off unless an environment variable is set, and those job scripts do not set it. Byte-equality is
+   NOT proven. `docs/decisions/20260908-X-build-provenance-of-the-low-emissions-leg.md`
 2. ⚠ **The high-emissions leg has no second model run.** Its two "seed" tables are byte-identical
-   across all 22 quantities and all 67,420 cells, because the second run was started from the FIRST
-   run's own initial state. A two-run average from that leg is therefore a single draw, and any
-   tolerance derived from it collapses to the bare 10 % floor while still reading as "10 % or the
-   model's own spread". The kill test's verdict stands and is NOT re-run — a changed corpus is a
-   changed question. `docs/decisions/20260908-X-ssp370-has-no-second-seed.md`
+   across all 22 quantities and all 67,420 cells — the second run started from the FIRST run's own
+   initial state. So a two-run average from it is a single draw, and a tolerance derived from it is
+   the bare 10 % floor wearing the costume of "10 % or the model's own spread". The kill test's
+   verdict stands and is NOT re-run. `docs/decisions/20260908-X-ssp370-has-no-second-seed.md`
 
 **Owed by other lines, in order:**
 
@@ -63,6 +61,12 @@ the decision rule and is the informative part.
   `docs/decisions/20260908-X-build-gate-correction-the-wrapper-exists.md`.
 * **integrator** — two `MEMORY.md` rows are now wrong or incomplete; both requested wordings are in
   the two records above.
+
+**Merged to main and pushed**, with `--allow-red` recorded as a trailer: `lint` and `types` are red
+**on main itself** in D- and T-owned files this diff never touches; it is green on all five gates it
+can affect. The failure list went to `CHANGELOG.md` because **neither D's nor T's `STATE.md` has
+room for an inbound block** (T sits at exactly 120 lines) — I tried, it broke all three budgets, I
+backed it out. Tell the integrator: the cross-line channel is unusable at budget.
 
 Housekeeping: none owed. The stale `origin` warning is deleted deliberately, as line INT asked:
 the remote is settled and pushing works (`MEMORY.md:the-repo`, `repo-is-clean`).
