@@ -41,7 +41,9 @@ FLOOR_TOLERANCE = 0.10  # invariant 5: the band is max(10 %, the two-seed spread
 CHUNK = 100  # time steps read at once
 
 
-def cell_index_map(grid_nc: Path, ncell: int) -> tuple[npt.NDArray[np.int64], npt.NDArray[np.int64]]:
+def cell_index_map(
+    grid_nc: Path, ncell: int
+) -> tuple[npt.NDArray[np.int64], npt.NDArray[np.int64]]:
     """(lat_idx, lon_idx) for orderA cell 0..ncell-1, from `cellid(lat,lon)`."""
     with netCDF4.Dataset(grid_nc) as ds:
         cellid = np.asarray(ds.variables["cellid"][:])
@@ -88,7 +90,7 @@ def convergence_year(
     one pass instead of a per-cell search, and it gives the LAST exit rather than the first entry --
     the distinction matters for a cell that wanders back out after briefly settling.
     """
-    nyear, ncell = traj.shape
+    nyear = traj.shape[0]
     level = np.nanmean(traj[-TAIL_YEARS:], axis=0).astype(np.float64)
     band = np.maximum(np.abs(level) * tol, 1e-9)
     outside = np.abs(traj.astype(np.float64) - level) > band
