@@ -14,58 +14,59 @@ pre-registrations and verdicts (X).
 ## NEXT — start here
 
 **The emitted restart file is now stationary under the real model and its carbon matches to 9 %.**
-The previous handoff's item 1 was based on a wrong diagnosis and has been retracted — do not do it.
-Read `docs/decisions/20260909-T-the-roster-was-valid-but-not-viable.md` first.
+The previous handoff's item 1 (`add agb to MATCH_TRAITS`) rested on a wrong diagnosis and is
+RETRACTED — do not do it. Read `docs/decisions/20260909-T-the-roster-was-valid-but-not-viable.md`
+first; it has the whole attribution and every caveat.
 
-**What was actually wrong.** Donors were matched on height and wood density over a pool spanning
-biomes, and the tree TYPE was never checked, so 31 % of the stems written into twenty temperate
-European cells were tropical broadleaved evergreen — a type those cells never contain. The model
-loaded the file, ran without aborting, and killed all of them in year one. The synthesis was fine:
-the file held 6.7 % MORE above-ground biomass than the truth, not half. Type is now copied from the
-target cell's own template at the matching size rank, and the pool is 25,424 stems from a proximity
-band with the target block excluded.
+In one line: donors were matched on height and wood density and never on tree TYPE, so 31 % of the
+stems written into twenty temperate cells were tropical, and the model killed them all in year one.
+The synthesis was never at fault — the file held 6.7 % MORE biomass than the truth, not half.
 
-**Where it stands, in numbers** (20 cells of 54,020, temperate Europe, present-day, seed 1 — this
-is NOT the acceptance test):
+**The artifact.** `/p/tmp/jamirp/vegemu/runs/synth-v2/restart/restart_1999_emulated.lpj`, 47.9 MB,
+sha256 `64fdbf2d…`, cells 42480–42499, campaign `T-synth-v3`. ⚠ `synth-v3` is the REJECTED
+five-trait variant — do not pick it up by mistake. Rebuild:
+`scripts/sbatch_py.sh <tag> scripts/synth_restart.py --first-cell 42480 --ncell 20 --out-dir <dir>`.
 
-* **The emitted file, after one year of the real model**, median |emulated − control| / control:
-  vegetation carbon **0.091**, above-ground biomass 0.092, stems per patch 0.088, median height
-  0.063 — all inside the band, from 0.543 / 0.610 / 0.490 / 0.099 before. Carbon over the first
-  year now goes ×1.04 against the control's ×1.02, where it went ×0.35.
-* **But the conjunctive test still fails: 0 of 20 cells** inside the band on all 22 quantities at
-  once, median 15 of 22. That rate is consistent with the emulator's own held-out 3.6 %, so it is
-  inherited from the prediction, not added by the synthesis.
-* **Level map** (unchanged, sealed): 0.0361 of held-out cells conjunctively, against 0.0212 for the
-  nearest climate analogue; beats every null by 1.7× but the gate wanted a 0.050 margin, got 0.0149.
-* **Warming response** (unchanged, sealed): −0.727 against 0.000 for predicting no change.
+**Numbers** (20 cells of 54,020, temperate Europe, present-day, seed 1 — NOT the acceptance test):
 
-**Next, in order, cheapest first:**
+* **After one year of the real model**, median |emulated − control| / control: vegetation carbon
+  **0.091**, biomass 0.092, stems per patch 0.088, median height 0.063 — all inside the band, from
+  0.543 / 0.610 / 0.490 / 0.099. Carbon goes ×1.04 over the year vs the control's ×1.02, was ×0.35.
+* **The conjunctive test still FAILS: 0 of 20 cells** inside the band on all 22 quantities at once,
+  median 15 of 22 — a rate consistent with the emulator's own held-out 3.6 %, so inherited from the
+  prediction rather than added by the synthesis.
+* Sealed and unchanged: level map 0.0361 conjunctively (nearest analogue 0.0212; gate wanted a 0.050
+  margin, got 0.0149); warming response −0.727 against 0.000 for predicting no change.
 
-1. **Run t3 — 20 years, drift against the two-seed spread.** Worth doing now and it was not before;
-   a state that collapsed in year one had nothing to say about year twenty. Same two-arm subset
-   recipe as t2: `scripts/corpus_cmodel_config.py --years 2000 2019` then `scripts/sbatch_cmodel.sh`.
+**Next, cheapest first:**
+
+1. **Run t3 — 20 years, drift against the two-seed spread.** Worth doing now and it was not before:
+   a state that collapsed in year one said nothing about year twenty. Same two-arm subset recipe as
+   t2, `scripts/corpus_cmodel_config.py --years 2000 2019` then `scripts/sbatch_cmodel.sh`.
 2. **Leaf area is 30 % low and does not move.** Leaf carbon is a per-stem MASS and the transplant
-   matches traits, not masses. A cell-total constraint (pick among near-matching donors so the
-   cell's total leaf carbon hits the prediction) is a different mechanism and is not built.
-3. **Do NOT widen `MATCH_TRAITS`** — measured, it makes things worse: 11 of 22 quantities degrade,
-   the median cell drops from 15 of 22 hits to 12. One donor is one real stem and cannot sit at the
-   same quantile of five distributions. `--match-traits` exists so the next attempt is a measurement.
-4. **Do NOT tune the current model to chase the map gate.** The pre-registration is sealed; a
-   changed model is a new `exp_id`.
-5. **The response model must predict the CHANGE directly**, blocked on line D's pilot corpus. The
-   current architecture differences two level predictions, which is the whole −0.727 and is
-   arithmetic, not a hyperparameter. `docs/decisions/20260908-X-response-fails-on-one-climate-per-place.md`.
-6. **T1, the GPU path, still not built and still not needed** — boosted trees on 16 CPU cores, 4 min.
+   matches traits, not masses. A cell-total mass constraint is a different mechanism, not built.
+3. **Do NOT widen `MATCH_TRAITS`** — measured: 11 of 22 quantities degrade, median cell 15 → 12 hits.
+   One donor is one real stem. `--match-traits` exists so the next attempt is a measurement.
+4. **Do NOT tune the model to chase the map gate** — the pre-registration is sealed; a changed model
+   is a new `exp_id`.
+5. **The response model must predict the CHANGE directly**, blocked on D's pilot corpus; differencing
+   two level predictions is the whole −0.727. `docs/decisions/20260908-X-response-fails-on-one-climate-per-place.md`.
+6. **T1, the GPU path: still not built, still not needed** — boosted trees on 16 CPU cores, 4 min.
 
-**Gate debt: T's is CLEARED; the merge is now blocked entirely by line D.** CI on 2e2d57a is green
-on test, pathsafety, flags, experiments and RED on lint (`ruff format` on four D files) and types
-(15 errors in `binfmt/clm.py`, 1 at `corpus/state.py:159`, **none** in `src/vegemu/models`). Every
-remaining failure is in a D-exclusive path, so `tools/merge.sh` refuses until D acts; sent via
-`tools/inbound.py`, which puts `lines/D/STATE.md` 1 line over budget so `budgets` goes red too until
-D runs `tools/rotate_state.py D`. **Do not merge with `--allow-red` without asking the owner** — the
-red is one line's housekeeping, not a defect in this work.
+**The merge is blocked, and not by this work.** CI on 2e2d57a: green on test, pathsafety, flags,
+experiments; RED on lint (`ruff format`, four D files) and types (15 in `binfmt/clm.py`, 1 at
+`corpus/state.py:159`, **none** in `src/vegemu/models`). Every failure is D-exclusive, so T cannot
+clear them. **Do not merge with `--allow-red` without asking the owner.**
 
-Housekeeping: campaigns T-synth-v2/v3/v4 and T-cmodel-t2b/t2c are launched and harvested in-session.
+⚠ **LINE D HAS NOT BEEN TOLD — relay the Outbound block below by hand.** It could not be committed:
+`commit-guard.sh` never passes `check_ownership.py --via-inbound`, the flag that exists to permit
+the one sanctioned cross-line write; and its advertised escape hatch cannot open, because
+`commit-guard.sh:22` reads `ALLOW_COMMIT_GUARD_SKIP` from the harness environment rather than the
+command prefix — the same bug `slurm-guard.sh` already fixed and regression-tested. Both files are
+integrator-owned, so **no line can currently send another line a message that survives a commit.**
+
+Housekeeping: all five campaigns this session (`T-synth-v2/v3/v4`, `T-cmodel-t2b/t2c`) are harvested
+with exit codes, artifact hashes and results; `tools/campaigns.py --check` green.
 
 ## Outbound to line D (2026-09-09) — line/T is blocked from merging by lint+types failures that are 100% in D-exclusive paths
 
