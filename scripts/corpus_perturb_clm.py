@@ -31,7 +31,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -151,6 +151,55 @@ def _write_one(
     return header
 
 
+@dataclass(frozen=True)
+class CellBase:
+    """One block's baseline forcing and its calibrated shapes, read once and reused per point.
+
+    ⚠ THIS EXISTS FOR A MEASURED REASON, NOT FOR TIDINESS. `calibrate_cell` reads three variables x
+    60 years out of the scenario leg, one seek per cell-year. The pilot corpus is 200 cells x 30
+    climates, and calling `build` thirty times per cell would repeat that read thirty times -- about
+    a million small random reads on a shared filesystem to produce the same thirty answers. The
+    baseline and the shapes depend on the CELL, never on the perturbation, so they are read once.
+    """
+
+    cells: range
+    window: tuple[int, int]
+    src: dict[str, str]
+    headers: dict[str, ClmHeader]
+    base: dict[str, npt.NDArray[np.float64]] = field(repr=False)
+    patterns: tuple[CellPattern, ...] = field(repr=False)
+
+
+def load_base(cells: range, window: tuple[int, int] = BASE_WINDOW) -> CellBase:
+    """Read the baseline block for `cells` and calibrate each cell's shapes against the GCM leg."""
+    cfg = paths()
+    src = {v: str(cfg["inputs"]["historical"][v]) for v in VARS}
+    calib = {v: str(cfg["inputs"][CALIB_LEG][v]) for v in ("tas", "pr", "lwnet")}
+    first, last = window
+    headers = {v: _source_header(src[v]) for v in VARS}
+    base = {v: _read_block(src[v], cells, first, last) for v in VARS}
+
+    patterns: list[CellPattern] = []
+    for i, cell in enumerate(cells):
+        pr_clim = np.array(
+            [
+                base["pr"][i][:, MONTH_START[m] : MONTH_START[m] + MONTH_LEN[m]]
+                .sum(axis=1)
+                .mean()
+                for m in range(len(MONTH_LEN))
+            ]
+        )
+        patterns.append(calibrate_cell(cell, pr_clim, calib, CALIB_EARLY, CALIB_LATE))
+    return CellBase(
+        cells=cells,
+        window=window,
+        src=src,
+        headers=headers,
+        base=base,
+        patterns=tuple(patterns),
+    )
+
+
 def build(
     cells: range,
     pert: Perturbation,
@@ -158,32 +207,29 @@ def build(
     window: tuple[int, int] = BASE_WINDOW,
 ) -> dict[str, Any]:
     """Write the five perturbed forcing files for `cells`, and return the provenance record."""
-    cfg = paths()
-    src = {v: str(cfg["inputs"]["historical"][v]) for v in VARS}
-    calib = {v: str(cfg["inputs"][CALIB_LEG][v]) for v in ("tas", "pr", "lwnet")}
-    first, last = window
-    headers = {v: _source_header(src[v]) for v in VARS}
+    return write_point(load_base(cells, window), pert, out_dir)
+
+
+def write_point(cb: CellBase, pert: Perturbation, out_dir: Path) -> dict[str, Any]:
+    """Apply one design point to an already-loaded block and write its five files.
+
+    Every check `build` ever made still runs here -- the physical assertions inside
+    `apply_perturbation`, the read-back comparison, and the neutral byte-identity proof -- because
+    this IS the path `build` takes. There is no cheaper variant that skips them.
+    """
+    cells, src, headers = cb.cells, cb.src, cb.headers
+    first, last = cb.window
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    base = {v: _read_block(src[v], cells, first, last) for v in VARS}
-    perturbed = {v: np.empty_like(base[v]) for v in VARS}
-    patterns: list[CellPattern] = []
-    for i, cell in enumerate(cells):
-        cell_base = {v: base[v][i] for v in VARS}
-        pr_clim = np.array(
-            [
-                cell_base["pr"][:, MONTH_START[m] : MONTH_START[m] + MONTH_LEN[m]]
-                .sum(axis=1)
-                .mean()
-                for m in range(len(MONTH_LEN))
-            ]
-        )
-        pattern = calibrate_cell(cell, pr_clim, calib, CALIB_EARLY, CALIB_LATE)
-        patterns.append(pattern)
-        out = apply_perturbation(cell_base, pattern, pert)
+    perturbed = {v: np.empty_like(cb.base[v]) for v in VARS}
+    patterns = list(cb.patterns)
+    for i in range(len(cells)):
+        cell_base = {v: cb.base[v][i] for v in VARS}
+        out = apply_perturbation(cell_base, patterns[i], pert)
         for v in VARS:
             perturbed[v][i] = out[v]
 
+    base = cb.base
     written: dict[str, Any] = {}
     for v in VARS:
         header = _write_one(

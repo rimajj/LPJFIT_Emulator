@@ -79,11 +79,15 @@ def run_dir(cell: int, point: str, seed: int) -> Path:
 
 
 def _build_forcing(cell: int, point: str) -> dict[str, object]:
-    spec = importlib.util.spec_from_file_location(
-        "corpus_perturb_clm", REPO / "scripts" / "corpus_perturb_clm.py"
-    )
+    # ⚠ The `sys.modules` registration is load-bearing: annotations here are strings (the
+    # `__future__` import), and `@dataclass` resolves them through `sys.modules[cls.__module__]`,
+    # which is `None` for a module loaded by path and never registered. Without it the script
+    # raises an `AttributeError` inside `dataclasses.py` the moment it defines a dataclass.
+    name = "corpus_perturb_clm"
+    spec = importlib.util.spec_from_file_location(name, REPO / "scripts" / f"{name}.py")
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod
     spec.loader.exec_module(mod)
     if point.endswith(NOFIXRH):
         base: Perturbation = design_by_name(point[: -len(NOFIXRH)])

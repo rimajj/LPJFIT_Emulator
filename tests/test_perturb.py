@@ -18,6 +18,7 @@ writer; it is skipped when `/p` is not mounted and runs in CI on the cluster run
 from __future__ import annotations
 
 import importlib.util
+import sys
 from pathlib import Path
 from types import ModuleType
 
@@ -46,13 +47,22 @@ HAINICH = 42490
 
 
 def _writer() -> ModuleType:
-    """Load `scripts/corpus_perturb_clm.py` as a module: it is a CLI, not an importable package."""
+    """Load `scripts/corpus_perturb_clm.py` as a module: it is a CLI, not an importable package.
+
+    ⚠ THE `sys.modules` REGISTRATION IS LOAD-BEARING, and its absence fails nowhere near itself.
+    Every module in this repo opens with `from __future__ import annotations`, so all annotations
+    are strings; `@dataclass` then resolves them through `sys.modules[cls.__module__]`, which is
+    `None` for a module loaded by path and never registered. The symptom is an `AttributeError` in
+    `dataclasses.py` on a line of library code, raised the moment the script merely DEFINES a
+    dataclass -- so it reads as a broken standard library rather than a broken loader.
+    """
+    name = "corpus_perturb_clm"
     spec = importlib.util.spec_from_file_location(
-        "corpus_perturb_clm",
-        Path(__file__).resolve().parent.parent / "scripts" / "corpus_perturb_clm.py",
+        name, Path(__file__).resolve().parent.parent / "scripts" / f"{name}.py"
     )
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod
     spec.loader.exec_module(mod)
     return mod
 
