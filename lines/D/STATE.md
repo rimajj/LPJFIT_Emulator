@@ -13,60 +13,55 @@ pre-registrations and verdicts (X).
 
 ## NEXT — start here
 
-**D2's SPIN-UPS ARE DONE. The pilot corpus exists as 6,000 real restart files.** 200 cells × 30
-climates × 1 seed, corpus version **v1**, `plan_sha256 bad787ade3fc609b25cf8ebc87dfd0978e4a8690`.
-All 6,000 printed the model's own completion line and all 6,000 wrote a restart — no reruns owed,
-and `campaigns/D/ledger.jsonl` has **no open campaigns** for the first time on this line.
+**D2 IS DONE. The pilot corpus is a TABLE, and rung 1 is unblocked.**
+`/p/tmp/jamirp/vegemu/corpus/pilot-v1/corpus.parquet` — **6,000 rows × 181 cols**, all 6,000 runs
+decoded, 0 failures, 8.9 s on 16 procs. 86 climate features from each run's OWN perturbed forcing +
+the 5 design coefficients + fold keys + 76 state targets. `truth_stems_total` is in there and is a
+LAGGED TRUTH — diagnostic only, never a feature.
+`corpus_sha256 fbe74ed2416b265f4c874959ab8b186679a641cedf3e18df32b125f7362e1e4d`,
+`plan_sha256 bad787ade3fc609b25cf8ebc87dfd0978e4a8690`. Driver: `corpus_pilot.py --stage decode`;
+`decode.json` beside the table. `campaigns/D/ledger.jsonl` has no open campaigns.
 
-| | measured |
-|---|---|
-| cost | **337 core-hours**, 3.37 core-minutes per 1000-year spin-up (estimate was 670) |
-| wall | 24 shards of 250, all 23 later ones concurrent on 5,750 CPU; ~8 min each |
-| forcing | 1.5 GB, every file exactly 43,851 B |
-| restarts | 12 GB; bytes p5/p50/p95 = 360,275 / 2,179,450 / 2,809,564 |
-| treeless | **374 of 6,000 (6.2 %)** at or below the vegetation-free floor |
-| tiles | all **164** populated 15° tiles covered; 5 forced biome + 159 medoids + 36 maximin |
+**The corpus was validated against the global ground truth, which nothing guaranteed.** Every one of
+the 6,000 is a single-cell subset run and `MEMORY.md:subset-diverges` says never to score one
+against global truth. Over the 183 control runs that grew a forest, stem count vs the stored
+`restart_1999`: Spearman **0.961**, ratio median **1.023**, p10/p90 **0.839/1.231**. And every
+control run's annual tas/pr/rsds reproduces the source forcing to **max abs diff 0.0** — the write
+-time byte identity surviving an independent read path. First bound ever put on `subset-diverges`.
 
-Everything about it, including the message line X needs:
-**`docs/decisions/20260909-D-pilot-corpus-v1.md`**. Driver: `scripts/corpus_pilot.py --stage
-plan|build|verify|harvest`. Tables in `/p/tmp/jamirp/vegemu/corpus/pilot-v1`; runs under
-`.../runs/pilot-v1/c<cell>/<point>`.
+⚠ **17 of the 200 control points grew NOTHING, and line X needs this before sealing rung 1.** 14 are
+real deserts (12 dry months, aridity 0.0001–0.014, soil carbon exactly 0; the driest cells that DID
+grow trees sit at 0.010–0.021, so the flip is sharp) — the model is right, and they are `maximin`
+picks doing what design rule 4 asked for. 3 are cold/wet bistable cells with real soil carbon; cell
+98 is a forest under 22 of its other 29 climates. **The same-cell baseline null is evaluated at the
+control point**, so at 8.5 % of cells the decisive null predicts bare ground and anything predicting
+"some forest" beats it by the full target range. Report BOTH bases: all 200, and the 183.
+Treeless overall is 380/6,000 (6.3 %), peaking at 34/200 on `lhs03` (−0.73 K, 0.67× precip) — DRYING
+empties cells, not warming. All of it: **`docs/decisions/20260909-D-corpus-v1-decoded.md`**.
 
-⚠ **`tools/inbound.py` is unusable both ways, so that message went via the record above.** It cannot
-commit (`commit-guard.sh:36` omits `--via-inbound`; line T hand-carried theirs), and a recipient at
-its 120-line budget — X was, D is now — reddens `budgets`, which stops EVERY line's merge.
+⚠ **`tools/inbound.py` is still unusable both ways, so that record IS the message to X.** It cannot
+commit (`commit-guard.sh:36` omits `--via-inbound`), and a recipient at its 120-line budget reddens
+`budgets`, which stops EVERY line's merge.
 
 **Next, in order:**
 
-1. **D2b — DECODE the 6,000 restarts into the corpus table. The only thing between the corpus and
-   rung 1, and nothing blocks it.** The decoder is the one corpus v0 used:
-   `vegemu.corpus.state.summarise_cell` over `RestartReader`; v0 did 67,420 records with
-   `--nproc 64`, so 6,000 of ~2.2 MB is smaller. Join on `runs.csv` (name, cell, point) and carry
-   `design.csv`'s five coefficients into each row, or the climate a row belongs to is not
-   recoverable from the row. ⚠ **A single-cell restart holds ONE record, not a slice of the global
-   file** — v0's reader was aimed at a 119 GiB file of 67,420; check the count before trusting an
-   index.
-2. **The high-emissions leg's second seed is not a second run, and the corpus rebuild is line D's.**
-   `state_ssp370_seed1` and `_seed2` in corpus **v0** are byte-identical across all 22 quantities
-   and all 67,420 cells: the second run was started from the first's initial state. So any
-   tolerance derived from that leg collapses to the bare 10 % floor while still looking like
-   "10 % or the model's own spread". The genuine second run **is** on disk. Rebuild under a new
-   corpus version — a changed corpus is a changed question, so it does not touch v0's hashes or the
-   verdicts that cite them. Record: `docs/decisions/20260908-X-ssp370-has-no-second-seed.md`.
-3. **The emitted restart carries about half the right carbon** — donors matched on height and wood
+1. **Corpus v2 — do BOTH corpus changes in one rebuild, after a word with line X.** (a) The
+   high-emissions leg's second seed is not a second run: `state_ssp370_seed1`/`_seed2` in **v0** are
+   byte-identical across all 22 quantities and all 67,420 cells, because the second run started
+   from the first's initial state, so any tolerance from that leg collapses to the bare 10 % floor
+   while still looking like "10 % or the model's own spread". The genuine second run **is** on disk.
+   (b) Put `pft_frac_*` in `SCORED_CONJUNCTIVE`: a stem's PFT id is climatically constrained
+   (`mort_temp` hits 1.0 after 73 days below 12.5 °C, `tree/mortality_tree_ind.c`), and because
+   those columns are computed but not scored, the synthesiser must COPY species composition from a
+   template — which is exactly what stops an emulated warmed restart shifting composition at all.
+   ⚠ Both change what a SEALED pre-registration's "all 22 quantities" means, so both need a new
+   corpus version, and neither touches v0/v1 hashes — a changed corpus is a changed question.
+   Records: `20260908-X-ssp370-has-no-second-seed.md`,
+   `20260909-T-the-roster-was-valid-but-not-viable.md`, `20260909-T-t3-drift-fails-below-the-null.md`.
+2. **The emitted restart carries about half the right carbon** — donors matched on height and wood
    density, not mass. Line T's fix; line D owns the verification run, and 20 cells for a year is 8 s.
-4. **Line T's ask, and it is line D's because `corpus/state.py` is: put `pft_frac_*` in the scored
-   set.** A stem's PFT id is climatically constrained — LPJmL-FIT kills a tropical broadleaved
-   evergreen with certainty in a temperate cell (`mort_temp` reaches 1.0 after 73 days below
-   12.5 °C, `tree/mortality_tree_ind.c`), which is what halved a synthesised roster's carbon in one
-   simulated year. `state.py` already computes `pft_frac_*` per cell, but those columns are not in
-   `SCORED_CONJUNCTIVE`, so the synthesiser must COPY species composition from a template instead of
-   predicting it — and that is precisely what stops an emulated warmed-climate restart from
-   shifting composition at all. ⚠ **Do not just add them.** The scored set fixes the quantity count
-   that line X's SEALED pre-registrations cite ("all 22 quantities"), so widening it changes what
-   those seals mean and needs a new corpus version and a word with line X — a changed corpus is a
-   changed question. Records: `docs/decisions/20260909-T-the-roster-was-valid-but-not-viable.md`,
-   `20260909-T-t3-drift-fails-below-the-null.md`.
+3. **The 17 empty controls are NOT a reason to re-select cells.** 14 are the model being right, and
+   dropping them would quietly narrow the envelope the design set out to span.
 
 ## Milestones
 
@@ -83,9 +78,10 @@ task farm), `corpus_cmodel_config.py`, `corpus_restart_subset.py` (byte-exact co
 `tests/test_perturb.py` is 40 tests including the byte identity.
 Record: `docs/decisions/20260908-D-perturbation-design.md`.
 
-**D2 — the pilot corpus. SPIN-UPS DONE, TABLE PENDING.** See NEXT. `vegemu.corpus.select` and
-`scripts/corpus_pilot.py`; `tests/test_select.py` is 16 tests including "every populated tile gets a
-cell". ⚠ It is 6,000 restart FILES, not a table — D2b is the decode.
+**D2 — the pilot corpus. DONE, runs and table both.** `vegemu.corpus.select` and
+`scripts/corpus_pilot.py --stage plan|build|verify|harvest|decode`; `tests/test_select.py` is 16
+tests including "every populated tile gets a cell". Records: `20260909-D-pilot-corpus-v1.md` (the
+6,000 spin-ups, 337 core-hours), `20260909-D-corpus-v1-decoded.md` (the table and its validation).
 
 **D3 — provenance. PARTLY DONE.** Every corpus table ships a `provenance.json` with each source
 file's size, mtime and decoded header, plus the hash a pre-registration cites.
@@ -93,27 +89,31 @@ file's size, mtime and decoded header, plus the hash a pre-registration cites.
 ## Line D gotchas
 
 * **A byte-identical round-trip validates a LAYOUT, not a CROSS-REFERENCE.** The last byte of a PFT
-  entry is an index into that patch's litter list; it is self-consistent inside any one record, so a
-  round-trip cannot see it, and it breaks only when a stem moves between patches. The only test that
-  found it was running the real model. Any field that indexes into another part of the same record
-  needs its own check.
+  entry indexes that patch's litter list; it is self-consistent inside any one record, so a
+  round-trip cannot see it, and it breaks only when a stem moves between patches. Only running the
+  real model found it. Any field indexing into another part of the same record needs its own check.
 * **Never judge a C run by its exit code**; require the model's own line `lpjml successfully
   terminated, <n> grid cells processed.` in a non-empty log. The wrapper writes that grep into the
   ledger row as the harvest command.
 * The `.clm` size check the C only warns about (`WARNING032`) is a hard refusal here: a size
   mismatch means the dtype or the year count is wrong and every value read is silently shifted.
-* **`srun` forwards its stdin to the task**, and inside `while read … done < manifest` that stdin
-  IS the manifest. It swallowed 18 of 25 lines: seven members ran, eighteen never started, the job
-  exited 0 and the log said "7 of 7" because the counter came from the same starved loop. Redirect
-  the member from `/dev/null`, and take the expected count straight off the file.
-* **A script loaded by path must be registered in `sys.modules` before `exec_module`.** Every module
-  here opens with `from __future__ import annotations`, so annotations are strings and `@dataclass`
-  resolves them through `sys.modules[cls.__module__]` — `None` for an unregistered module. It raises
-  an `AttributeError` inside `dataclasses.py` the moment the loaded script merely *defines* a
-  dataclass, so it reads as a broken standard library. Three loaders had the bug.
+* **`srun` forwards its stdin to the task**, and inside `while read … done < manifest` that stdin IS
+  the manifest. It swallowed 18 of 25 lines, the job exited 0, and the log said "7 of 7" because the
+  counter came from the same starved loop. Redirect the member from `/dev/null`; count off the file.
+* **A script loaded by path must be registered in `sys.modules` before `exec_module`**, or
+  `@dataclass` raises an `AttributeError` inside `dataclasses.py` that reads as a broken standard
+  library. Three loaders had the bug; the why is in `corpus_pilot.py:_load`.
 * **A complete campaign is not a usable corpus.** Judge the spin-ups by the model's own completion
   line, then judge the CORPUS separately: restart byte size is a free proxy (≈360 KB with no
-  vegetation, ≈1.9 MB with a forest), and a run's cost tracks it — 1 min treeless, 3–8 min forested.
+  vegetation, ≈1.9 MB with a forest) and a run's cost tracks it — 1 min treeless, 3–8 min forested.
+  It was a good one: 374/6,000 treeless by bytes against 380/6,000 by decoded stem count.
+* **polars does not survive `fork`: a forked worker that touches a DataFrame hangs forever** with no
+  error and no traceback, so the job burns its wall-clock limit with an empty log — which reads as a
+  slow filesystem. Workers return plain dicts, the parent builds the frame. `corpus.climate` splits
+  `climate_columns` (numpy, fork-safe) from `climate_table` (parent only); `corpus.state` always did.
+* **A subset `.clm` declares its cell in `firstcell`; indexing a GLOBAL file by row is silent.**
+  Global inputs have `firstcell = 0`, so row and cell coincide until a single-cell file arrives —
+  then every row gets cell 0's soil depth and cell 0's coordinate, with nothing raised.
 * **Do not export `ALLOW_LOGIN_HEAVY` before running the test suite.** The guard allows
   unconditionally when it, `ALLOW_RAW_SBATCH` or `SLURM_JOB_ID` is set, and it inherits the
   session's environment, so every must-deny case in `tests/test_slurm_guard.py` went red at once —
