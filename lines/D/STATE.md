@@ -13,63 +13,52 @@ pre-registrations and verdicts (X).
 
 ## NEXT — start here
 
-**D2 IS DONE. The pilot corpus is a TABLE and rung 1 is unblocked.**
-`/p/tmp/jamirp/vegemu/corpus/pilot-v1/corpus.parquet` — **6,000 rows × 181 cols**, 0 failures, 8.9 s
-on 16 procs: 86 climate features from each run's OWN perturbed forcing + the 5 design coefficients +
-fold keys + 76 state targets. `truth_stems_total` is a LAGGED TRUTH, diagnostic only, never a
-feature. `corpus_sha256 fbe74ed2416b265f4c874959ab8b186679a641cedf3e18df32b125f7362e1e4d`; driver
-`corpus_pilot.py --stage decode`, `decode.json` beside it; no open campaigns in the ledger.
+**The corpus builder now REFUSES a leg whose two seeds are one run twice** (2d5eaf4). It compares
+the recorded RNG triple (the cause) and the decoded rows (the effect); a failure WITHHOLDS
+`corpus_sha256`, so a defective corpus cannot be cited by a pre-registration at all. Replayed on
+real v0: historical 63,372 and ssp126 63,586 of 67,420 cells differ (pass), **ssp370 differs in 0
+and is refused on both signals**. Discharges consequence 2 of `20260908-X-ssp370-has-no-second-seed`.
 
-**The corpus was validated against the global truth, which nothing guaranteed** — all 6,000 are
-single-cell subset runs and `MEMORY.md:subset-diverges` forbids scoring one against global truth.
-Over the 183 controls that grew a forest: Spearman **0.961**, ratio median **1.023**, p10/p90
-**0.839/1.231**; and all 200 controls' annual tas/pr/rsds reproduce the source to **max abs diff 0**.
+**`tools/inbound.py` is HALF fixed** (5667030, record `20260909-D-inbound-recognised-from-the-diff`).
+Ownership no longer needs the flag nothing ever passed — the write is recognised from the staged
+diff (nothing removed, every added heading an `## INBOUND from line <you>`, tool sentinel present),
+which is narrower than the flag and needs no hook change. ⚠ **The budget half still blocks it and is
+integrator-owned**: `lines/X/STATE.md` is at **exactly 120/120**, so a message of ANY length reddens
+`budgets` and stops EVERY line's merge. A real send was verified through ownership, then reverted
+unsent. **Check `wc -l lines/<to>/STATE.md` before writing to anyone.**
 
-⚠ **17 of the 200 control points grew NOTHING, and line X needs this before sealing rung 1.** 14 are
-real deserts (12 dry months, aridity 0.0001–0.014, soil carbon exactly 0; the driest cells that DID
-grow trees sit at 0.010–0.021, so the flip is sharp) — the model is right, and they are `maximin`
-picks doing what design rule 4 asked. 3 are cold/wet bistable cells with real soil carbon; cell 98
-is a forest under 22 of its other 29 climates. **The same-cell baseline null is evaluated at the
-control point**, so at 8.5 % of cells the decisive null predicts bare ground and anything predicting
-"some forest" beats it by the full target range — report BOTH bases, all 200 and the 183. Treeless
-overall is 380/6,000 (6.3 %), peaking at 34/200 on `lhs03` (−0.73 K, 0.67× precip): DRYING empties
-cells, not warming. All of it: **`docs/decisions/20260909-D-corpus-v1-decoded.md`**.
-
-⚠ **`tools/inbound.py` is still unusable both ways, so that record IS the message to X.** It cannot
-commit (`commit-guard.sh:36` omits `--via-inbound`), and a recipient at its 120-line budget reddens
-`budgets`, which stops EVERY line's merge.
-
-🚫 **PUSHED (1b28b79) BUT NOT MERGED. The red gates are CLEARED to merge past; the blocker is now the
-integration worktree.** `lint`/`types` are red only in line-T exclusive files — `mypy --strict` finds
-**1 error in 16 files** (`models/synth.py:143`, `Returning Any`), `ruff format` would rewrite
-`models/synth.py`, `models/__init__.py`, `scripts/train_emulator.py` — and both were **already red on
-`main` before this branch existed**, so the owner approved `merge.sh D --allow-red` on 2026-09-09.
-⚠ **But `/p/projects/open/Jamir/vegemu` had 4 STAGED, uncommitted files from a LIVE session** (mtimes
-10 min old: both `.claude/hooks/` guards, `tests/test_session_end_gate.py`,
-`changelog.d/INT-stop-gate-sigpipe.md`). `git merge --no-ff` refuses on a dirty index (exit 2, no
-commit — verified, so `main` was never at risk), and `merge.sh` has no lock over *editing* that
-worktree, only over merging in it. **Do not stash it — that is another session's live work.** Wait
-until `git -C /p/projects/open/Jamir/vegemu status --porcelain` is empty, then merge.
+🚫 **PUSHED (5667030) BUT NOT MERGED — same blocker as last session, unchanged.**
+`/p/projects/open/Jamir/vegemu` still has the SAME 4 staged files (both `.claude/hooks/` guards,
+`tests/test_session_end_gate.py`, `changelog.d/INT-stop-gate-sigpipe.md`), untouched since 11:59 on
+2026-09-09. `git merge --no-ff` refuses on a dirty index, so `main` is not at risk. **Do not stash —
+that is another session's work.** Poll `git -C /p/projects/open/Jamir/vegemu status --porcelain`;
+when empty, `tools/merge.sh D --allow-red` (owner-approved 2026-09-09).
+Gates on 5667030: `budgets`/`pathsafety`/`test` green, `lint` red **only** in the three line-T files
+(`models/synth.py`, `models/__init__.py`, `scripts/train_emulator.py` need `ruff format`) — verified
+none of them mine; `ruff check .` is clean. `types` last ran on 1368569 (red: `synth.py:143`).
+⚠ **`tools/expected_gates.py` over-predicted here**: it named `types` and `flags`, which never ran,
+because it diffs the whole branch against main while the workflows filter on the PUSH diff — and my
+two commits touch no `src/vegemu`. `wait_gates` would have hung had `lint` not failed first.
 
 **Next, in order:**
 
-1. **Corpus v2 — do BOTH corpus changes in one rebuild, after a word with line X.** (a) The
-   high-emissions leg's second seed is not a second run: `state_ssp370_seed1`/`_seed2` in **v0** are
-   byte-identical across all 22 quantities and all 67,420 cells, because the second run started
-   from the first's initial state, so any tolerance from that leg collapses to the bare 10 % floor
-   while still looking like "10 % or the model's own spread". The genuine second run **is** on disk.
-   (b) Put `pft_frac_*` in `SCORED_CONJUNCTIVE`: a stem's PFT id is climatically constrained
-   (`mort_temp` hits 1.0 after 73 days below 12.5 °C, `tree/mortality_tree_ind.c`), and because
-   those columns are computed but not scored, the synthesiser must COPY species composition from a
-   template — which is exactly what stops an emulated warmed restart shifting composition at all.
-   ⚠ Both change what a SEALED pre-registration's "all 22 quantities" means, so both need a new
-   corpus version, and neither touches v0/v1 hashes — a changed corpus is a changed question.
-   Records: `20260908-X-ssp370-has-no-second-seed.md`,
-   `20260909-T-the-roster-was-valid-but-not-viable.md`, `20260909-T-t3-drift-fails-below-the-null.md`.
+1. **Corpus v2 is blocked on TWO decisions, neither of them D's.** Ask, do not assume.
+   - **Integrator:** `config/paths.yaml` needs a `ssp370_seed2_from_hist_seed2` key. The genuine
+     second run is on disk and verified today — different file size (133,580,962,759 vs
+     133,559,375,490), written 2026-08-03 — but it came from the Jul-21 build, not Feb-05, so the
+     corrected pair straddles a build boundary and that must be disclosed.
+   - **Line X:** does v2 also put `pft_frac_*` in `SCORED_CONJUNCTIVE`? Because those columns are
+     computed but not scored, the synthesiser must COPY species composition from a template, which
+     is exactly what stops an emulated warmed restart shifting composition at all. It changes what
+     "all 22 quantities" means for every sealed pre-registration citing it.
+   - ⚠ **ONE rebuild or the other, never two** — each is a new corpus version and a changed corpus
+     is a changed question. v0/v1 hashes are untouched either way. The map entry in
+     `corpus_build.py` carries the full warning at the point of use.
 2. **The emitted restart carries about half the right carbon** — donors matched on height and wood
    density, not mass. Line T's fix; line D owns the verification run, and 20 cells for a year is 8 s.
 3. **The 17 empty controls are NOT a reason to re-select cells.** 14 are the model being right, and
-   dropping them would quietly narrow the envelope the design set out to span.
+   dropping them would quietly narrow the envelope the design set out to span. Full detail, and the
+   both-bases warning line X needs before sealing rung 1: `20260909-D-corpus-v1-decoded.md`.
 
 ## Milestones
 
