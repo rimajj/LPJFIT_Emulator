@@ -248,6 +248,26 @@ def state_table(
     return frame.with_columns(pl.col("cell").cast(pl.Int32))
 
 
+def single_cell_state(restart: Path | str, cell: int) -> dict[str, float]:
+    """The state vector of a restart file that holds exactly ONE cell.
+
+    ⚠ THE CELL NUMBER IS NOT AN INDEX INTO THIS FILE. A corpus run writes a restart for one cell, so
+    the file holds one record at index 0, while the cell it describes is a global number in the tens
+    of thousands. `state_table`'s indexing is aimed at the 119 GiB global file where the two
+    coincide; calling `reader.read(cell)` here raises `IndexError` at best and, if the number
+    happened to be small, would silently summarise the wrong record. So the count is asserted and
+    the global number is carried in as a label, never used as an offset.
+    """
+    reader = RestartReader(Path(restart))
+    if reader.ncell != 1:
+        raise ValueError(
+            f"{restart} declares ncell={reader.ncell}; single_cell_state is for the one-record "
+            "files a per-cell corpus run writes. Use state_table for a multi-cell restart."
+        )
+    with reader:
+        return summarise_cell(reader.read(0), cell, reader.layout)
+
+
 def basis(restart: Path | str) -> dict[str, Any]:
     """The reference basis of a state table: what file, what year, what patch count.
 

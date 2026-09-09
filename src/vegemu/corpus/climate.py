@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -132,18 +133,51 @@ def _monthly(daily: npt.NDArray[np.float64], reduce_sum: bool) -> npt.NDArray[np
     return out
 
 
-def climate_table(  # noqa: PLR0915 -- a flat sequence of independent feature definitions
+@lru_cache(maxsize=4)
+def _static_inputs(
+    soildepth: str, coord: str
+) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+    """Soil depth and the grid coordinate for every global cell, read once per process.
+
+    Cached because the pilot corpus calls `climate_table` once per RUN -- 6,000 single-cell forcing
+    sets -- and both of these are whole-globe files that do not depend on the run at all. Without
+    the cache that is 6,000 re-reads of the same 67,420-cell arrays to answer the same question.
+    Callers only read the arrays; nothing here writes to them.
+    """
+    depth = ClmReader(soildepth)
+    with depth:
+        soil = np.asarray(depth.year(depth.header.firstyear)[:, 0], dtype=np.float64)
+    return soil, read_grid(coord)
+
+
+def climate_columns(  # noqa: PLR0915 -- a flat sequence of independent feature definitions
     window: Window,
     cells: Sequence[int] | None = None,
     files: dict[str, str] | None = None,
     soildepth: str | None = None,
     coord: str | None = None,
-) -> pl.DataFrame:
-    """Reduce one leg's 30-year window to one row per cell.
+) -> dict[str, npt.NDArray[Any]]:
+    """Reduce one leg's 30-year window to one row per cell, as plain arrays.
 
     Reads a whole year block per variable per year -- 150 sequential reads for the window -- and
     accumulates. That is the cheap direction: the file is laid out `value[year][cell][band]`, so a
     year is contiguous and a cell is not.
+
+    ⚠ THIS IS THE ENTRY POINT A FORKED WORKER MUST CALL, and `climate_table` is not. polars runs a
+    Rust thread pool that does not survive `fork`, so a forked child that touches a DataFrame hangs
+    forever with no error and no traceback -- the symptom is a job that burns its whole wall-clock
+    limit having produced nothing. `vegemu.corpus.state` already keeps to this rule by having its
+    workers return dicts and building the frame in the parent; the pilot corpus decodes 6,000 runs
+    the same way. Everything here is numpy and file I/O, so it is fork-safe.
+
+    ⚠ `cells` IS ALWAYS A GLOBAL CELL INDEX, NEVER A ROW NUMBER, and the difference only shows up on
+    a subset file. A `.clm` header declares `firstcell`, so the perturbation writer's single-cell
+    files carry `firstcell = <that cell>` and hold exactly one row. Row `i` of such a file is global
+    cell `firstcell + i`, and the soil depth and the grid coordinate are read from GLOBAL files that
+    must be indexed by the global number. Reading them at the row number instead returns cell 0's
+    soil depth and cell 0's coordinate, with no error anywhere -- a wrong feature that looks
+    entirely normal. Every global input has `firstcell = 0`, so this is a no-op for them and corpus
+    v0's tables are byte-unchanged.
     """
     cfg = paths()
     files = files or {v: str(cfg["inputs"][window.leg][v]) for v in VARS}
@@ -152,15 +186,33 @@ def climate_table(  # noqa: PLR0915 -- a flat sequence of independent feature de
 
     readers = {v: ClmReader(files[v]) for v in VARS}
     ncell = readers["tas"].header.ncell
+    firstcell = readers["tas"].header.firstcell
     for var, reader in readers.items():
         if reader.header.ncell != ncell:
             raise ValueError(f"{var} has ncell={reader.header.ncell}, tas has {ncell}")
+        if reader.header.firstcell != firstcell:
+            raise ValueError(
+                f"{var} starts at cell {reader.header.firstcell}, tas at {firstcell}. The five "
+                "variables do not describe the same cells, so every row would mix two places."
+            )
         if reader.header.nbands != NDAYYEAR:
             raise ValueError(
                 f"{var} has nbands={reader.header.nbands}, expected {NDAYYEAR} (daily)"
             )
 
-    sel = np.arange(ncell) if cells is None else np.asarray(cells, dtype=np.int64)
+    # `gsel` numbers cells globally, `sel` numbers rows within these files. They differ by
+    # `firstcell` and are the same array for every global input.
+    gsel = (
+        np.arange(firstcell, firstcell + ncell)
+        if cells is None
+        else np.asarray(cells, dtype=np.int64)
+    )
+    sel = gsel - firstcell
+    if sel.size and (sel.min() < 0 or sel.max() >= ncell):
+        raise ValueError(
+            f"requested cells {int(gsel.min())}..{int(gsel.max())} but these files hold "
+            f"{firstcell}..{firstcell + ncell - 1}"
+        )
     n = sel.size
     ny = window.nyear
 
@@ -242,23 +294,29 @@ def climate_table(  # noqa: PLR0915 -- a flat sequence of independent feature de
     with np.errstate(divide="ignore", invalid="ignore"):
         cols["aridity"] = np.where(pet > 0, annual_pr / pet, 0.0)
 
-    depth = ClmReader(soildepth)
-    with depth:
-        soil = depth.year(depth.header.firstyear)[:, 0]
-    cols["soildepth"] = soil[sel] if cells is not None else soil
+    soil, grid = _static_inputs(soildepth, coord)
+    cols["soildepth"] = soil[gsel]
 
-    grid = read_grid(coord)
-    frame = pl.DataFrame(
-        {
-            "cell": sel.astype(np.int32),
-            "lon": grid[sel, 0],
-            "lat": grid[sel, 1],
-            "leg": np.full(n, window.leg),
-            "state_year": np.full(n, window.state_year, dtype=np.int32),
-            **{k: v.astype(np.float64) for k, v in cols.items()},
-        }
-    )
-    return frame.select([*NON_FEATURE_COLUMNS, *CLIMATE_FEATURES])
+    return {
+        "cell": gsel.astype(np.int32),
+        "lon": grid[gsel, 0],
+        "lat": grid[gsel, 1],
+        "leg": np.full(n, window.leg),
+        "state_year": np.full(n, window.state_year, dtype=np.int32),
+        **{k: v.astype(np.float64) for k, v in cols.items()},
+    }
+
+
+def climate_table(
+    window: Window,
+    cells: Sequence[int] | None = None,
+    files: dict[str, str] | None = None,
+    soildepth: str | None = None,
+    coord: str | None = None,
+) -> pl.DataFrame:
+    """`climate_columns` as a table, in the fixed column order. Call this in the PARENT only."""
+    cols = climate_columns(window, cells=cells, files=files, soildepth=soildepth, coord=coord)
+    return pl.DataFrame(cols).select([*NON_FEATURE_COLUMNS, *CLIMATE_FEATURES])
 
 
 def basis(window: Window, files: dict[str, str] | None = None) -> dict[str, Any]:
