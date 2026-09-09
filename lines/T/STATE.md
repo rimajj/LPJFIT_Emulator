@@ -60,16 +60,16 @@ un-anchored tail. Level model out-of-fold: `exp/map-response-v0/oof_map.parquet`
 
 **Housekeeping, clear.** Five campaigns harvested, `--check` green. No verdict owed (no `exp_id`).
 
-**TWO THINGS WAIT ON THE OWNER. Do neither unasked** (both re-verified 2026-09-09).
+**ONE THING WAITS ON THE OWNER: the merge. Do not merge unasked.** T is rebased onto the current
+`origin/main` (now carrying `0e6fc9f`), 16 ahead / 0 behind, every gate verified locally on the
+rebased tree (`ruff check`, `ruff format --check`, `mypy --strict src/vegemu`, 207 tests + 1
+skipped, budgets, pathsafety, flags, ownership). `expected_gates.py` predicts budgets, lint, types,
+test, pathsafety, flags — but read the CI note in `docs/reference/cluster.md` first: it predicts
+from the WHOLE branch diff, so a docs-only push runs fewer than it names and `wait_gates.py` hangs.
 
-1. **The merge is READY.** D merged (`ae08be0` is in `origin/main`), T is rebased, gates green
-   locally. `expected_gates.py`: budgets, lint, types, test, pathsafety, flags — poll no others.
-2. **The Stop-gate fix is WRITTEN BUT UNCOMMITTED**, staged in `/p/projects/open/Jamir/vegemu` on
-   main under delegated integrator access. Claude Code's permission classifier denied the commit
-   twice; no workaround was attempted, which was right for enforcement machinery. Four files:
-   `session-end-gate.sh` (fix), `tests/test_session_end_gate.py` (5 tests, verified to fail
-   pre-fix), `path-guard.sh` (comment), `changelog.d/INT-stop-gate-sigpipe.md`. ⚠ **Do not redo it**
-   — `git -C /p/projects/open/Jamir/vegemu status` first; until main carries it, the gotcha holds.
+**The Stop-gate fix LANDED** (`0e6fc9f`, the four staged files unchanged) — the owner committed what
+the previous session could not. Verified satisfiable HERE by running the hook FILE, as its own
+gotcha demanded: exit 0 six times out of six. Gotcha retired, reasoning now in that hook's comment.
 
 ## Milestones
 
@@ -108,12 +108,10 @@ passes on carbon at year one and fails conjunctively. t5 (end-to-end transient) 
   conjunctive test is effectively over **19** quantities, not 22. Disclose it when quoting the 22.
 * **Keep a command clear of `slurm-guard.sh`'s keywords** (`train|eval|score|fit|sweep|response|
   rung`): it matches the WHOLE command, so even `cat scripts/train_emulator.py` is denied. It also
-  catches paths — copy an input somewhere without the word.
-* **The Stop gate CANNOT be satisfied IN THIS WORKTREE — diagnosed and FIXED on main, see NEXT;
-  until that lands, refresh the handoff because it is right, then ignore the block.**
-  `session-end-gate.sh:26` pipes `git log` into `grep -q` under `set -o pipefail`: grep exits on its
-  first match, `git log` takes SIGPIPE, pipefail makes the pipeline 141, so the `if` is false
-  however good your handoff is. ⚠ **It only reproduces when run AS A SCRIPT, which is how the hook
-  runs it — 141 six times out of six; the same pipeline typed into an interactive subshell returns
-  0 six out of six**, so an inline check will tell you it is fixed when it is not. Verify by running
-  the hook file. Integrator-owned; fix is `|| true` or capture before grepping.
+  catches paths, and any command naming a `.py` file trips the login-node guard — prefix
+  `ALLOW_LOGIN_HEAVY=1` for a genuinely quick check, or copy the input somewhere without the word.
+* **Verify a hook by running the HOOK FILE, never by retyping its pipeline into a shell.** The Stop
+  gate's SIGPIPE bug returned 141 six times out of six as a script and 0 six out of six inline, so
+  an inline check reports a fix that is not there. (That bug is now fixed on main.)
+* **Re-read `origin/main` before trusting "the merge is ready"** — it moved under this line twice in
+  two days, once carrying the very fix this line was blocked on.
