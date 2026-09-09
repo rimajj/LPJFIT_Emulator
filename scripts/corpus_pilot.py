@@ -71,6 +71,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
+import numpy as np
 import polars as pl
 
 from vegemu.corpus.perturb import DESIGN_SEED, VARS, pilot_design
@@ -88,6 +89,10 @@ NSPINUP = 1000
 # launches them all promptly. ⚠ PARTITION=priority is capped at 64 CPU per job, so a shard larger
 # than 64 must go to PARTITION=standard (up to 2048).
 SHARD_SIZE = 250
+# The smallest restart record the format admits: 25 patches with no vegetation in any of them
+# (`MEMORY.md:restart-size`, measured on the real 119 GiB file). A run whose record is this size
+# grew nothing, and a run that grew a forest is nearer 1.9 MB. Used only as a proxy in `harvest`.
+TREELESS_RESTART_BYTES = 380_000
 
 
 def _load(name: str) -> ModuleType:
@@ -492,6 +497,8 @@ def stage_harvest(version: str) -> int:
     out = meta_dir(version)
     runs = pl.read_csv(out / "runs.csv")
     ok, no_line, no_log, no_restart = 0, [], [], []
+    sizes: list[int] = []
+    treeless: list[str] = []
     for name, rdir in zip(runs["name"].to_list(), runs["run_dir"].to_list(), strict=True):
         log = Path(rdir) / f"lpjml.{name}.log"
         if not log.is_file() or log.stat().st_size == 0:
@@ -504,6 +511,11 @@ def stage_harvest(version: str) -> int:
         restart = Path(rdir) / "restart" / f"restart_{name}.lpj"
         if not restart.is_file() or restart.stat().st_size == 0:
             no_restart.append(name)
+            continue
+        size = restart.stat().st_size
+        sizes.append(size)
+        if size <= TREELESS_RESTART_BYTES:
+            treeless.append(name)
 
     total = runs.height
     print(f"pilot corpus {version}: {total} runs")
@@ -518,6 +530,27 @@ def stage_harvest(version: str) -> int:
     ):
         if items:
             print(f"  first few {label}: {items[:5]}")
+
+    # ⚠ A COMPLETE CAMPAIGN IS NOT THE SAME AS A USABLE CORPUS. A restart record is ~1.9 MB with a
+    # forest and bottoms out near 360 KB with no vegetation at all (`MEMORY.md:restart-size`), so
+    # the size distribution is a free first look at how many design points killed the forest. It is
+    # a PROXY, not the stem count -- that comes from decoding the records into the corpus table --
+    # but it is the number that says whether rung 1 would be scoring forests or scoring emptiness.
+    if sizes:
+        arr = np.sort(np.asarray(sizes, dtype=np.int64))
+        pct = [int(np.percentile(arr, q)) for q in (5, 25, 50, 75, 95)]
+        print(f"  restart bytes p5/p25/p50/p75/p95         {'/'.join(f'{p:,}' for p in pct)}")
+        print(
+            f"  at or below the treeless floor           {len(treeless)}/{len(sizes)} "
+            f"({100 * len(treeless) / len(sizes):.1f} %, floor {TREELESS_RESTART_BYTES:,} B)"
+        )
+        if len(treeless) > len(sizes) // 2:
+            print(
+                "  ⚠ MORE THAN HALF the runs produced a vegetation-free state. The campaign can be "
+                "complete and the corpus still be mostly empty -- report this fraction with every "
+                "number the corpus supports, and check the axis ranges before scoring anything."
+            )
+
     complete = ok == total and not no_restart
     print(
         f"verdict: {'COMPLETE' if complete else 'INCOMPLETE'} -- "
