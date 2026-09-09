@@ -116,6 +116,28 @@ curl -s -H "Authorization: token $TOKEN" https://api.github.com/repos/<owner>/<r
 path filter reports *no status at all*, not "skipped", so waiting for a gate that will not run hangs
 forever. If it prints `(none)`, there is no verdict coming.
 
+⚠ **`expected_gates.py` answers a different question than `wait_gates.py` needs, and the two disagree
+exactly when your last push was documentation.** It computes from the diff **against `origin/main`**,
+i.e. everything the branch would merge — which is the right basis for deciding whether to merge. But a
+push only starts the workflows whose path filters match **that push**. So on a branch whose cumulative
+diff touches `src/**`, a docs-only push prints `types, test, flags` among the expected gates and then
+runs none of them, and `wait_gates.py` hangs on gates that will never appear (measured 2026-09-09:
+predicted six, three ran).
+
+That is not a wrong answer, and the fix is not to distrust it. Ask which gates ran for **this head sha**
+and compare paths:
+
+```bash
+gh run list --branch line/<L> --limit 15 --json name,status,conclusion,headSha
+git diff --name-only <sha-of-their-last-green-run>..HEAD -- src tests pyproject.toml
+```
+
+If that diff is **empty**, the missing gates' last green run still covers the current tree and the
+branch is mergeable — the gate did not skip because something was wrong, it skipped because nothing it
+guards changed. `src/**` is the filter for `types` and `test`; `flags` adds `config/flags.toml`,
+`.github/gates.toml` and `tools/check_gates.py`. Verify locally too (`mypy --strict src/vegemu`,
+`PYTHONPATH=src pytest -q`) rather than inferring green from an absence.
+
 ---
 
 ## Storage
