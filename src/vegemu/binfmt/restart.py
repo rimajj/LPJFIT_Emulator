@@ -498,9 +498,7 @@ _SOIL_VECTORS: tuple[tuple[str, int], ...] = (
     ("df_tillage", NTILLLAYER),
     ("w", NSOILLAYER),
 )
-_SOIL_VECTORS_2: tuple[tuple[str, int], ...] = (
-    ("w_fw", NSOILLAYER),
-)
+_SOIL_VECTORS_2: tuple[tuple[str, int], ...] = (("w_fw", NSOILLAYER),)
 _SOIL_VECTORS_3: tuple[tuple[str, int], ...] = (
     ("temp", NSOILLAYER + 1),
     ("enth", NHEATGRIDP),

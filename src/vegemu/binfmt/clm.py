@@ -145,42 +145,84 @@ class ClmHeader:
 
     @classmethod
     def _read_payload(cls, fh: BinaryIO, name: str, version: int) -> ClmHeader:
+        """Parse one version's struct. The six common ints are bound BY NAME, deliberately.
+
+        Every version begins with the same six integers, so they are read once here and the
+        version-specific tail follows on the same handle -- 24, then 8 / 16 / 24 more, which is the
+        24 / 32 / 40 / 48 `headersize()` reports.
+
+        ⚠ WHY NOT `cls(name, version, *f, ...)`, WHICH IS SHORTER AND WAS WHAT THIS DID. It reads as
+        a type error -- "gets multiple values for keyword argument" at every call site -- because
+        `struct.unpack` is typed as a tuple of UNKNOWN length, so nothing proves the star-unpack
+        stops before `cellsize_lon`. The runtime binding was correct: `ClmHeader` has exactly eight
+        positional fields before `cellsize_lon` and every branch passed exactly eight. But a format
+        reader wants its field map spelled out regardless, because this is the one place where the
+        order of six integers in a file BECOMES the meaning of six fields, and a checker that
+        cannot see that boundary is telling us the code hid it.
+        """
+        order, firstyear, nyear, firstcell, ncell, nbands = struct.unpack("<6i", fh.read(24))
         if version == 1:
-            f = struct.unpack("<6i", fh.read(24))
-            return cls(name, version, *f, datatype=LPJ_SHORT)
-        if version == 2:
-            f = struct.unpack("<6i2f", fh.read(32))
             return cls(
                 name,
                 version,
-                *f[:6],
-                cellsize_lon=f[6],
-                scalar=f[7],
-                cellsize_lat=f[6],  # v2 has one cellsize; the C copies it to both
+                order,
+                firstyear,
+                nyear,
+                firstcell,
+                ncell,
+                nbands,
+                datatype=LPJ_SHORT,
+            )
+        if version == 2:
+            cellsize, scalar = struct.unpack("<2f", fh.read(8))
+            return cls(
+                name,
+                version,
+                order,
+                firstyear,
+                nyear,
+                firstcell,
+                ncell,
+                nbands,
+                cellsize_lon=cellsize,
+                scalar=scalar,
+                cellsize_lat=cellsize,  # v2 has one cellsize; the C copies it to both
                 datatype=LPJ_SHORT,
             )
         if version == 3:
-            f = struct.unpack("<6i3fi", fh.read(40))
+            cellsize_lon, scalar, cellsize_lat, datatype = struct.unpack("<3fi", fh.read(16))
             return cls(
                 name,
                 version,
-                *f[:6],
-                cellsize_lon=f[6],
-                scalar=f[7],
-                cellsize_lat=f[8],
-                datatype=f[9],
+                order,
+                firstyear,
+                nyear,
+                firstcell,
+                ncell,
+                nbands,
+                cellsize_lon=cellsize_lon,
+                scalar=scalar,
+                cellsize_lat=cellsize_lat,
+                datatype=datatype,
             )
-        f = struct.unpack("<6i3fi2i", fh.read(48))
+        cellsize_lon, scalar, cellsize_lat, datatype, nstep, timestep = struct.unpack(
+            "<3fi2i", fh.read(24)
+        )
         return cls(
             name,
             version,
-            *f[:6],
-            cellsize_lon=f[6],
-            scalar=f[7],
-            cellsize_lat=f[8],
-            datatype=f[9],
-            nstep=f[10],
-            timestep=f[11],
+            order,
+            firstyear,
+            nyear,
+            firstcell,
+            ncell,
+            nbands,
+            cellsize_lon=cellsize_lon,
+            scalar=scalar,
+            cellsize_lat=cellsize_lat,
+            datatype=datatype,
+            nstep=nstep,
+            timestep=timestep,
         )
 
     def pack(self) -> bytes:

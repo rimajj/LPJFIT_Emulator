@@ -245,9 +245,52 @@ pairing the two does not raise, it relabels every cell in the corpus.
 
 ## 3. Which forcing years the spin-up actually sees
 
-`iterate.c:114` — `spinup_year = (year - firstyear + nspinup) % nspinyear`, and
-`climate_year = spinup_year + climate->firstyear`. With `nspinup` 1000, `nspinyear` 30 and forcing
-starting in 1901, **the 1000-year spin-up cycles 1901–1930 deterministically** (`shuffle_climate`
-is off). The stored `restart_1999.lpj` is therefore *spin-up under 1901–1930, then the 1901–1999
-historical transient* — a near-equilibrium carrying a real 20th-century transient signal, not a
-pure equilibrium. Any estimand built on it must say so.
+⚠ **Corrected 2026-09-08.** An earlier version of this section said the spin-up cycles its 30 years
+deterministically via `spinup_year = (year - firstyear + nspinup) % nspinyear` (`iterate.c:114`).
+That is the **`else` branch**, and it is not the one taken: the ground truth's config sets
+`"shuffle_climate": true`, so `iterate.c:108` runs instead and each spin-up year draws a **random**
+one of the stored `nspinyear` years, `spinup_year = erand48(config->seed) * nspinyear`.
+
+What actually happens (`iterate.c:88-119`): the loop runs `firstyear - nspinup` … `lastyear`, and a
+year **before the climate file's own first year** takes a random stored year; from the file's first
+year onward the file is read in order. With `nspinup` 1000, `nspinyear` 30, `firstyear` 2000,
+`lastyear` 1999 and forcing starting in 1901, the stored `restart_1999.lpj` is **901 randomly drawn
+years out of 1901–1930, then the 1901–1999 historical transient in order** — not a pure
+equilibrium, and not a deterministic cycle either. Any estimand built on it must say so.
+
+Two consequences that bite:
+
+* the draw sequence is a function of `random_seed` alone, so **two arms with the same seed see the
+  same sequence of climate years** and their difference is climate, not weather. That is what makes
+  a paired control-vs-perturbed comparison at a single cell worth anything.
+* the last `nyear_of_file` years are **not** shuffled. With a 30-year forcing file every arm and
+  every seed shares that deterministic tail, so a window mean taken over it has far less climate
+  noise than one taken over the shuffled part. Do not compare a tail window against a shuffled one.
+
+Also: the spin-up is run with **no preprocessor flag at all** — the ground truth's `slurm_spinup.jcf`
+passes no `-D`, so `-DSPINUP` is *not* set and `inherit_startyear` is 0, not 200. The model prints
+its resolved value as `inheritance after N yrs`; read it there rather than from the config text.
+
+---
+
+## 4. A subset `.clm`: one cell, 44 KB, and the model reads it correctly
+
+A forcing file does **not** have to span the whole grid. `openclimate.c:207-219` seeks to
+`(startgrid - header.firstcell) * nbands * itemsize + headersize` and strides by
+`header.ncell * nbands * itemsize`; the only range gate is `openinputfile.c:145`,
+
+```
+firstgrid >= header.firstcell  &&  nall + firstgrid <= header.ncell + header.firstcell
+```
+
+where `firstgrid`/`nall` come from `startgrid`/`endgrid` (`fscanconfig.c:1104`). So a file declaring
+`firstcell = <cell>, ncell = 1` is read and validated correctly while the grid and soil inputs stay
+global. One cell × 30 years × 365 days × float32 is **43,851 bytes** including the header.
+
+Writing one: copy every header field from the source and change only `firstcell`, `ncell`,
+`firstyear` and `nyear`. **Refuse a source that is not unscaled float** — the historical leg is v3
+float32 scalar 1.0, but the scenario legs are v2 int16 scalar 0.1, and a perturbation written
+through one of those quantises to a tenth of a degree instead of failing.
+
+The proof that such a writer is correct is a **zero-perturbation byte comparison** against the slice
+of the source file it came from (`tests/test_perturb.py`), not an assertion — invariant 7.

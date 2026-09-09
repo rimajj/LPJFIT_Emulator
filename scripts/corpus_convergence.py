@@ -179,9 +179,7 @@ def main() -> int:  # noqa: PLR0915 -- one flat measurement pass, reported in on
         lats = np.asarray(ds.variables["lat"][:])
     res, earth_r = 0.5, 6_371_000.0
     lat_edges = np.deg2rad(np.stack([lats - res / 2, lats + res / 2], axis=1))
-    cell_area = earth_r**2 * np.deg2rad(res) * (
-        np.sin(lat_edges[:, 1]) - np.sin(lat_edges[:, 0])
-    )
+    cell_area = earth_r**2 * np.deg2rad(res) * (np.sin(lat_edges[:, 1]) - np.sin(lat_edges[:, 0]))
     area = cell_area[lat_i]
     glob1 = np.nansum(t1.astype(np.float64) * area[None, :], axis=1) * 1e-15  # gC -> Pg C
     glob2 = np.nansum(t2.astype(np.float64) * area[None, :], axis=1) * 1e-15
