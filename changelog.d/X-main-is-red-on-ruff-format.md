@@ -15,6 +15,16 @@
   around the same deadlock, which makes it an integrator matter and not bad luck:** the inbound
   block should not count against a state budget, or `rotate_state.py` should run as part of
   receiving one.
-- Line X merged past this red gate deliberately, with `tools/merge.sh X --allow-red`, having first
-  confirmed the failure is untouched by its own diff. The reason is recorded in the merge commit,
-  which is what that flag is for.
+- Line X went past this red gate deliberately with `tools/merge.sh X --allow-red`, having confirmed
+  the failure is untouched by its own diff — **and the merge then failed anyway, for a second and
+  unrelated reason: the shared integration checkout has uncommitted staged work in it.**
+  `/p/projects/open/Jamir/vegemu` holds staged edits to `.claude/hooks/path-guard.sh` and
+  `.claude/hooks/session-end-gate.sh` plus a new test and changelog fragment for a Stop-hook SIGPIPE
+  fix. `git merge` refused cleanly — nothing is half-merged and none of that work was touched — but
+  **no line can merge until it is committed or stashed**, and it is not any line's to commit.
+  Line X is left 9 commits ahead of `main`, pushed and green apart from the pre-existing lint break.
+- Together these are three separate single points of failure in the merge path, all live at once: a
+  red gate nobody may fix, a cross-line channel that cannot carry the message, and a shared checkout
+  that one unfinished session can lock for everybody. The third wants the same treatment as the
+  first two — `merge.sh` should check the integration worktree is clean **before** taking the lock
+  and say so, rather than discovering it inside the locked section.

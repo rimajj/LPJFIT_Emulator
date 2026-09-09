@@ -13,6 +13,12 @@ does not build models (T) or generate data (D).
 
 ## NEXT — start here
 
+⚠ **Line X is 9 commits ahead of `main`, pushed but NOT merged.** `tools/merge.sh` refused cleanly
+inside its lock: the shared checkout `/p/projects/open/Jamir/vegemu` has **uncommitted staged work**
+(a Stop-hook SIGPIPE fix), untouched and not half-merged, but no line can merge until its owner
+commits or stashes it. `main` is also red on `lint` — `ruff format` on three of line T's files,
+handled with `--allow-red`. Both in `changelog.d/X-main-is-red-on-ruff-format.md`.
+
 **The kill test is sealed and the bar is 0.225690.** Line D's pilot corpus (200 cells × 30 climates,
 same cell, same seed, only the climate differs) removes the collinearity that made X1's `fail`
 non-decisive. `X-20260909-pilot-warming-response` has seven nulls, all derived before any model
@@ -30,11 +36,9 @@ blocked 5-fold seed 42 via `blocked_spatial_folds`, as derived. Re-derive any nu
 Three things that constrain how the result may be reported:
 
 * **Copying another cell's response is worse than saying nothing changes** (nearest cell −0.281166,
-  analogue −0.239753) — but not uniformly: the analogue null reaches +0.3292 on soil carbon and
-  −0.6387 on stem count. Size transfers between cells, composition does not.
+  analogue −0.239753) — but the analogue gets +0.3292 on soil carbon and −0.6387 on stem count.
 * **The per-level table (29 rows) is part of the result, not an appendix.** Only 40.5 % of cells are
-  monotone in carbon across 0/+2/+4/+6 K. A pass pooled with a fail at more than half the levels
-  must be reported as such.
+  monotone in carbon across 0/+2/+4/+6 K; a pooled pass with a fail at >half the levels must say so.
 * **380 of 6,000 runs (6.33 %) are treeless.** Counts and stocks keep those rows; the three trait
   medians score on 5,620 — where vegetation survived. Say the row count with every trait number.
 
@@ -52,24 +56,20 @@ can synthesise for a dispersed cell set, X4 is re-derivable against it. Bar 0.78
 
 **Owed by other lines, in order:**
 
-* **line T** — the two model arms above. Also still owed: commit `synth-v1`/`v2`/`v3`, which exist
-  only as scratch output, then re-score by adding the run directory to `VARIANTS` in
-  `scripts/exp_derive_nulls_restart.py` (two seconds a run).
+* **line T** — the two model arms above, plus the still-owed `synth-v1`/`v2`/`v3` commit (they exist
+  only as scratch output); then re-score via `VARIANTS` in `scripts/exp_derive_nulls_restart.py`.
 * **line D** — rebuild the corpus against the genuine high-emissions second run
   (`..._random_seed2_from_hist_seed2`) under a **new corpus version**: v0's hash is cited by two
   sealed pre-registrations and must not move. Make the builder **assert** the two run files differ.
-* **line D** — the one-cell, one-year, two-binary byte comparison that closes the build question.
-  Correction to the sealed wording: `docs/decisions/20260908-X-build-gate-correction-the-wrapper-exists.md`.
-* **integrator** — `PLAN.md` needs the two corrections requested last session (the t3 wording and the
-  polish-run paragraph); neither has landed. `MEMORY.md` wants rows for the proportional-response bar
-  and for the ceiling-arm rule below. ⚠ The cross-line channel is still unusable at budget, so this
-  list is the channel.
+* **line D** — the one-cell, one-year, two-binary byte comparison closing the build question; the
+  sealed wording is corrected in `docs/decisions/20260908-X-build-gate-correction-the-wrapper-exists.md`.
+* **integrator** — `PLAN.md` still needs last session's two corrections (the t3 wording, the
+  polish-run paragraph); `MEMORY.md` wants rows for the proportional-response bar and the
+  ceiling-arm rule. ⚠ The cross-line channel is unusable at budget, so this list is the channel.
 * **integrator** — two shared-`tools/` bugs, each a guard reading a different file set than it
-  guards. **`git add … && git commit` in ONE command silently disables every commit-time checker**
-  (the hook reads the index before the command runs, sees it empty, exits 0):
-  `docs/decisions/20260909-X-the-commit-guard-sees-an-empty-index.md`. And the gate selector reads a
-  different diff than GitHub, costing 15 minutes per `.md`-only push:
-  `docs/decisions/20260909-X-gate-selector-reads-a-different-diff-than-github.md`.
+  guards: **`git add … && git commit` in ONE command silently disables every commit-time checker**
+  (`docs/decisions/20260909-X-the-commit-guard-sees-an-empty-index.md`), and the gate selector reads
+  a different diff than GitHub, 15 min per `.md`-only push (`…-gate-selector-reads-a-different-diff-than-github.md`).
 
 ## Milestones
 
