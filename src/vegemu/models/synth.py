@@ -244,8 +244,10 @@ def synthesise_cell(  # noqa: PLR0915 -- one pass over the patches; splitting it
             u = (np.arange(n) + 0.5) / n
             targets = {
                 name: quantile_function(
-                    prediction[f"{name}_p10"], prediction[f"{name}_p50"],
-                    prediction[f"{name}_p90"], u,
+                    prediction[f"{name}_p10"],
+                    prediction[f"{name}_p50"],
+                    prediction[f"{name}_p90"],
+                    u,
                 )
                 for name in MATCH_TRAITS
                 if f"{name}_p50" in prediction

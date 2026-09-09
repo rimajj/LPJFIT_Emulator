@@ -73,8 +73,10 @@ def assert_no_leakage() -> None:
                 raise AssertionError(
                     f"feature {name!r} contains {bad!r}: that is a null or a target, not an input"
                 )
-    print(f"leakage: {len(CLIMATE_FEATURES)} features, none containing "
-          f"{'/'.join(FORBIDDEN)}", flush=True)
+    print(
+        f"leakage: {len(CLIMATE_FEATURES)} features, none containing {'/'.join(FORBIDDEN)}",
+        flush=True,
+    )
 
 
 def _analogue(features: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
@@ -111,8 +113,11 @@ def run(version: str, block_degrees: float, k: int, out: Path) -> dict[str, obje
 
     # ---- the map experiment ---------------------------------------------------------------
     a = assemble(hist, SCORED_CONJUNCTIVE, k=k, block_degrees=block_degrees)
-    print(f"\nmap: {a.n} cells, {len(SCORED_CONJUNCTIVE)} quantities, {k} folds "
-          f"at {block_degrees} deg", flush=True)
+    print(
+        f"\nmap: {a.n} cells, {len(SCORED_CONJUNCTIVE)} quantities, {k} folds "
+        f"at {block_degrees} deg",
+        flush=True,
+    )
     t0 = time.time()
     (pred_map,), models = fit_out_of_fold(
         a.features, a.truth, a.folds, SCORED_CONJUNCTIVE, [a.features], config=EmulatorConfig()
@@ -154,8 +159,12 @@ def run(version: str, block_degrees: float, k: int, out: Path) -> dict[str, obje
         raise AssertionError("the two legs are not aligned")
     t0 = time.time()
     (pred_base, pred_future), _ = fit_out_of_fold(
-        base.features, base.truth, base.folds, RESPONSE_QUANTITIES,
-        [base.features, future.features], config=EmulatorConfig(),
+        base.features,
+        base.truth,
+        base.folds,
+        RESPONSE_QUANTITIES,
+        [base.features, future.features],
+        config=EmulatorConfig(),
     )
     print(f"  fitted in {time.time() - t0:.0f} s", flush=True)
     pred_delta = pred_future - pred_base
@@ -165,18 +174,23 @@ def run(version: str, block_degrees: float, k: int, out: Path) -> dict[str, obje
         "model": skill_response_mean(pred_delta, delta),
         "no_response": skill_response_mean(np.zeros_like(delta), delta),
         "mean_response": skill_response_mean(null_delta["climatological_mean"], delta),
-        "geographic_address_response": skill_response_mean(
-            null_delta["geographic_address"], delta
-        ),
+        "geographic_address_response": skill_response_mean(null_delta["geographic_address"], delta),
         "shuffled_response": skill_response_mean(null_delta["shuffled_target"], delta),
     }
     resp_per_q = {
-        "model": dict(zip(RESPONSE_QUANTITIES,
-                          [float(v) for v in skill_vs_no_change(pred_delta, delta)], strict=True)),
+        "model": dict(
+            zip(
+                RESPONSE_QUANTITIES,
+                [float(v) for v in skill_vs_no_change(pred_delta, delta)],
+                strict=True,
+            )
+        ),
         "analogue_response": dict(
-            zip(RESPONSE_QUANTITIES,
+            zip(
+                RESPONSE_QUANTITIES,
                 [float(v) for v in skill_vs_no_change(null_delta["nearest_analogue"], delta)],
-                strict=True)
+                strict=True,
+            )
         ),
     }
     print("  skill_response_mean:")
@@ -205,8 +219,12 @@ def run(version: str, block_degrees: float, k: int, out: Path) -> dict[str, obje
 
     return {
         "corpus_version": version,
-        "split": {"kind": "blocked_spatial", "k": k, "block_degrees": block_degrees,
-                  "fold_seed": 42},
+        "split": {
+            "kind": "blocked_spatial",
+            "k": k,
+            "block_degrees": block_degrees,
+            "fold_seed": 42,
+        },
         "shuffle_seed": SHUFFLE_SEED,
         "hyperparameters": EmulatorConfig().__dict__,
         "map": {
