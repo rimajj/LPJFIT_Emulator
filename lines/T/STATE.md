@@ -64,13 +64,12 @@ more than any other single prediction. Re-measure that bound after any change wi
 **Housekeeping, clear.** Five campaigns harvested, `--check` green. **No verdict is owed:** this has
 no `exp_id` — `experiments/**` is X's, so a ladder step goes in a record.
 
-**THE MERGE IS UNBLOCKED AND READY — but still do not merge unasked.** Line D merged
-(`ae08be0` is now an ancestor of `origin/main`), line/T is rebased onto it, and every gate is green
-LOCALLY: `ruff check .`, `ruff format --check .`, `mypy --strict src/vegemu`, and 195 tests. Two
-long-standing type errors in T's own `models/` files surfaced once D's fix stopped masking them and
-are fixed. `expected_gates.py` says this diff triggers budgets, lint, types, test, pathsafety,
-flags — and NOT experiments, campaigns or changelog, so do not poll for those. Run
-`tools/merge.sh T` when the owner asks; nothing else is outstanding.
+**THE MERGE IS UNBLOCKED AND READY — but still do not merge unasked.** Line D merged (`ae08be0` is
+now an ancestor of `origin/main`), line/T is rebased onto it, and every gate is green LOCALLY:
+`ruff check .`, `ruff format --check .`, `mypy --strict src/vegemu`, 195 tests. Two long-standing
+type errors in T's own `models/` files surfaced once D's fix stopped masking them, and are fixed.
+`expected_gates.py` says this diff triggers budgets, lint, types, test, pathsafety, flags and NOT
+experiments/campaigns/changelog — do not poll for those. `tools/merge.sh T` when the owner asks.
 
 ## Milestones
 
