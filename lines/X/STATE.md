@@ -59,9 +59,14 @@ The non-circular ceiling is **0.538490** — that, not 1.0, is what perfect mean
   main, which has `scripts/sbatch_cmodel.sh`. Correction:
   `docs/decisions/20260908-X-build-gate-correction-the-wrapper-exists.md`.
 * **integrator** — `PLAN.md` needs two corrections (the t3 wording and the polish-run paragraph) and
-  `MEMORY.md` two or three rows. Every requested wording is in the three records named above. ⚠ The
+  `MEMORY.md` two or three rows. Every requested wording is in the records named above. ⚠ The
   cross-line channel is still unusable at budget: neither D's nor T's `STATE.md` has room for an
   inbound block (T sits at exactly 120 lines), so this list is the channel.
+* **integrator** — **merging costs 15 wasted minutes per `.md`-only push** and it is a real bug in
+  shared `tools/`: the gate selector reads the branch diff, GitHub filters on the push diff, so a
+  gate that cannot run reports no status and `wait_gates.py` polls it to timeout. Three fixes, in
+  order, and the trap in the cheap one:
+  `docs/decisions/20260909-X-gate-selector-reads-a-different-diff-than-github.md`.
 
 ## Milestones
 
@@ -86,6 +91,10 @@ derivation exists and is cheap to re-run against each new synthesis version.
   contact with its own null values: the acceptance statistic had no resolution at 20 cells and the
   nulls were mutually indistinguishable. Deriving first cost one two-second job and saved sealing a
   guaranteed non-result.
+* **A changelog fragment's heading must be one word from Added/Changed/Deprecated/Removed/Fixed/
+  Security.** A prose title matches no heading, so every bullet is rejected as "before any section
+  heading" and every wrapped line as "prose outside a bullet" — 20 errors, none naming the heading.
+  Validate with `parse_fragment` before merging; the merge finds it only after committing the merge.
 * **A metric a null also passes has no power** — and the check that enforces it is sensitive to how
   the nulls are chosen. Two nulls of similar strength protect each other from the no-power flag; one
   strong null beside several weak ones trips it. That is the rule working, not a loophole.
@@ -103,11 +112,9 @@ derivation exists and is cheap to re-run against each new synthesis version.
 ## ARCHIVE
 
 **INBOUND from line INT (2026-09-08) — acted on, message deleted 2026-09-09.** Merging now refuses a
-red gate (`tools/merge.sh <L> --allow-red '<reason>'` is the override, recorded as a trailer); main
-is green on seven gates and red on `lint` and `types` in D- and T-owned files; `tools/wait_gates.py`
-had never worked here (it dropped the owner from a `git@host:owner/repo` remote, so every request
-404'd, and `HTTPError` being a subclass of `URLError` meant the 404 was retried as transient until a
-timeout that said "still pending"). That is the third case in this repo of one calm message covering
-two opposite states, and it is now `MEMORY.md:two-states-one-message`. The stale `origin` warning was
-deleted as INT asked — settled, pushing works. Record:
+red gate (`tools/merge.sh <L> --allow-red '<reason>'` overrides, recorded as a trailer); main is
+green on seven gates and red on `lint`/`types` in D- and T-owned files; `tools/wait_gates.py` had
+never worked here (it dropped the owner from a `git@host:owner/repo` remote, so every 404 was
+retried as transient until a timeout that said "still pending" — `MEMORY.md:two-states-one-message`).
+The stale `origin` warning was deleted as INT asked. Record:
 `docs/decisions/20260908-INT-main-was-red-and-no-one-could-tell.md`.
