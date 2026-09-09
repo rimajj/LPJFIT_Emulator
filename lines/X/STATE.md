@@ -13,12 +13,12 @@ does not build models (T) or generate data (D).
 
 ## NEXT — start here
 
-⚠ **Line X is 11 commits ahead of `main`, pushed but NOT merged, and ONE commit unblocks it.**
-`tools/merge.sh` refused cleanly inside its lock: the shared checkout `/p/projects/open/Jamir/vegemu`
-holds **uncommitted staged work — which is itself the fix for the Stop hook's SIGPIPE bug, the one
-that falsely blocks any session refreshing its handoff in its last commit** (it fired on this one;
-the handoff was fine). Committing it unblocks the merge AND the hook. `main` is separately red on
-`lint` (`ruff format`, three line-T files) — handled. `changelog.d/X-main-is-red-on-ruff-format.md`.
+✅ **Merged. Line X's 11 commits are on `main`, every gate green, and this line is level with it.**
+Neither blocker was line X's. The staged Stop-hook SIGPIPE fix is committed, so **the "Stop gate
+cannot be satisfied" gotcha is dead** — refreshing the handoff in your last commit now passes, pinned
+by `tests/test_session_end_gate.py`. The three line-T files that reddened `lint` were formatted on
+`main` (that gate checks the WHOLE repo, so they reddened every branch). ⚠ One is **not** layout-only:
+the docstring of `src/vegemu/models/__init__.py` lost a deliberate indent — restoring it is T's call.
 
 **The kill test is sealed and the bar is 0.225690.** Line D's pilot corpus (200 cells × 30 climates,
 same cell, same seed, only the climate differs) removes the collinearity that made X1's `fail`
@@ -43,11 +43,10 @@ Three things that constrain how the result may be reported:
 * **380 of 6,000 runs (6.33 %) are treeless.** Counts and stocks keep those rows; the three trait
   medians score on 5,620 — where vegetation survived. Say the row count with every trait number.
 
-**X3 (`X-20260908-heldout-forcing-leg`) is sealed and still awaits line T's model arm** — unchanged
-for two sessions. Fit on the historical leg only, predict from the low-emissions 2071–2100 climate,
-assemble out-of-fold under 15° blocked folds: `scripts/sbatch_py.sh --exp
-X-20260908-heldout-forcing-leg T-heldout-leg-v0 <script>`. It must reach **0.0837** (best null
-0.033749) against 0.0361 on its own leg; the non-circular ceiling is **0.538490**, not 1.0.
+**X3 (`X-20260908-heldout-forcing-leg`) is sealed and still awaits line T's model arm** — unchanged for
+three sessions. Fit on the historical leg only, predict from the low-emissions 2071–2100 climate, then
+assemble out-of-fold under 15° blocked folds: `scripts/sbatch_py.sh --exp X-20260908-heldout-forcing-leg
+T-heldout-leg-v0 <script>`. Must reach **0.0837** (best null 0.033749) against 0.0361 on its own leg; the non-circular ceiling is **0.538490**, not 1.0.
 
 **X4 (the emitted restart file) stays unsealed; the pilot corpus is what will fix it.** Its blocker
 was a 20-cell contiguous block on which all four nulls collapsed into 0.786–0.845. The pilot design
@@ -63,13 +62,14 @@ can synthesise for a dispersed cell set, X4 is re-derivable against it. Bar 0.78
   sealed pre-registrations and must not move. Make the builder **assert** the two run files differ.
 * **line D** — the one-cell, one-year, two-binary byte comparison closing the build question; the
   sealed wording is corrected in `docs/decisions/20260908-X-build-gate-correction-the-wrapper-exists.md`.
-* **integrator** — `PLAN.md` still needs last session's two corrections (the t3 wording, the
-  polish-run paragraph); `MEMORY.md` wants rows for the proportional-response bar and the
-  ceiling-arm rule. ⚠ The cross-line channel is unusable at budget, so this list is the channel.
-* **integrator** — two shared-`tools/` bugs, each a guard reading a different file set than it
-  guards: **`git add … && git commit` in ONE command silently disables every commit-time checker**
-  (`docs/decisions/20260909-X-the-commit-guard-sees-an-empty-index.md`), and the gate selector reads
-  a different diff than GitHub, 15 min per `.md`-only push (`…-gate-selector-reads-a-different-diff-than-github.md`).
+* **integrator** — `PLAN.md` wants two corrections (t3 wording, polish-run paragraph); `MEMORY.md`
+  wants rows for the proportional-response bar and the ceiling-arm rule. ⚠ Line T's and line D's
+  `STATE.md` both sit at exactly 120 lines, so `tools/inbound.py` reddens `budgets` — still no channel.
+* **integrator** — three shared-tool bugs, one shape (a guard whose input is not what it guards):
+  `git add … && git commit` in ONE command disables every commit-time checker
+  (`docs/decisions/20260909-X-the-commit-guard-sees-an-empty-index.md`); the gate selector reads a
+  different diff than GitHub; and **`slurm-guard` matches a command's TEXT**, so any `git` command
+  naming a `.py` path — even in a commit message body — is refused, teaching `ALLOW_LOGIN_HEAVY=1`.
 
 ## Milestones
 
