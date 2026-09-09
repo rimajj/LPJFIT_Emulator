@@ -6,7 +6,7 @@
 WHY THIS DERIVATION IS DIFFERENT FROM `exp_derive_nulls.py`. That one derives the nulls of the
 warming-response test on the two ground-truth legs, where every cell holds exactly ONE climate, so
 climate and geography are collinear and the response is not separately identified -- which is the
-diagnosis X1 came back with. The pilot corpus (line D, `docs/decisions/20260909-D-pilot-corpus-v1.md`)
+diagnosis X1 came back with. The pilot corpus (line D, `20260909-D-pilot-corpus-v1.md`)
 spins the SAME cell up under 30 climates with the same config, the same forcing window and the same
 random seed, so the only difference between an arm and its control is the climate. The response is
 therefore identified BY CONSTRUCTION here, and the same-cell baseline null is free at every cell.
@@ -42,6 +42,7 @@ import csv
 import json
 import sys
 import warnings
+from itertools import pairwise
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
@@ -67,7 +68,7 @@ from vegemu.score import (
 SHUFFLE_SEED = 20260909
 CONTROL_POINT = "control"
 
-# The cells.csv columns that carry each cell's own baseline climate, already standardised by line D's
+# The cells.csv columns carrying each cell's own baseline climate, already standardised by line D's
 # design code. These are the analogue null's feature space: they are the five perturbation axes'
 # baselines, so "climatically nearest cell" means nearest in the same coordinates the design varies.
 ANALOGUE_FEATURES: tuple[str, ...] = (
@@ -129,7 +130,11 @@ def decode(version: str, nproc: int, limit: int | None) -> pl.DataFrame:
     if limit is not None:
         rows = rows[:limit]
     tasks = [
-        (str(Path(r["run_dir"]) / "restart" / f"restart_{r['name']}.lpj"), int(r["cell"]), r["point"])
+        (
+            str(Path(r["run_dir"]) / "restart" / f"restart_{r['name']}.lpj"),
+            int(r["cell"]),
+            r["point"],
+        )
         for r in rows
     ]
     print(f"decoding {len(tasks)} restart files on {nproc} processes", flush=True)
@@ -142,7 +147,8 @@ def decode(version: str, nproc: int, limit: int | None) -> pl.DataFrame:
             decoded = list(pool.imap(_decode_one, tasks, chunksize=8))
 
     present = [r for r in decoded if r is not None]
-    print(f"decoded {len(present)} of {len(tasks)}; {len(tasks) - len(present)} missing", flush=True)
+    missing = len(tasks) - len(present)
+    print(f"decoded {len(present)} of {len(tasks)}; {missing} missing", flush=True)
     return pl.DataFrame(present)
 
 
@@ -168,7 +174,8 @@ def build_deltas(
     cell_ids = sorted(set(complete) & set(cells["cell"].to_list()))
     print(f"{len(cell_ids)} cells complete over {len(points)} perturbed points + control")
 
-    index = {(int(c), str(p)): i for i, (c, p) in enumerate(zip(state["cell"], state["point"]))}
+    pairs = zip(state["cell"], state["point"], strict=True)
+    index = {(int(c), str(p)): i for i, (c, p) in enumerate(pairs)}
     values = matrix(state, quantities)
 
     dtrue = np.full((len(cell_ids), len(points), len(quantities)), np.nan)
@@ -210,6 +217,7 @@ def derive_nulls(
     control: npt.NDArray[np.float64],
     cells: pl.DataFrame,
     points: list[str],
+    *,
     quantities: tuple[str, ...],
     k: int,
     degrees: float,
@@ -229,7 +237,7 @@ def derive_nulls(
     ⚠ BOTH FORMS ARE REPORTED BECAUSE THE OBVIOUS ONE IS UNUSABLE. Aggregating the donor fractions
     with a MEAN scores -27.4 pooled and -173.8 on above-ground biomass: the fraction has a near-zero
     control in its denominator at the cells that go treeless, so a handful of enormous donor ratios
-    are multiplied onto the standing state of large cells. The median is the estimator a heavy-tailed
+    are multiplied onto the standing state of large cells. The median is what a heavy-tailed
     ratio requires, and the mean form is kept in the output so that "unusable" stays a measurement
     rather than a remark.
     """
@@ -238,7 +246,7 @@ def derive_nulls(
     features = matrix(cells, ANALOGUE_FEATURES)
     folds = blocked_spatial_folds(lon, lat, k=k, degrees=degrees, seed=42)
     n_tiles = len(np.unique(spatial_blocks(lon, lat, degrees)))
-    print(f"{len(np.unique(folds))} folds over {n_tiles} tiles of {degrees:g} deg, {len(lon)} cells")
+    print(f"{len(np.unique(folds))} folds, {n_tiles} tiles of {degrees:g} deg, {len(lon)} cells")
 
     level_mean = np.full_like(dtrue, np.nan)
     prop_mean = np.full_like(dtrue, np.nan)
@@ -248,7 +256,7 @@ def derive_nulls(
 
     # The proportional null's own currency: each cell's response as a FRACTION of its own standing
     # state. A control level of zero (a cell treeless before any perturbation) makes the fraction
-    # undefined rather than infinite, and it must stay undefined -- there is no proportional response
+    # undefined rather than infinite, and it must stay so -- there is no proportional response
     # to a forest that is not there.
     with np.errstate(divide="ignore", invalid="ignore"):
         fraction = np.where(control[:, None, :] != 0.0, dtrue / control[:, None, :], np.nan)
@@ -264,11 +272,11 @@ def derive_nulls(
             for j in range(dtrue.shape[1]):
                 y_train = dtrue[train, j, :]
                 level_mean[test, j, :] = np.nanmean(y_train, axis=0)[None, :]
-                prop_mean[test, j, :] = np.nanmean(fraction[train, j, :], axis=0)[None, :] * (
-                    control[test, :]
+                prop_mean[test, j, :] = (
+                    np.nanmean(fraction[train, j, :], axis=0)[None, :] * (control[test, :])
                 )
-                prop_median[test, j, :] = np.nanmedian(fraction[train, j, :], axis=0)[None, :] * (
-                    control[test, :]
+                prop_median[test, j, :] = (
+                    np.nanmedian(fraction[train, j, :], axis=0)[None, :] * (control[test, :])
                 )
                 geographic[test, j, :] = nearest_geographic(
                     lon[train], lat[train], y_train, lon[test], lat[test]
@@ -311,7 +319,8 @@ def temperature_diagnostics(
     If that arm scores poorly, a fold design that holds out a perturbation level and assumes
     interpolation between the neighbours is unsound, and the pre-registration has to say so.
     """
-    index = {(int(c), str(p)): i for i, (c, p) in enumerate(zip(state["cell"], state["point"]))}
+    pairs = zip(state["cell"], state["point"], strict=True)
+    index = {(int(c), str(p)): i for i, (c, p) in enumerate(pairs)}
     values = matrix(state, quantities)
     agb = quantities.index("agb")
 
@@ -337,9 +346,7 @@ def temperature_diagnostics(
         "frac_agb_monotone_in_temperature": float(np.mean(monotone)),
         "interpolate_plus4_from_plus2_and_plus6": {
             "pooled": float(np.nanmean(interpolated)),
-            "per_quantity": {
-                q: float(v) for q, v in zip(quantities, interpolated, strict=True)
-            },
+            "per_quantity": {q: float(v) for q, v in zip(quantities, interpolated, strict=True)},
         },
     }
 
@@ -372,10 +379,7 @@ def separation(nulls: dict[str, dict[str, object]]) -> dict[str, object]:
     """
     values = {name: float(entry["pooled"]) for name, entry in nulls.items()}  # type: ignore[arg-type]
     names = sorted(values, key=lambda n: -values[n])
-    gaps = {
-        f"{a} - {b}": round(values[a] - values[b], 6)
-        for a, b in zip(names, names[1:], strict=False)
-    }
+    gaps = {f"{a} - {b}": round(values[a] - values[b], 6) for a, b in pairwise(names)}
     return {
         "ranked": {n: round(values[n], 6) for n in names},
         "adjacent_gaps": gaps,
@@ -414,7 +418,9 @@ def main() -> int:
     dtrue, control, cell_ids, points = build_deltas(state, cells, quantities)
     scored_cells = cells.filter(pl.col("cell").is_in(cell_ids)).sort("cell")
 
-    nulls = derive_nulls(dtrue, control, scored_cells, points, quantities, args.k, args.degrees)
+    nulls = derive_nulls(
+        dtrue, control, scored_cells, points, quantities=quantities, k=args.k, degrees=args.degrees
+    )
     report = {
         "version": args.version,
         "corpus": str(corpus),
