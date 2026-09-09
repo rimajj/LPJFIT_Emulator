@@ -50,6 +50,33 @@ SYNTHESISER, not of the idea: `corpus/state.py` already computes `pft_frac_*` pe
 composition becomes predictable as soon as those columns are added to the scored set. Until then
 a warmed-climate restart carries present-day composition, and that must be disclosed with it.
 
+⚠ THE ROSTER IS DRAWN AT CELL-LEVEL RANKS, AND IT USED TO BE DRAWN AT PER-PATCH ONES. That was a
+bug, and it cost the whole upper tail of the size distribution. The predicted quantiles are CELL
+quantiles -- `corpus/state.py` pools all 25 patches before taking a percentile -- but the roster was
+built one patch at a time from `u = (arange(n) + 0.5) / n` with n ~ 19. So every patch was handed
+the SAME nineteen ranks, spanning only 0.026 to 0.974, and the cell ended up holding twenty-five
+copies of one truncated ladder. No patch ever addressed the 0.99 rank, so no cell ever received the
+tree that lives there. Measured on the twenty-cell block: the true state holds 382 stems above 16 m
+and the synthesised file held ZERO, its tallest stem being 13.3 m against a true 23.0 m -- while the
+donor pool held 794 admissible stems above 16 m and the predicted `height_p90` was good to 7 %.
+Those missing tall stems carried 36 % of the stand's leaf, which is the whole of the leaf-area
+shortfall that made leaf area the largest single loss at twenty years. Ranks are now drawn once
+across the cell and dealt out to patches at random, so each patch is a random SAMPLE of the stand
+rather than a copy of it.
+
+⚠ AND THE SHAPE COMES FROM THE TEMPLATE, BECAUSE THREE KNOTS AND A STRAIGHT LINE CANNOT MAKE A
+FOREST. Cell-level ranks are necessary but nowhere near sufficient: continuing the interior slope
+past the 90th percentile reaches only 14.3 m at rank 0.999, still 9 m short of the real tallest
+tree. A stand's height distribution is strongly right-skewed and no three-point linear
+interpolation reproduces that. Rather than invent a tail shape -- which would be a free parameter
+fitted to the answer -- the SHAPE is taken from the template's own stems and only its LOCATION and
+SPREAD come from the prediction, by the monotone recalibration in `recalibrate`. This is the
+mechanism `type_ladder` already used for tree type, now applied to the matched traits as well: one
+real stem per rank, carrying all of its fields at once, so the template's joint trait structure
+survives while the three predicted knots move the marginals. The price is the same price the type
+mechanism already pays, and it is disclosed in the same place: a warmed-climate restart carries the
+template's distributional SHAPE, with only the predicted quantiles shifted.
+
 WHAT THIS DOES NOT DO YET. The fast soil water/ice/enthalpy block is copied wholesale, so the
 water state belongs to the template's climate rather than the predicted one. `PLAN.md` classifies
 that block as RELAXED for exactly this reason, and the sanctioned fallback -- letting the C relax it
@@ -168,13 +195,18 @@ def build_donor_pool(reader: RestartReader, cells: list[int]) -> DonorPool:
 def quantile_function(
     p10: float, p50: float, p90: float, u: npt.NDArray[np.float64]
 ) -> npt.NDArray[np.float64]:
-    """A monotone quantile function through three predicted points.
+    """A monotone quantile function through three predicted points. THE FALLBACK, not the default.
 
     Linear between the knots; beyond them the last interior slope is continued, which keeps the
     function monotone without inventing a tail shape the prediction says nothing about. The three
     knots are sorted first: the three heads are fitted independently, so nothing guarantees the
     predicted 10th percentile comes out below the predicted 90th, and a crossed pair would produce
     a decreasing quantile function and a nonsense roster.
+
+    ⚠ This is used only where the template cannot supply a shape -- a treeless template, or one
+    whose own 10th and 90th percentiles coincide. Everywhere else `recalibrate` is used instead,
+    because the straight tail this function draws is measurably far too short: at the 0.999 rank it
+    reaches 14.3 m where the real stand's tallest tree is 23.0 m (see the module docstring).
     """
     lo, mid, hi = sorted((float(p10), float(p50), float(p90)))
     knots_u = np.array([0.10, 0.50, 0.90])
@@ -190,6 +222,55 @@ def quantile_function(
     # `np.interp` is typed loosely enough that the expression comes back as Any.
     clipped: npt.NDArray[np.float64] = np.maximum(out, 1e-9).astype(np.float64)
     return clipped
+
+
+def recalibrate(
+    values: npt.NDArray[np.float64],
+    sample: npt.NDArray[np.float64],
+    p10: float,
+    p50: float,
+    p90: float,
+) -> npt.NDArray[np.float64] | None:
+    """Move a REAL distribution's values onto three predicted knots, monotonically.
+
+    `sample` is the template cell's own stems -- a real equilibrium stand, so it carries the
+    right-skew, the understorey spike and the long upper tail that a forest actually has.
+    `values` are draws from it (one real stem per rank). The returned values have the template's
+    shape and the prediction's location and spread: between the knots the map is the piecewise
+    linear transform sending the template's own (p10, p50, p90) to the predicted (p10, p50, p90).
+    Exact at all three knots, continuous, and monotone -- so the rank ordering the caller relies
+    on survives.
+
+    ⚠ OUTSIDE THE KNOTS THE MAP IS MULTIPLICATIVE, AND THAT IS NOT A STYLE CHOICE. Continuing the
+    interior slope past the top knot AMPLIFIES the prediction's own error, because the correction
+    it applies grows with distance from the median while the prediction's evidence does not. It was
+    measured doing exactly that: the level model predicts this block's 90th-percentile height 5 %
+    high, and an extrapolated slope turned that into +13 % at the 99.9th percentile, which -- since
+    stem mass climbs steeply with height -- put the whole roster's above-ground biomass 21 % over
+    the truth while every other quantity improved. Scaling the tail by `predicted / template` at
+    the knot instead caps the distortion at the prediction's own error, and is exactly the identity
+    when the prediction is right. Both ends are multiplicative for the same reason, which also
+    makes the result positive by construction rather than by clipping.
+
+    Returns None when the template cannot supply a shape (fewer than three distinct positive
+    percentiles), which is the caller's signal to fall back to `quantile_function`. Returning None
+    rather than silently degrading matters: the fallback draws a measurably too-short tail, and a
+    cell that took it must be visible as having taken it.
+    """
+    lo, mid, hi = sorted((float(p10), float(p50), float(p90)))
+    t10, t50, t90 = (float(v) for v in np.percentile(sample, [10.0, 50.0, 90.0]))
+    if not (0.0 < t10 < t50 < t90):
+        return None
+    out = np.where(
+        values <= t50,
+        lo + (values - t10) * ((mid - lo) / (t50 - t10)),
+        mid + (values - t50) * ((hi - mid) / (t90 - t50)),
+    )
+    # The two tails, anchored at their knot rather than extrapolated from the interior.
+    out = np.where(values < t10, values * (lo / t10), out)
+    out = np.where(values > t90, values * (hi / t90), out)
+    mapped: npt.NDArray[np.float64] = np.maximum(out, 1e-9).astype(np.float64)
+    return mapped
 
 
 @dataclass
@@ -214,6 +295,38 @@ class SynthReport:
     type_achieved: dict[int, int] = field(default_factory=dict)
     type_fallbacks: int = 0
     inadmissible_placed: int = 0
+    # Where each matched trait's distributional SHAPE came from: "template" (the cell's own real
+    # stand, recalibrated onto the predicted knots) or "knots" (the three-point linear fallback,
+    # whose upper tail is measurably far too short). A cell that silently took the fallback would
+    # look like a cell that had a tail; this is what stops that.
+    shape_source: dict[str, str] = field(default_factory=dict)
+    ranks_drawn_over: str = "cell"
+    # The upper tail, which `pool_shortfall` (a median) cannot see, and the tallest stem placed
+    # against the tallest the template holds -- the two numbers that made the truncation visible.
+    tail_shortfall: dict[str, float] = field(default_factory=dict)
+    tallest_placed: float = 0.0
+    tallest_in_template: float = 0.0
+
+
+def template_ladder(template: dict[str, Any]) -> Any:
+    """The template cell's own stems, every field, ordered smallest tree to largest.
+
+    One row per real stem of the cell, sorted by height, pooled over all patches -- so row k is the
+    k-th smallest tree in the STAND, which is the level the predicted quantiles are defined at.
+    Reading a whole stem rather than one field is the point: the type, the height and the wood
+    density at a given size rank all come off the SAME real tree, so the template's joint trait
+    structure is carried over rather than three marginals being recombined independently.
+    """
+    rows: list[Any] = []
+    for patch in template["stands"][0]["patches"]:
+        arr = trees_of(patch["pftlist"])
+        if arr.size:
+            rows.append(arr)
+    if not rows:
+        return np.zeros(0, dtype=trees_of(template["stands"][0]["patches"][0]["pftlist"]).dtype)
+    allrows = np.concatenate(rows)
+    order = np.argsort(np.asarray(allrows["height"], dtype=np.float64), kind="stable")
+    return allrows[order]
 
 
 def type_ladder(template: dict[str, Any]) -> npt.NDArray[np.uint8]:
@@ -231,24 +344,57 @@ def type_ladder(template: dict[str, Any]) -> npt.NDArray[np.uint8]:
       distribution the emulator predicted. Taking the type at the matching size RANK carries the
       template's type-size association over while the height VALUES stay the emulator's.
     """
-    ids: list[npt.NDArray[np.uint8]] = []
-    heights: list[npt.NDArray[np.float64]] = []
-    for patch in template["stands"][0]["patches"]:
-        arr = trees_of(patch["pftlist"])
-        if arr.size:
-            ids.append(np.asarray(arr["id"], dtype=np.uint8))
-            heights.append(np.asarray(arr["height"], dtype=np.float64))
-    if not ids:
+    rungs = template_ladder(template)
+    if rungs.size == 0:
         return np.zeros(0, dtype=np.uint8)
-    all_ids = np.concatenate(ids)
-    order = np.argsort(np.concatenate(heights), kind="stable")
-    return np.asarray(all_ids[order], dtype=np.uint8)
+    return np.asarray(rungs["id"], dtype=np.uint8)
+
+
+def _rank_index(size: int, u: npt.NDArray[np.float64]) -> npt.NDArray[np.int64]:
+    """The ladder row each requested rank lands on."""
+    return np.clip((u * size).astype(np.int64), 0, size - 1)
 
 
 def _types_for(ladder: npt.NDArray[np.uint8], u: npt.NDArray[np.float64]) -> npt.NDArray[np.int64]:
     """The template's type at each predicted size rank."""
-    idx = np.clip((u * ladder.size).astype(np.int64), 0, ladder.size - 1)
-    return np.asarray(ladder[idx], dtype=np.int64)
+    return np.asarray(ladder[_rank_index(ladder.size, u)], dtype=np.int64)
+
+
+def _tally(types: npt.NDArray[np.int64] | None) -> dict[int, int]:
+    """How many stems of each type the roster asks for."""
+    out: dict[int, int] = {}
+    for t in types if types is not None else ():
+        out[int(t)] = out.get(int(t), 0) + 1
+    return out
+
+
+def _targets(
+    rungs: Any,
+    u: npt.NDArray[np.float64],
+    prediction: dict[str, float],
+    match_traits: tuple[str, ...],
+) -> tuple[dict[str, npt.NDArray[np.float64]], dict[str, str]]:
+    """The trait value asked of each ranked stem, and where each trait's SHAPE came from.
+
+    One real template stem per rank, its traits recalibrated onto the predicted knots. The stem is
+    read whole, so height and wood density at a given rank come off the same tree and the
+    template's joint structure survives; only the marginals are moved. Falls back to the
+    three-knot linear function per trait, and says so, wherever the template cannot supply a shape.
+    """
+    out: dict[str, npt.NDArray[np.float64]] = {}
+    source: dict[str, str] = {}
+    names = set(rungs.dtype.names or ()) if rungs.size else set()
+    for name in match_traits:
+        if f"{name}_p50" not in prediction:
+            continue
+        p10, p50, p90 = (float(prediction[f"{name}_p{q}"]) for q in (10, 50, 90))
+        mapped = None
+        if u.size and name in names:
+            sample = np.asarray(rungs[name], dtype=np.float64)
+            mapped = recalibrate(sample[_rank_index(sample.size, u)], sample, p10, p50, p90)
+        out[name] = quantile_function(p10, p50, p90, u) if mapped is None else mapped
+        source[name] = "knots" if mapped is None else "template"
+    return out, source
 
 
 def _choose_donors(
@@ -330,6 +476,7 @@ def synthesise_cell(  # noqa: PLR0915 -- one pass over the patches; splitting it
     npatch = int(stand["npatch"])
 
     want_per_patch = max(float(prediction["stems_per_patch"]), 0.0)
+    rungs = template_ladder(template)
     ladder = type_ladder(template)
     admissible = tuple(int(t) for t in np.unique(ladder)) if ladder.size else ()
     report = SynthReport(
@@ -342,14 +489,36 @@ def synthesise_cell(  # noqa: PLR0915 -- one pass over the patches; splitting it
         type_admissible=admissible,
     )
 
+    # THE RANKS, DRAWN ONCE ACROSS THE CELL. Every patch's count is settled first, because the
+    # ranks cannot be known until the cell's total is: the predicted quantiles are cell-level, so
+    # rank k of N runs over the whole stand and not over one patch of it. Dealing the ranks out at
+    # random then makes each patch a random SAMPLE of the stand -- which is what a patch is -- and
+    # lets the cell hold the one tree that lives at rank 0.999. Drawing per patch instead handed
+    # every patch the same truncated ladder and cost the entire upper tail; see the module
+    # docstring for the measurement.
+    #
+    # Stochastic rounding of the count survives unchanged: a predicted 23.4 stems per patch must
+    # not become 23 in every patch, or the cell mean comes out 23.0 and the count the emulator
+    # predicted is not the count that was written.
+    counts = [
+        int(np.floor(want_per_patch) + (rng.random() < (want_per_patch % 1.0)))
+        for _ in stand["patches"]
+    ]
+    n_cell = int(sum(counts))
+    report.stems_requested = n_cell
+    report.ranks_drawn_over = "cell" if n_cell else "none"
+    u_cell = (np.arange(n_cell) + 0.5) / n_cell if n_cell else np.zeros(0)
+    owner = rng.permutation(np.repeat(np.arange(len(counts)), counts))
+
+    targets_cell, report.shape_source = _targets(rungs, u_cell, prediction, match_traits)
+    want_types_cell = _types_for(ladder, u_cell) if (ladder.size and n_cell) else None
+    report.type_requested = _tally(want_types_cell)
+
     new_patches: list[dict[str, Any]] = []
     placed_fields: list[Any] = []
-    for patch in stand["patches"]:
-        # Stochastic rounding: a predicted 23.4 stems per patch must not become 23 in every patch,
-        # or the cell mean comes out 23.0 and the count the emulator predicted is not the count
-        # that was written.
-        n = int(np.floor(want_per_patch) + (rng.random() < (want_per_patch % 1.0)))
-        report.stems_requested += n
+    for p_index, patch in enumerate(stand["patches"]):
+        n = counts[p_index]
+        mine = np.flatnonzero(owner == p_index) if n_cell else np.zeros(0, dtype=np.int64)
 
         pft = patch["pftlist"]
         grass_offs = pft["grass_offsets"]
@@ -370,23 +539,14 @@ def synthesise_cell(  # noqa: PLR0915 -- one pass over the patches; splitting it
 
         parts: list[bytes] = []
         if n > 0:
-            u = (np.arange(n) + 0.5) / n
-            targets = {
-                name: quantile_function(
-                    prediction[f"{name}_p10"],
-                    prediction[f"{name}_p50"],
-                    prediction[f"{name}_p90"],
-                    u,
-                )
-                for name in match_traits
-                if f"{name}_p50" in prediction
-            }
-            # `u` is ascending and `quantile_function` is monotone, so target k is the k-th
-            # smallest stem and the template's type at that same rank is the type to ask for.
-            want_types = _types_for(ladder, u) if ladder.size else None
-            if want_types is not None:
-                for t in want_types:
-                    report.type_requested[int(t)] = report.type_requested.get(int(t), 0) + 1
+            # This patch's share of the cell's ranks. The height target is monotone in rank, so
+            # target k is still the k-th smallest stem and the template's type at that same rank is
+            # still the type to ask for. The wood-density target deliberately is NOT monotone: it
+            # is the density of the real template stem at that HEIGHT rank, so the template's joint
+            # height-density structure is carried over instead of the two being forced into perfect
+            # rank correlation, which is what drawing both from one quantile function did.
+            targets = {name: values[mine] for name, values in targets_cell.items()}
+            want_types = want_types_cell[mine] if want_types_cell is not None else None
             picks, fell_back = _choose_donors(
                 pool, targets, rng, want_types=want_types, admissible=admissible
             )
@@ -443,6 +603,18 @@ def synthesise_cell(  # noqa: PLR0915 -- one pass over the patches; splitting it
                 report.pool_shortfall[name] = float(
                     (report.achieved[key] - prediction[key]) / prediction[key]
                 )
+            # The TAIL, reported separately, because it is the half of the distribution the median
+            # cannot see and the half that carried the whole leaf-area loss. A roster can sit on
+            # the predicted median to four decimal places and still hold no tree above 13 m.
+            tail = f"{name}_p90"
+            if prediction.get(tail):
+                report.tail_shortfall[name] = float(
+                    (report.achieved[tail] - prediction[tail]) / prediction[tail]
+                )
+        report.tallest_placed = float(np.max(allf["height"].astype(float)))
+        report.tallest_in_template = (
+            float(np.max(np.asarray(rungs["height"], dtype=np.float64))) if rungs.size else 0.0
+        )
     return rec, report
 
 
