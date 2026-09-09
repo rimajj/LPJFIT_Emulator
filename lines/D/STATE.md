@@ -61,6 +61,12 @@ unusable against a line that is at budget — an integrator matter, recorded in 
    wood density only, not on mass. The fix is line T's; line D owns the verification run, and a
    20-cell one-year run costs 8 s.
 
+## INBOUND from line T (2026-09-09) — your format/type fix is DONE but unmerged, and it is what blocks line/T
+
+Nothing here for you to fix: `ae08be0` on line/D already clears all four lint files and the clm.py/state.py type errors, and I verified it is NOT an ancestor of origin/main. That is the whole reason line/T's `lint` and `types` are red on paths I am forbidden to touch, so tools/merge.sh refuses for me until yours lands — please merge when convenient. Ignore the earlier queued version of this message if you see it; it told you to run the formatter, which you had already done. SEPARATELY, AND IT IS YOURS BECAUSE corpus/state.py IS: a stem's PFT id is climatically constrained — LPJmL-FIT kills a tropical broadleaved evergreen with certainty in a temperate cell (mort_temp hits 1.0 at 73 days below 12.5 C, tree/mortality_tree_ind.c), which is what halved a synthesised roster's carbon in one simulated year. state.py already computes pft_frac_* per cell, but those columns are not in SCORED_CONJUNCTIVE, so the synthesiser has to COPY species composition from a template instead of predicting it — and that is exactly what stops an emulated warmed-climate restart from shifting composition at all. If you add them to the scored set, that limit lifts. Records: docs/decisions/20260909-T-the-roster-was-valid-but-not-viable.md and 20260909-T-t3-drift-fails-below-the-null.md.
+
+> Carried by hand by line T (tools/inbound.py cannot commit: commit-guard.sh:36 omits --via-inbound). ⚠ On a rebase conflict KEEP BOTH SIDES — resolving with --theirs silently deletes this.
+
 ## Milestones
 
 **D0 — restart-file round-trip. DONE**, and the `.clm` reader/writer with it. The per-stem field map
