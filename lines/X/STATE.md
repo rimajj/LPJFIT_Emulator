@@ -13,11 +13,12 @@ does not build models (T) or generate data (D).
 
 ## NEXT — start here
 
-⚠ **Line X is 9 commits ahead of `main`, pushed but NOT merged.** `tools/merge.sh` refused cleanly
-inside its lock: the shared checkout `/p/projects/open/Jamir/vegemu` has **uncommitted staged work**
-(a Stop-hook SIGPIPE fix), untouched and not half-merged, but no line can merge until its owner
-commits or stashes it. `main` is also red on `lint` — `ruff format` on three of line T's files,
-handled with `--allow-red`. Both in `changelog.d/X-main-is-red-on-ruff-format.md`.
+⚠ **Line X is 11 commits ahead of `main`, pushed but NOT merged, and ONE commit unblocks it.**
+`tools/merge.sh` refused cleanly inside its lock: the shared checkout `/p/projects/open/Jamir/vegemu`
+holds **uncommitted staged work — which is itself the fix for the Stop hook's SIGPIPE bug, the one
+that falsely blocks any session refreshing its handoff in its last commit** (it fired on this one;
+the handoff was fine). Committing it unblocks the merge AND the hook. `main` is separately red on
+`lint` (`ruff format`, three line-T files) — handled. `changelog.d/X-main-is-red-on-ruff-format.md`.
 
 **The kill test is sealed and the bar is 0.225690.** Line D's pilot corpus (200 cells × 30 climates,
 same cell, same seed, only the climate differs) removes the collinearity that made X1's `fail`
@@ -44,10 +45,9 @@ Three things that constrain how the result may be reported:
 
 **X3 (`X-20260908-heldout-forcing-leg`) is sealed and still awaits line T's model arm** — unchanged
 for two sessions. Fit on the historical leg only, predict from the low-emissions 2071–2100 climate,
-assemble out-of-fold under 15° blocked folds. `scripts/sbatch_py.sh --exp
-X-20260908-heldout-forcing-leg T-heldout-leg-v0 <script>`. It must reach **0.0837** (best null:
-same-cell persistence, 0.033749) against the 0.0361 it scores on the leg it was fitted on. The
-non-circular ceiling is **0.538490** — that, not 1.0, is what perfect means there.
+assemble out-of-fold under 15° blocked folds: `scripts/sbatch_py.sh --exp
+X-20260908-heldout-forcing-leg T-heldout-leg-v0 <script>`. It must reach **0.0837** (best null
+0.033749) against 0.0361 on its own leg; the non-circular ceiling is **0.538490**, not 1.0.
 
 **X4 (the emitted restart file) stays unsealed; the pilot corpus is what will fix it.** Its blocker
 was a 20-cell contiguous block on which all four nulls collapsed into 0.786–0.845. The pilot design
