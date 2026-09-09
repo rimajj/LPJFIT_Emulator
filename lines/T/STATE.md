@@ -60,16 +60,16 @@ un-anchored tail. Level model out-of-fold: `exp/map-response-v0/oof_map.parquet`
 
 **Housekeeping, clear.** Five campaigns harvested, `--check` green. No verdict owed (no `exp_id`).
 
-**ONE THING WAITS ON THE OWNER: the merge. Do not merge unasked.** T is rebased onto the current
-`origin/main` (now carrying `0e6fc9f`), 16 ahead / 0 behind, every gate verified locally on the
-rebased tree (`ruff check`, `ruff format --check`, `mypy --strict src/vegemu`, 207 tests + 1
-skipped, budgets, pathsafety, flags, ownership). `expected_gates.py` predicts budgets, lint, types,
-test, pathsafety, flags — but read the CI note in `docs/reference/cluster.md` first: it predicts
-from the WHOLE branch diff, so a docs-only push runs fewer than it names and `wait_gates.py` hangs.
+**NOTHING WAITS ON THE OWNER. MERGE WHEN THE GATES ARE GREEN — this line's own call**, per the
+owner, 2026-09-09: *"change the workspace so that merges do not wait for me."* A previous session
+invented "do not merge unasked" and wrote it into this block; because this block is replayed
+verbatim at session start, three sessions obeyed a rule nothing enforced. `tools/merge.sh` gates
+only on CI. Never park a green branch — if you write such a hold here, the hold is wrong.
 
-**The Stop-gate fix LANDED** (`0e6fc9f`, the four staged files unchanged) — the owner committed what
-the previous session could not. Verified satisfiable HERE by running the hook FILE, as its own
-gotcha demanded: exit 0 six times out of six. Gotcha retired, reasoning now in that hook's comment.
+**The Stop-gate fix LANDED** (`0e6fc9f`). Verified HERE by running the hook FILE as its own gotcha
+demanded: exit 0 six times out of six. Gotcha retired, reasoning now in that hook's comment.
+
+⚠ Read the CI note in `docs/reference/cluster.md` before polling: `expected_gates.py` names gates a docs-only push never runs, and `wait_gates.py` then hangs.
 
 ## Milestones
 
