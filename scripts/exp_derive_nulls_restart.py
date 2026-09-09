@@ -228,9 +228,13 @@ def oof_nulls(
     """Every null's year-0 state, leave-one-cell-out within the scored block.
 
     Leave-one-out and not k-fold: the scored set is a single contiguous 20-cell block, so there is
-    no spatial blocking to be had inside it and pretending otherwise would be theatre. The whole
-    block is one 15-degree tile, which is stated in the pre-registration as a limit on what the
-    result licenses -- it is an engineering gate on 20 of 54,020 cells, never fidelity evidence.
+    no spatial blocking to be had inside it and pretending otherwise would be theatre.
+
+    ⚠ THAT IS ALSO WHY THERE IS NO PRE-REGISTRATION TO POINT AT. The whole block is one 15-degree
+    tile, so these four nulls land within 0.786-0.845 of each other and cannot be told apart; an
+    experiment sealed on this cell set would return `invalid` by construction, and X4 was therefore
+    deliberately NOT sealed. This is an engineering gate on 20 of 54,020 cells, never fidelity
+    evidence. See docs/decisions/20260909-X-synthesised-restart-is-beaten-by-a-random-neighbour.md.
     """
     n = corpus_state.shape[0]
     out = {
