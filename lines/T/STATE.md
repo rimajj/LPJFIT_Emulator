@@ -14,9 +14,9 @@ the corpus (D), pre-registrations and verdicts (X).
 ## NEXT — start here
 
 **t3 is done: the state survives twenty years and FAILS the drift test below the no-change null.**
-Read `docs/decisions/20260909-T-t3-drift-fails-below-the-null.md` first. No collapse and no runaway
-— which is what t3 existed to ask — but after twenty years the emulated state is a *worse*
-description of the control than the true 1999 state it was built to replace.
+Read `docs/decisions/20260909-T-t3-drift-fails-below-the-null.md` first. No collapse, no runaway —
+what t3 existed to ask — but at twenty years the emulated state describes the control *worse* than
+the true 1999 state it replaces.
 
 **Numbers** (20 cells of 54,020, temperate Europe, present-day, 2000–2019, one task per arm, seed
 pair 1/2 for the band and seed 3 for the ceiling — NOT the acceptance test):
@@ -24,29 +24,27 @@ pair 1/2 for the band and seed 3 for the ceiling — NOT the acceptance test):
 * emulated **0 of 20 cells** inside `max(10 %, two-seed spread)` on all 22 quantities, median 16/22
 * **ceiling, a third real run: 25 %, median 21/22** — so the test has power; this is a fail. ⚠ Always
   run that arm: the two band legs score 100 % by arithmetic, so without it a 0 % has no scale.
-* null, "twenty years change nothing" (the true 1999 state): 0 %, median **18**/22, and closer to
-  the control on 14 of the 22. The sharpest statement of the failure.
+* null, "twenty years change nothing" (the true 1999 state): 0 %, median **18**/22, closer to the
+  control on 14 of the 22. The sharpest statement of the failure.
 * vegetation carbon, per-cell median gap **grew 0.087 → 0.140** against the two controls' own
   0.010 → 0.097. The block TOTAL closes from −10.6 % to −1.3 %, but that is opposite-sign per-cell
   errors cancelling in a sum. **Never quote the total alone.**
-* worst shortfalls against what a real run attains: leaf area 90 % → **15 %**, rooting-depth low
-  tail 90 → 35, stems/patch 70 → 25, height median 95 → 50. All transplant-uncontrolled quantities.
-* unchanged: t4 carbon at year one 0.091; level map 0.0361 conjunctively; warming response −0.727.
+* worst shortfalls vs what a real run attains: leaf area 90 → **15 %**, rooting-depth low tail
+  90 → 35, stems/patch 70 → 25, height median 95 → 50 — all transplant-uncontrolled. Unchanged: t4
+  carbon at year one 0.091; level map 0.0361 conjunctively; warming response −0.727.
 
-**The artifacts.** The deliverable is unchanged:
-`/p/tmp/jamirp/vegemu/runs/synth-v2/restart/restart_1999_emulated.lpj`, sha256 `64fdbf2d…`, cells
-42480–42499. ⚠ `synth-v3` is the REJECTED five-trait variant. t3 is in
-`runs/t3-{emulated,control,control-s2,control-s3}`, scored into `t3-emulated/t3_drift.json` by the
-new `scripts/synth_drift.py`. Recipe:
-`scripts/corpus_cmodel_config.py --years 2000 2019`, patch `new_seed`→true and `random_seed` for a
-fresh seed, `scripts/sbatch_cmodel.sh`, then `synth_drift.py --ceiling … --initial …`.
+**The artifacts.** Deliverable unchanged: `/p/tmp/jamirp/vegemu/runs/synth-v2/restart/
+restart_1999_emulated.lpj`, sha256 `64fdbf2d…`, cells 42480–42499. ⚠ `synth-v3` is the REJECTED
+five-trait variant. t3 is in `runs/t3-{emulated,control,control-s2,control-s3}` → `t3-emulated/
+t3_drift.json`, by the new `scripts/synth_drift.py`. Recipe: `corpus_cmodel_config.py --years 2000
+2019`, patch `new_seed`→true and `random_seed` per arm, `sbatch_cmodel.sh`, then `synth_drift.py`.
 
 **THE SINGLE NEXT ACTION: give `synthesise_cell` a cell-total LEAF-MASS constraint**
 (`src/vegemu/models/synth.py`), then re-run the ladder above to score it. Leaf area is t3's largest
 single loss — 15 % of cells against an attainable 90 % — and the only one with a known mechanism:
-leaf carbon is a per-stem MASS and the transplant matches traits, so nothing targets it. Rescale the
-placed stems' leaf carbon to the predicted cell total after the type-and-trait match, and measure
-the other 21 for damage the way five-trait matching was measured. A new mechanism, not a parameter.
+leaf carbon is a per-stem MASS and the transplant matches traits, so nothing targets it. Rescale
+placed leaf carbon to the predicted cell total after the type-and-trait match, then measure the
+other 21 for damage as five-trait matching was measured. A new mechanism, not a parameter.
 
 **Then, cheapest first:**
 
@@ -54,22 +52,24 @@ the other 21 for damage the way five-trait matching was measured. A new mechanis
    match — the rest of t3's loss (wood density 70 % vs 100, height 50 vs 95, rooting depth 50 vs 85).
 2. **Do NOT widen `MATCH_TRAITS`** — measured: 11 of 22 quantities degrade, median cell 15 → 12.
 3. **Do NOT quote t3 as a pass on carbon**, and do not tune the model to chase the sealed map gate.
-4. **The response model must predict the CHANGE directly**, blocked on D's pilot corpus.
-5. **T1, the GPU path: still not built, still not needed** — boosted trees on 16 CPU cores, 4 min.
+4. **The response model must predict the CHANGE directly**, blocked on D's pilot corpus. (The GPU
+   path is still not built and still not needed — see Milestones.)
 
-**Housekeeping, clear.** Six campaigns harvested with exit codes, hashes and results;
-`tools/campaigns.py --check` green. **No verdict is owed:** t3 has no `exp_id` — `experiments/**` is
-X-exclusive, and a ladder step on the artifact goes in a decision record, as t2 and t4 did.
+**Housekeeping, clear.** Six campaigns harvested with hashes and results, `--check` green. **No
+verdict is owed:** t3 has no `exp_id` — `experiments/**` is X's, and a ladder step on the artifact
+goes in a decision record, as t2 and t4 did.
+**The merge is blocked by line D and the decision is WITH THE OWNER — do not merge unasked.** Red:
+`lint` on D's four files (`scripts/corpus_*.py` ×2, `binfmt/restart.py`, `corpus/state.py`) and
+`types` on `binfmt/clm.py` + `corpus/state.py:159`. T's files are clean; every other gate is green.
+Measured 2026-09-09 and put to the owner: D's whole fix is 23 lines of pure reformatting plus five
+one-line edits at five named places, and **main is ALREADY red on these same two gates**, so
+`--allow-red` protects nothing — recommended one short D session instead, which also turns main
+green for the first time. If the owner says merge anyway, that measurement is the stated reason.
 
-**The merge is still blocked by line D, not by this work.** `ruff format --check .` still reports
-D's four files (`scripts/corpus_cmodel_config.py`, `scripts/corpus_convergence.py`,
-`src/vegemu/binfmt/restart.py`, `src/vegemu/corpus/state.py`) and the types debt is in
-`binfmt/clm.py` + `corpus/state.py:159`. T's own files are clean. **Do not merge with `--allow-red`
-without asking the owner.** ⚠ **Neither Outbound block below has reached its line.** Confirmed by
-reading the code this time: `commit-guard.sh:36` calls `check_ownership.py --staged` with no
-`--via-inbound`, and its hatch at line 22 reads the harness env, not the command prefix. NEW today:
-even with that fixed, `lines/X/STATE.md` sits at **exactly** its 120-line budget, so any inbound
-message trips the budgets checker on a file only X may rotate. Relay both by hand.
+⚠ **Neither Outbound block below has reached its line**, and no automated path can deliver them:
+`commit-guard.sh:36` calls `check_ownership.py --staged` without `--via-inbound`, its hatch at line
+22 reads the harness env not the command prefix, and `lines/X/STATE.md` sits at exactly its 120-line
+budget so any message trips the budgets checker on a file only X may rotate. Relay both by hand.
 
 ## Outbound to line D (2026-09-09) — line/T is blocked from merging by lint+types failures that are 100% in D-exclusive paths
 
@@ -108,13 +108,13 @@ measured ceiling, t4 passes on carbon at year one and fails conjunctively. t5 is
 * **Name a new script so it misses `slurm-guard.sh`'s experiment keywords** (`train|eval|score|fit|
   sweep|response|rung`): the guard matches the whole command, so `scripts/score_*.py` is denied as
   an unregistered experiment however the tag is named. This one is `synth_drift.py` for that reason.
+* **The Stop gate CANNOT be satisfied — refresh the handoff because it is right, then ignore the
+  block.** `session-end-gate.sh:26` pipes `git log` into `grep -q` under `set -o pipefail`: grep
+  exits on its first match, `git log` takes SIGPIPE, pipefail makes the pipeline 141, so the `if` is
+  false however good your handoff is. Measured 2026-09-09: exit 141 with pipefail, 0 without; its
+  `NEXT: unchanged` hatch fails identically. Integrator-owned; fix is `|| true` or capture first.
 
 ## ARCHIVE
 
-* **2026-09-08/09, the roster fault and its fix.** Donors were matched on height and wood density
-  and never on tree TYPE, so 31 % of the stems written into twenty temperate cells were tropical and
-  the model killed them all in year one. The synthesis was never at fault — the file held 6.7 % MORE
-  biomass than the truth. Fixed by copying type from the template at matching size rank and widening
-  the pool to a proximity band; one-year carbon 0.543 → 0.296 → 0.091. Record: `docs/decisions/20260909-T-the-roster-was-valid-but-not-viable.md`.
-* **Five-trait matching, rejected** 2026-09-08: one donor is one real stem and cannot sit at the
-  same quantile of five distributions at once.
+* **The roster fault and its fix, and five-trait matching measured and rejected**, 2026-09-08/09:
+  `docs/decisions/20260909-T-the-roster-was-valid-but-not-viable.md`.
