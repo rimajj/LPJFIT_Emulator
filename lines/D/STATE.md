@@ -40,6 +40,14 @@ none of them mine; `ruff check .` is clean. `types` last ran on 1368569 (red: `s
 because it diffs the whole branch against main while the workflows filter on the PUSH diff — and my
 two commits touch no `src/vegemu`. `wait_gates` would have hung had `lint` not failed first.
 
+⚠ **The Stop hook blocks SPURIOUSLY even when you did refresh this file — ignore it once, do not
+write a second handoff commit to appease it.** `session-end-gate.sh` runs `set -o pipefail` and then
+`git log … | grep -q`; `grep -q` exits on first match, `git log` dies of SIGPIPE, and `pipefail`
+hands the pipeline 141 — so a SUCCESSFUL match reads as "no handoff found". Confirmed here: exit 141
+with `grep -q`, exit 0 with a pipe-draining `grep -c`. **The integrator is already fixing it** —
+`changelog.d/INT-stop-gate-sigpipe.md` is one of the four staged files blocking the merge above. Do
+not fix it from line D: `.claude/hooks/**` is integrator-only.
+
 **Next, in order:**
 
 1. **Corpus v2 is blocked on TWO decisions, neither of them D's.** Ask, do not assume.
