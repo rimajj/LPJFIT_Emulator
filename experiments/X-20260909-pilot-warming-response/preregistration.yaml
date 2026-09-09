@@ -1,0 +1,242 @@
+schema_version: 1
+
+exp_id: X-20260909-pilot-warming-response
+line: X
+
+status: sealed
+
+title: "THE KILL TEST, RE-RUN WHERE THE RESPONSE IS ACTUALLY IDENTIFIED: one cell, thirty climates"
+question: >
+  Shown a cell's real present-day forest and a perturbed climate, can the emulator predict HOW THAT
+  FOREST CHANGES better than the best information-free competitor -- which is "every cell changes by
+  the same fraction of what it already has"?
+
+  X1 asked this on the two ground-truth legs and answered `fail`, but its own diagnosis was that the
+  question was not cleanly askable there: every cell holds exactly ONE climate, so climate and
+  geography are collinear and a warming response is not separately identified. The pilot corpus
+  removes that confound by construction -- the SAME cell is spun up under 30 climates with the same
+  config, the same forcing window and the same random seed, so the only difference between an arm
+  and its control is the climate. This is X1's question asked on data that can answer it.
+
+  If the emulator cannot beat the nulls here, it is not that the test was unfair.
+
+estimand:
+  name: skill_response_mean
+  definition: >
+    For each of seven quantities -- stems per patch, above-ground biomass, leaf area index, soil
+    carbon, and the medians of stem height, wood density and specific leaf area -- compute
+    1 - SUM((dpred - dtrue)^2) / SUM(dtrue^2) pooled over all scored (cell, climate) pairs, where
+    dtrue = state(cell, perturbed point) - state(cell, control) is a WITHIN-CELL PAIRED CONTRAST.
+    The statistic is the unweighted mean of the seven. Denominator SUM(dtrue^2), not the variance of
+    dtrue: that pins the no-response null analytically at exactly 0.0. Unweighted so no single
+    quantity's variance dominates.
+
+    ⚠ THE POOLED NUMBER MAY NOT BE REPORTED ALONE. The per-level table (29 rows, one per perturbed
+    design point) is part of the result, not an appendix, because the response is NOT monotone in
+    temperature: only 40.5 % of the 200 cells have a monotone above-ground-carbon response across
+    0 / +2 / +4 / +6 K, and a level-averaged score is exactly the summary that hides it. A pass on
+    the pooled statistic accompanied by a fail at more than half the 29 levels must be reported as
+    such in the verdict.
+
+    TREELESS HANDLING, FIXED HERE AND NOT LATER. 380 of the 6,000 runs (6.33 %, touching 39 of the
+    200 cells) end with no stems. For the count and stock quantities those rows are KEPT: zero is a
+    legitimate value and a collapse to zero is the largest response in the corpus, so all 5,800
+    pairs score. For the three trait medians a treeless arm has no median at all -- a wood density
+    of zero is not light wood, it is no wood -- so those rows are dropped per-quantity and 5,620 of
+    6,000 state rows remain. The consequence is a disclosure, not a footnote: the trait medians are
+    therefore scored on cells where vegetation SURVIVED, which selects toward the milder
+    perturbations, and the surviving row count is reported beside every trait number.
+  reference_basis: >
+    LPJmL-FIT 5.6.004, binary built 2026-08-12 -- ONE binary for all 6,000 runs, so no
+    build-mismatch arm is needed here (unlike the stored ground-truth legs). Pilot corpus v1: 200
+    cells x 30 climates x 1 seed, each a single-cell 1000-year spin-up, npatch=25, tree PFTs only,
+    base climate window 1970-1999, constant CO2 and CO2 never written. State is read from the
+    end-of-spin-up restart file, which is UNCENSORED, so it includes stems under 5 m that the
+    per-tree text output drops. Cell eligibility was stems_total > 0 in the historical seed-1
+    end-of-spin-up restart = 56,986 cells, which is NOT the acceptance criterion's 54,020 (that
+    counts cells with a VISIBLE tree); quote one or the other, never both as one number.
+    Dimensionless; a ratio of sums of squares, i.e. a ratio and not a level.
+
+    ⚠ THE TARGET IS PROTOCOL-DEFINED, NOT AN EQUILIBRIUM. The 1000-year spin-up is not converged
+    (57.9 % of vegetated cells still moving, median +6.8 %/century). What is estimated is therefore
+    "the state the model's standard spin-up reaches", and the paired contrast is legitimate because
+    both arms of a pair carry the same drift under the same protocol. No claim about the stationary
+    forest a climate supports is licensed by this experiment.
+  units: dimensionless
+  kind: ratio
+
+data:
+  corpus: /p/tmp/jamirp/vegemu/corpus/pilot-v1
+  corpus_sha256: "bad787ade3fc609b25cf8ebc87dfd0978e4a869068d9408c73945ec3dc667f99"
+  n_rows: 5800
+
+  split:
+    kind: blocked_spatial
+    k: 5
+    seed: 42
+    block_degrees: [15, 5]
+
+  leakage_checks:
+    - "A held-out cell's 29 perturbed states are held out TOGETHER with the cell: the fold is assigned per cell, never per (cell, climate) pair, so no arm of a cell can train on another arm of the same cell."
+    - "The held-out cell's CONTROL state IS an input, deliberately and disclosed. PLAN.md's synthesis is template-conditioned -- in production a real restart for the cell under its present climate always exists -- so withholding it would test a task nobody has to solve. It is also exactly the information the proportional nulls use, which is what makes them fair competitors rather than a handicap."
+    - "Whole 15-degree tiles are held out together via vegemu.score.blocked_spatial_folds, the same function that assigned the folds in the null derivation; the 5-degree arm is reported alongside, never substituted."
+    - "The feature set excludes lon, lat and cell id; only the nearest_cell_response null sees coordinates. Asserted in the training script before fitting."
+    - "CO2 is never a feature and never varies: the pilot forcing writer does not write a CO2 file at all (invariant 8)."
+    - "The 30 design points are the SAME at every cell, so a model can learn a per-point average response from the training cells. That is not leakage -- it is precisely the information the level_mean_response null already has, which is why that null is in the decision arms."
+
+nulls:
+  - id: no_response
+    description: >
+      Predict no change at all: dpred = 0 in every cell at every level. The decisive floor -- the
+      emulator is handed a perturbed climate and asked whether it does anything at all better than
+      saying the forest stays as it is.
+    expected:
+      statistic: skill_response_mean
+      value: 0.0
+      tolerance: 0.000001
+      derivation: >
+        ANALYTIC and exact. With dpred = 0 the numerator equals the denominator, so the statistic is
+        1 - 1 = 0 for every quantity and hence for their mean. Confirmed at 0.000000 by
+        scripts/exp_derive_nulls_pilot.py on pilot-v1.
+
+  - id: level_mean_response
+    description: >
+      Every held-out cell is given the MEAN response of the training cells at that same design
+      point. "The climate perturbation does the same thing everywhere." Knows the level, knows
+      nothing about the cell.
+    expected:
+      statistic: skill_response_mean
+      value: 0.095610
+      tolerance: 0.01
+      derivation: >
+        Measured from the truth and the fold assignment alone, out of fold under 15-degree blocking,
+        by scripts/exp_derive_nulls_pilot.py on pilot-v1. At 5-degree blocking it is 0.097965, i.e.
+        the blocking radius barely moves it, because the 200 cells sit in 164 populated 15-degree
+        tiles and there is no near neighbour to interpolate from at either radius.
+
+  - id: proportional_median_response
+    description: >
+      THE BEST NULL, and the one the emulator actually has to beat. Every held-out cell is given the
+      MEDIAN FRACTIONAL response of the training cells at that design point, applied to its own
+      control level: "every cell changes by the same fraction of what it already has." The estimand
+      is a difference of levels and the cells run from Amazon to Sahel, so this is the competitor a
+      scientist would propose against level_mean_response, and it is stronger.
+    expected:
+      statistic: skill_response_mean
+      value: 0.145690
+      tolerance: 0.01
+      derivation: >
+        Measured, out of fold under 15-degree blocking, by scripts/exp_derive_nulls_pilot.py on
+        pilot-v1; 0.144655 at 5 degrees. Per quantity it is carried by soil carbon (0.5539) and
+        above-ground biomass (0.2309) and is near zero or negative on the trait medians (height
+        -0.0203, SLA 0.0058), which is itself the shape of the problem: the SIZE of the response
+        scales with standing stock, its COMPOSITION does not.
+
+  - id: proportional_mean_response
+    description: >
+      The same construction with the donor fractions aggregated by MEAN instead of median. Included
+      because it is the obvious way to build the null and it is unusable, and that has to be on the
+      record as a measurement rather than as a remark.
+    expected:
+      statistic: skill_response_mean
+      value: -27.402105
+      tolerance: 1.0
+      derivation: >
+        Measured. It fails because the fraction has a near-zero control in its denominator at the 39
+        cells that go treeless under some perturbation, so a few enormous donor ratios get multiplied
+        onto the standing state of large cells: above-ground biomass alone scores -173.8. A
+        heavy-tailed ratio needs a median, which is what proportional_median_response uses.
+
+  - id: nearest_cell_response
+    description: >
+      Copy the response of the geographically nearest TRAINING cell at the same design point. The
+      pure spatial-address null.
+    expected:
+      statistic: skill_response_mean
+      value: -0.281166
+      tolerance: 0.01
+      derivation: >
+        Measured. NEGATIVE, and that is a result rather than a defect: copying a neighbour's response
+        is worse than predicting no change at all. At 5-degree blocking it falls further, to
+        -0.397925.
+
+  - id: nearest_analogue_response
+    description: >
+      Copy the response of the climatically most similar TRAINING cell -- nearest in the five
+      standardised baseline coordinates the design itself varies. THE space-for-time null.
+    expected:
+      statistic: skill_response_mean
+      value: -0.239753
+      tolerance: 0.01
+      derivation: >
+        Measured; -0.143786 at 5 degrees. Also negative overall, but NOT uniformly: it reaches
+        +0.3292 on soil carbon and +0.1677 on above-ground biomass while collapsing to -0.6387 on
+        stem count and -0.5849 on wood density. Space-for-time substitution transfers the slow
+        stocks between cells and does not transfer the roster.
+
+  - id: shuffled_cells
+    description: "The true response, permuted across cells within each design point. The sanity null."
+    expected:
+      statistic: skill_response_mean
+      value: -0.797389
+      tolerance: 0.05
+      derivation: >
+        Near -1 by construction: for a permutation independent of the target the numerator tends to
+        2*SUM(dtrue^2) minus a term in the squared mean. Measured at -0.797389 with permutation seed
+        20260909; identical at both blocking radii, since the permutation does not use the folds.
+
+decision_rule:
+  statistic: skill_response_mean
+  comparator: model_minus_best_null
+  pass_if: "> 0.080"
+  arms:
+    - model
+    - no_response
+    - level_mean_response
+    - proportional_median_response
+    - proportional_mean_response
+    - nearest_cell_response
+    - nearest_analogue_response
+    - shuffled_cells
+  multiplicity: none
+  power_note: >
+    THE THRESHOLD IS DERIVED FROM THE NULLS, NOT COPIED FROM X1, AND THE DIFFERENCE IS DECISIVE.
+    The best null is proportional_median_response at 0.145690 and the runner-up is
+    level_mean_response at 0.095610, so the best null beats the rest by 0.050080. X1's threshold was
+    "> 0.050" -- transplanted here it would be satisfied BY THE BEST NULL ITSELF, by eight
+    hundred-thousandths, and the verdict would be a guaranteed `invalid` under E08. At 0.080 the
+    best null's margin sits 0.030 below the threshold and the metric retains power.
+
+    A pass therefore requires the model to reach at least 0.225690: it must explain over a fifth of
+    the total squared change, having been given only the cell's present forest and the perturbed
+    climate. That is set low ON PURPOSE -- this is a kill test asking whether a learnable
+    cell-specific response exists at all, not whether it meets the acceptance criterion. Passing
+    licenses nothing about fidelity.
+
+    WHY THE TWO STRONG NULLS ARE BOTH HERE. A single strong null beside several weak ones forces the
+    threshold above the margin by which it beats them, which is how the no-power rule bites. These
+    two measure the same kind of skill -- level-driven, cell-blind response -- so neither can pass a
+    threshold the other does not, and the rule stays a real check instead of an arithmetic accident.
+
+    ⚠ THE SPATIAL NULLS ARE NEGATIVE AND THAT IS THE FINDING TO PROTECT. Both borrowing nulls score
+    below "no change", so the response is cell-specific and does not transfer between cells. A model
+    that lands between -0.28 and 0.0 has learned something worse than silence and must be reported
+    as such, not debugged away: the predecessor's operator inverted the sign of the aggregate warming
+    response and was reported as a success for two months.
+
+    ⚠ WHY THE SPLIT IS NOT `holdout_perturbation`, THOUGH THE CORPUS FINALLY ALLOWS IT. Holding out a
+    whole climate level would measure the roughness of the response surface, not the emulator.
+    Measured on this corpus: predicting a cell's +4 K response from its OWN +2 K and +6 K responses
+    -- far more information than any emulator is given -- reaches only 0.6176, and 0.3342 for median
+    height. A held-out-level design would charge the emulator for that roughness. It is a legitimate
+    later experiment with its own pre-registration; it is not this one.
+
+compute:
+  launcher: scripts/sbatch_py.sh
+  tag: T-pilot-response-v0
+  partition: standard
+  est_core_hours: 8
+
+outputs:
+  - path: /p/tmp/jamirp/vegemu/exp/X-20260909-pilot-warming-response/metrics.json
+    kind: metrics
