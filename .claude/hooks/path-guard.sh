@@ -96,6 +96,18 @@ gate reports it as a non-append-only ledger (E11)."
 fi
 
 # An accepted decision record.
+#
+# ⚠ KEEP THE WRITER BOUNDED, AND BOUNDED MEANS ONE SMALL WRITE -- NOT "under 64 KB". `head -15`
+# emits ~667 bytes in a single write that lands before `grep -q` can quit at the first match --
+# verified 12/12. Replace it with an unbounded reader (`cat`, `git log`) and this pipeline starts
+# taking SIGPIPE under `pipefail`, the `if` goes false, and the guard fails OPEN: accepted records
+# become editable with no message. That is exactly how `session-end-gate.sh` was broken.
+#
+# Do NOT reason "my writer emits less than the 64 KB pipe buffer, so it finishes first." Measured on
+# line/X, the broken gate took SIGPIPE 6/6 at 15,841 bytes -- a quarter of the buffer. It is a race
+# against a `grep -q` that exits on its FIRST match, not a buffer-capacity question, and a
+# newest-first stream puts that match in the first few lines. If you need more than a couple of
+# hundred bytes, capture into a variable first and grep the variable.
 if [[ "$REL" =~ ^docs/decisions/.*\.md$ ]] && [[ -f "$FILE" ]] && head -15 "$FILE" | grep -qi 'status.*accepted'; then
   deny "$REL is an ACCEPTED decision record and is immutable.
 

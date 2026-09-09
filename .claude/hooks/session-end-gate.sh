@@ -23,7 +23,22 @@ N="$(git rev-list --count origin/main..HEAD 2>/dev/null || echo 0)"
 [[ "$N" == "0" ]] && exit 0
 
 # Did any of them touch the handoff? An explicit "NEXT: unchanged (<reason>)" also satisfies it.
-if git log origin/main..HEAD --name-only --format=%B 2>/dev/null | grep -qE "lines/$LINE/STATE.md|NEXT: unchanged"; then
+#
+# ⚠ CAPTURED FIRST, NOT PIPED, AND THAT IS THE WHOLE POINT. This was
+#     git log ... | grep -qE "..."
+# under `set -o pipefail`, and it made the gate UNSATISFIABLE: `grep -q` exits at its FIRST match,
+# `git log` is still writing (21 KB over eleven commits in the case that caught it), so `git log`
+# takes SIGPIPE, `pipefail` promotes 141 to the pipeline's status, and the `if` is false however
+# good the handoff is. Worse, it failed hardest for the sessions doing the right thing: `git log`
+# emits newest-first, so refreshing the handoff in your LAST commit puts the match at the very top
+# of the stream and guarantees the early exit.
+#
+# ⚠ AND IT ONLY REPRODUCES WHEN RUN AS A SCRIPT, which is how a hook runs. The identical pipeline
+# typed into an interactive subshell returns 0 six times out of six; run as a script it returns 141
+# six times out of six. So an inline check reports the bug fixed when it is not -- verify by
+# executing this FILE, which `tests/test_session_end_gate.py` does.
+LOG="$(git log origin/main..HEAD --name-only --format=%B 2>/dev/null || true)"
+if grep -qE "lines/$LINE/STATE.md|NEXT: unchanged" <<<"$LOG"; then
   exit 0
 fi
 
