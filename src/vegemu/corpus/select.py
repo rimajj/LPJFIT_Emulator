@@ -141,9 +141,7 @@ def eligible_cells(version: str = "v0") -> pl.DataFrame:
         if not np.isfinite(v).all():
             raise ValueError(f"{col}: non-finite values among eligible cells; the design needs all")
     return out.with_columns(
-        tile=pl.Series(
-            spatial_blocks(out["lon"].to_numpy(), out["lat"].to_numpy(), TILE_DEGREES)
-        )
+        tile=pl.Series(spatial_blocks(out["lon"].to_numpy(), out["lat"].to_numpy(), TILE_DEGREES))
     ).sort("cell")
 
 
@@ -289,10 +287,7 @@ def pilot_cells(n: int = 200, version: str = "v0", force_biome: bool = True) -> 
         df[order]
         .with_columns(
             stage=pl.Series([stage[r] for r in order]),
-            **{
-                f"z_{name}": pl.Series(coords[order, j])
-                for j, name in enumerate(DESIGN_COORDS)
-            },
+            **{f"z_{name}": pl.Series(coords[order, j]) for j, name in enumerate(DESIGN_COORDS)},
         )
         .sort("cell")
     )

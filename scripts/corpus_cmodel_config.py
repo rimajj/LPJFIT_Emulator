@@ -77,8 +77,7 @@ def main() -> int:
     text = patch(
         text,
         r'^\s*"startgrid" : "all",.*$',
-        f'  "startgrid" : {args.first_cell},\n'
-        f'  "endgrid" : {args.first_cell + args.ncell - 1},',
+        f'  "startgrid" : {args.first_cell},\n  "endgrid" : {args.first_cell + args.ncell - 1},',
     )
     # Only the FROM_RESTART (transient) block is selected at run time, but both blocks carry these
     # keys, so each patch expects two hits and both are set consistently.

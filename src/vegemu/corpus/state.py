@@ -156,7 +156,11 @@ def summarise_cell(rec: dict[str, Any], cell: int, lay: Layout) -> dict[str, flo
         + stems["ind_heartwood_bg_c"].astype(np.float64)
     )
 
-    out: dict[str, float] = {
+    # Not annotated: `out` is already bound on the no-trees path above, with the same
+    # `dict[str, float]` that `_empty_summary` returns. A second ANNOTATION on the same name is a
+    # redefinition even though the two bindings sit on mutually exclusive paths -- that branch
+    # returns -- so annotating once is the fix, and neither binding is dead.
+    out = {
         "cell": float(cell),
         "skip": 0.0,
         "npatch": float(npatch),
@@ -278,9 +282,7 @@ def two_seed_spread(a: pl.DataFrame, b: pl.DataFrame, columns: Sequence[str]) ->
     for col in columns:
         mean = (pl.col(col) + pl.col(f"{col}_b")) / 2.0
         rel = (pl.col(col) - pl.col(f"{col}_b")).abs() / mean
-        exprs.append(
-            pl.when(mean.abs() > 0).then(rel).otherwise(None).alias(f"spread_{col}")
-        )
+        exprs.append(pl.when(mean.abs() > 0).then(rel).otherwise(None).alias(f"spread_{col}"))
     return joined.select(exprs)
 
 

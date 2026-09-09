@@ -225,9 +225,9 @@ def test_dtemp_delivers_exactly_that_annual_mean_warming(dtemp: float) -> None:
 
 def test_dtemp_carries_the_seasonal_shape_not_a_uniform_shift() -> None:
     base = _synthetic_base()
-    delta = apply_perturbation(base, _pattern(base), Perturbation("t", dtemp=4.0))["tas"] - base[
-        "tas"
-    ]
+    delta = (
+        apply_perturbation(base, _pattern(base), Perturbation("t", dtemp=4.0))["tas"] - base["tas"]
+    )
     monthly = np.array(
         [delta[:, MONTH_START[m] : MONTH_START[m] + MONTH_LEN[m]].mean() for m in range(12)]
     )

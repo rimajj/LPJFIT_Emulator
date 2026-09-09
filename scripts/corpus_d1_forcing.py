@@ -104,12 +104,18 @@ def _build_config(cell: int, point: str, seed: int, nspinup: int, tag: str) -> P
     cmd = [
         sys.executable,
         str(REPO / "scripts" / "corpus_spinup_config.py"),
-        "--cell", str(cell),
-        "--forcing", str(forcing_dir(cell, point)),
-        "--run-dir", str(rd),
-        "--tag", tag,
-        "--seed", str(seed),
-        "--nspinup", str(nspinup),
+        "--cell",
+        str(cell),
+        "--forcing",
+        str(forcing_dir(cell, point)),
+        "--run-dir",
+        str(rd),
+        "--tag",
+        tag,
+        "--seed",
+        str(seed),
+        "--nspinup",
+        str(nspinup),
     ]
     subprocess.run(cmd, check=True, capture_output=True, text=True)
     return rd / f"lpjml_spinup_{tag}.js"

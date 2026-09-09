@@ -251,19 +251,25 @@ def stage_plan(version: str, ncell: int, npoint: int, shard_size: int) -> int:
 
     print(f"pilot corpus {version}: {len(cells)} cells x {len(design)} climates = {len(rows)} runs")
     print(f"  eligible tree-bearing cells   {sel.eligible}")
-    print(f"  populated {int(sel.as_dict()['tile_degrees'])}-degree tiles      "
-          f"{sel.tiles_populated}, of which covered {sel.tiles_covered}")
+    print(
+        f"  populated {int(sel.as_dict()['tile_degrees'])}-degree tiles      "
+        f"{sel.tiles_populated}, of which covered {sel.tiles_covered}"
+    )
     for stage, count in sorted(sel.as_dict()["by_stage"].items()):
         print(f"  cells chosen by {stage:12s}  {count}")
-    print(f"  design: {sum(1 for p in design if p.is_neutral)} control, "
-          f"{sum(1 for p in design if p.name.startswith('core_'))} factorial core, "
-          f"{sum(1 for p in design if p.name.startswith('lhs'))} hypercube")
+    print(
+        f"  design: {sum(1 for p in design if p.is_neutral)} control, "
+        f"{sum(1 for p in design if p.name.startswith('core_'))} factorial core, "
+        f"{sum(1 for p in design if p.name.startswith('lhs'))} hypercube"
+    )
     print(f"  plan_sha256 {prov['plan_sha256']}")
     print(f"  tables      {out}")
     print(f"  manifests   {len(shards)} shards of <= {shard_size} in {mdir}")
     if shard_size > 64:
-        print("  ⚠ a shard larger than 64 must go to PARTITION=standard; priority is capped at "
-              "64 CPU per job and refuses at submit time.")
+        print(
+            "  ⚠ a shard larger than 64 must go to PARTITION=standard; priority is capped at "
+            "64 CPU per job and refuses at submit time."
+        )
     return 0
 
 
@@ -271,7 +277,9 @@ def _git_commit() -> str:
     try:
         return subprocess.run(
             ["git", "-C", str(REPO), "rev-parse", "HEAD"],
-            check=True, capture_output=True, text=True,
+            check=True,
+            capture_output=True,
+            text=True,
         ).stdout.strip()
     except (subprocess.CalledProcessError, OSError):
         return "unknown"
@@ -369,8 +377,10 @@ def stage_build(version: str, workers: int, shard: int, nshard: int, npoint: int
     runs = pl.read_csv(out / "runs.csv")
     cells = sorted(set(int(c) for c in runs["cell"].to_list()))
     mine = cells[shard::nshard] if nshard > 1 else cells
-    print(f"building {len(mine)} of {len(cells)} cells x {npoint} climates "
-          f"(shard {shard}/{nshard}, {workers} workers)")
+    print(
+        f"building {len(mine)} of {len(cells)} cells x {npoint} climates "
+        f"(shard {shard}/{nshard}, {workers} workers)"
+    )
 
     done: list[dict[str, Any]] = []
     failed: list[dict[str, Any]] = []
@@ -407,11 +417,15 @@ def stage_build(version: str, workers: int, shard: int, nshard: int, npoint: int
         json.dumps(summary, indent=2, sort_keys=True) + "\n", "utf-8"
     )
     print(f"forcing written: {total_bytes / 1e9:.2f} GB over {len(done)} cells")
-    print(f"neutral byte identity: {len(neutral)} control points checked, "
-          f"all pass = {summary['neutral_byte_identity_all_pass']}")
+    print(
+        f"neutral byte identity: {len(neutral)} control points checked, "
+        f"all pass = {summary['neutral_byte_identity_all_pass']}"
+    )
     if not summary["neutral_byte_identity_all_pass"]:
-        print("  ⚠ a control point did NOT reproduce the source bytes. The writer is not a no-op "
-              "on the identity design point, so no perturbed file it produced can be trusted.")
+        print(
+            "  ⚠ a control point did NOT reproduce the source bytes. The writer is not a no-op "
+            "on the identity design point, so no perturbed file it produced can be trusted."
+        )
         return 1
     if failed:
         print(f"⚠ {len(failed)} cells FAILED; the corpus is incomplete:", file=sys.stderr)
@@ -452,8 +466,10 @@ def stage_verify(version: str) -> int:
     print(f"  forcing files present  {sum(sizes.values())}/{total * 5}")
     print(f"  distinct forcing sizes {sorted(sizes.items(), reverse=True)[:4]}")
     if len(sizes) > 1:
-        print("  ⚠ forcing files are NOT all the same size. A `.clm` size mismatch means the "
-              "dtype or the year count is wrong and every value read is silently shifted.")
+        print(
+            "  ⚠ forcing files are NOT all the same size. A `.clm` size mismatch means the "
+            "dtype or the year count is wrong and every value read is silently shifted."
+        )
     for label, items in (("configs", missing_cfg), ("forcing files", missing_forcing)):
         if items:
             print(f"  ⚠ {len(items)} missing {label}, first few: {items[:5]}", file=sys.stderr)
@@ -503,8 +519,10 @@ def stage_harvest(version: str) -> int:
         if items:
             print(f"  first few {label}: {items[:5]}")
     complete = ok == total and not no_restart
-    print(f"verdict: {'COMPLETE' if complete else 'INCOMPLETE'} -- "
-          f"{'harvestable' if complete else 'rerun the missing members before scoring anything'}")
+    print(
+        f"verdict: {'COMPLETE' if complete else 'INCOMPLETE'} -- "
+        f"{'harvestable' if complete else 'rerun the missing members before scoring anything'}"
+    )
     return 0 if complete else 1
 
 

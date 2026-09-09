@@ -137,8 +137,9 @@ def _state(run: Path, tag: str) -> dict[str, float]:
 def _attrib_present() -> bool:
     """The attribution arm is optional: the direction table stands without it."""
     return all(
-        (_run_dir(c, ATTRIB_POINT, 1) / "restart" / f"restart_{_tag(c, ATTRIB_POINT, 1)}.lpj")
-        .exists()
+        (
+            _run_dir(c, ATTRIB_POINT, 1) / "restart" / f"restart_{_tag(c, ATTRIB_POINT, 1)}.lpj"
+        ).exists()
         for c in CELLS.values()
     )
 
@@ -220,9 +221,7 @@ def analyse(table: pl.DataFrame) -> dict[str, Any]:
             entry["attribution_+4K"] = {
                 "rel_with_fixed_rh": real,
                 "rel_with_humidity_held": held,
-                "share_owed_to_rule2": (
-                    float("nan") if real == 0 else float((real - held) / real)
-                ),
+                "share_owed_to_rule2": (float("nan") if real == 0 else float((real - held) / real)),
                 "vegc_gCm2": attrib[0]["vegc_traj_gCm2"],
             }
 
@@ -246,8 +245,10 @@ def main() -> int:
     (out_dir / "d1_direction.json").write_text(json.dumps(verdict, indent=2) + "\n", "utf-8")
 
     print(f"D1 direction test -- {TAIL_YEARS}-year tail mean of the spin-up vegetation carbon")
-    print(f"basis: 5 cells, 1 patch-set of 25, seed 1; the null is seed {NULL_SEED} at zero "
-          f"perturbation; band = max({TOLERANCE_FLOOR:.0%}, that gap)")
+    print(
+        f"basis: 5 cells, 1 patch-set of 25, seed 1; the null is seed {NULL_SEED} at zero "
+        f"perturbation; band = max({TOLERANCE_FLOOR:.0%}, that gap)"
+    )
     print()
     header = (
         f"{'biome':22s} {'ctl gC/m2':>10s} {'null gap':>9s} "
@@ -276,10 +277,7 @@ def main() -> int:
     print(f"{'biome':22s} " + " ".join(f"{c:>13s}" for c in cols))
     for biome in CELLS:
         r = verdict["cells"][biome]["response"]["+4K"]
-        print(
-            f"{biome:22s} "
-            + " ".join(f"{r[f'rel_{c}'] * 100:+12.1f}%" for c in cols)
-        )
+        print(f"{biome:22s} " + " ".join(f"{r[f'rel_{c}'] * 100:+12.1f}%" for c in cols))
     print()
     print("Window sensitivity -- the same response measured over three tail lengths, and the")
     print("two-seed gap on each. A response that flips with the window is a window artefact.")

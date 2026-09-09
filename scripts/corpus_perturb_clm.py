@@ -89,9 +89,7 @@ def _source_header(path: str) -> ClmHeader:
     return header
 
 
-def _read_block(
-    path: str, cells: range, first: int, last: int
-) -> npt.NDArray[np.float64]:
+def _read_block(path: str, cells: range, first: int, last: int) -> npt.NDArray[np.float64]:
     """(ncell, nyear, 365) of one variable, for a contiguous cell range and a year window."""
     reader = ClmReader(path)
     with reader:
@@ -183,9 +181,7 @@ def load_base(cells: range, window: tuple[int, int] = BASE_WINDOW) -> CellBase:
     for i, cell in enumerate(cells):
         pr_clim = np.array(
             [
-                base["pr"][i][:, MONTH_START[m] : MONTH_START[m] + MONTH_LEN[m]]
-                .sum(axis=1)
-                .mean()
+                base["pr"][i][:, MONTH_START[m] : MONTH_START[m] + MONTH_LEN[m]].sum(axis=1).mean()
                 for m in range(len(MONTH_LEN))
             ]
         )

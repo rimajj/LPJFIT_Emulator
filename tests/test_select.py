@@ -227,9 +227,7 @@ def test_selection_is_deterministic() -> None:
 def test_tiles_agree_with_the_scorer_that_will_make_the_folds() -> None:
     """The corpus and the folds must compute a tile the same way, or blocking means nothing."""
     sel = pilot_cells(200)
-    want = spatial_blocks(
-        sel.table["lon"].to_numpy(), sel.table["lat"].to_numpy(), TILE_DEGREES
-    )
+    want = spatial_blocks(sel.table["lon"].to_numpy(), sel.table["lat"].to_numpy(), TILE_DEGREES)
     assert np.array_equal(sel.table["tile"].to_numpy(), want)
 
 

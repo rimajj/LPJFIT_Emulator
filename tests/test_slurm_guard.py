@@ -22,6 +22,7 @@ every case passed vacuously.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -30,6 +31,8 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 HOOK = ROOT / ".claude" / "hooks" / "slurm-guard.sh"
+# Every variable that makes the hook allow unconditionally. Stripped from the child; see `verdict`.
+_OVERRIDES = frozenset({"ALLOW_LOGIN_HEAVY", "ALLOW_RAW_SBATCH", "SLURM_JOB_ID"})
 sys.path.insert(0, str(ROOT / "tools"))
 
 import check_no_abs_paths as checker  # noqa: E402
@@ -75,13 +78,23 @@ MUST_ALLOW_WITH_HATCH = [
 
 
 def verdict(command: str) -> str:
-    """Either "deny" or "allow", as the hook decides for `command`."""
+    """Either "deny" or "allow", as the hook decides for `command`.
+
+    ⚠ THE THREE OVERRIDE VARIABLES ARE STRIPPED FROM THE CHILD'S ENVIRONMENT. The hook exits 0 --
+    allow -- as its very first act if any of them is set, and it inherits whatever the session
+    exported. So running this suite from a shell that had used the documented
+    `ALLOW_LOGIN_HEAVY=1` escape hatch turned every MUST_DENY case red at once, which reads as "the
+    guard is broken" rather than "the guard is switched off for this shell". A test of a deny rule
+    must control the thing that disables the rule.
+    """
+    env = {k: v for k, v in os.environ.items() if k not in _OVERRIDES}
     proc = subprocess.run(
         [str(HOOK)],
         input=json.dumps({"tool_input": {"command": command}}),
         capture_output=True,
         text=True,
         check=False,
+        env=env,
     )
     if proc.returncode != 0:
         pytest.fail(f"hook exited {proc.returncode}: {proc.stderr}")
