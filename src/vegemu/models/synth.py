@@ -442,7 +442,9 @@ def _choose_donors(
             # still wrong, but leaving an all-forbidden row would make argmin return donor 0
             # silently; `inadmissible_placed` is what surfaces it.
             allowed[~allowed.any(axis=1)] = True
-        cost = np.where(allowed, cost, np.inf)
+        # Re-annotated rather than assigned straight back: `np.where` is typed loosely enough to
+        # come back shape- and dtype-erased, which `strict` rejects against `cost`'s declared type.
+        cost = np.asarray(np.where(allowed, cost, np.inf), dtype=np.float64).reshape(cost.shape)
     return np.asarray(np.argmin(cost, axis=1), dtype=np.int64), fallbacks
 
 

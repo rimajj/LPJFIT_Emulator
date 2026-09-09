@@ -175,7 +175,11 @@ def fit_out_of_fold(
     """
     cfg = config or EmulatorConfig()
     quantities = tuple(quantities)
-    preds = [np.full((m.shape[0], len(quantities)), np.nan) for m in apply_to]
+    # Annotated rather than inferred: `np.full` comes back with a concrete 2-D shape type, which
+    # `strict` will not accept for the declared shape-agnostic float64 return.
+    preds: list[npt.NDArray[np.float64]] = [
+        np.full((m.shape[0], len(quantities)), np.nan, dtype=np.float64) for m in apply_to
+    ]
     models: dict[int, Emulator] = {}
     for f in np.unique(folds):
         test = folds == f
