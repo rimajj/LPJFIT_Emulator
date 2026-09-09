@@ -63,6 +63,22 @@ The maximin fill tested exhaustion with `isfinite`, but an unvisited candidate's
 distance is `+inf`, which is also not finite — so starting from an empty set reported "exhausted"
 immediately and selected nothing at all. The test that caught it asks for a fill of a whole frame.
 
+### Fixed — line D's share of the two red gates is now clear, and here is exactly what is left
+
+`types` went from **17 errors to 1**, and the one that remains is not line D's. `lint`'s format
+check went from 14 files to **3**, and none of those three is line D's either. What is left, for
+whoever owns it: `src/vegemu/models/synth.py:143` (an `Any` returned from a function declared to
+return an array — the same one-line annotation used twice in `corpus/perturb.py` in this commit),
+plus `ruff format` on `scripts/train_emulator.py`, `src/vegemu/models/__init__.py` and
+`src/vegemu/models/synth.py`. All four are **line T's exclusive paths**, so `check_ownership`
+refuses the fix from here — the guard working as designed, and the reason this note exists instead.
+
+⚠ Two of the type errors cleared here were in `corpus/perturb.py` and had never been seen, because
+that file landed on a branch whose gates had never run. The commit that introduced it claimed to
+have made its array types explicit for strict checking; it missed two functions. A gate that has
+never executed is not a gate, and "I fixed it for the type checker" is not evidence until the
+checker has actually said so.
+
 ### Process — the one sanctioned cross-line channel does not work against a line that is at budget
 
 ⚠ **An integrator matter, found the hard way.** The disclosures above were written as a

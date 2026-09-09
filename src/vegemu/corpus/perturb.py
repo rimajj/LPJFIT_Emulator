@@ -307,9 +307,14 @@ def calibrate_cell(
 
 
 def _annual_anomaly(daily: npt.NDArray[np.float64], reduce_sum: bool) -> npt.NDArray[np.float64]:
-    """(nyear,) departure of each year from the block mean; a total for sums, a mean otherwise."""
+    """(nyear,) departure of each year from the block mean; a total for sums, a mean otherwise.
+
+    Annotated rather than returned directly: `ndarray.sum(axis=...)` is typed `Any` in the numpy
+    stubs, so returning the expression straight out silently defeats the declared return type.
+    """
     per_year = daily.sum(axis=1) if reduce_sum else daily.mean(axis=1)
-    return per_year - per_year.mean()
+    out: npt.NDArray[np.float64] = per_year - per_year.mean()
+    return out
 
 
 def _iav_factor(
@@ -323,7 +328,9 @@ def _iav_factor(
     per_year = daily.sum(axis=1) if reduce_sum else daily.mean(axis=1)
     mean = float(per_year.mean())
     rel = (per_year - mean) / mean if mean > 0 else np.zeros_like(per_year)
-    return np.maximum(1.0 + k * rel, 0.0)[:, None]
+    # Annotated for the same reason as `_annual_anomaly`: a numpy ufunc's `__call__` is typed `Any`.
+    out: npt.NDArray[np.float64] = np.maximum(1.0 + k * rel, 0.0)[:, None]
+    return out
 
 
 def apply_perturbation(
