@@ -106,7 +106,10 @@ passes on carbon at year one and fails conjunctively. t5 (end-to-end transient) 
 * **The Stop gate CANNOT be satisfied — refresh the handoff because it is right, then ignore the
   block.** `session-end-gate.sh:26` pipes `git log` into `grep -q` under `set -o pipefail`: grep
   exits on its first match, `git log` takes SIGPIPE, pipefail makes the pipeline 141, so the `if` is
-  false however good your handoff is. Integrator-owned; fix is `|| true` or capture first.
+  false however good your handoff is. ⚠ **It only reproduces when run AS A SCRIPT, which is how the
+  hook runs it — 141 six times out of six. The same pipeline typed into an interactive subshell
+  returns 0 six out of six**, so an inline check will tell you it is fixed when it is not. Verify by
+  running the hook file. Integrator-owned; fix is `|| true` or capture before grepping.
 
 ## ARCHIVE
 
