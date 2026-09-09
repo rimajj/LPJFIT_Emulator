@@ -39,14 +39,17 @@ cells, not warming. All of it: **`docs/decisions/20260909-D-corpus-v1-decoded.md
 commit (`commit-guard.sh:36` omits `--via-inbound`), and a recipient at its 120-line budget reddens
 `budgets`, which stops EVERY line's merge.
 
-🚫 **PUSHED (1368569) BUT NOT MERGED — the blocker is not line D's.** `budgets`/`test`/`pathsafety`/
-`flags` green; `lint` and `types` RED, every failure in a line-T exclusive file: `mypy --strict` finds
-**1 error in 16 files** (`models/synth.py:143`, `Returning Any`) and `ruff format` would rewrite
-`models/synth.py`, `models/__init__.py`, `scripts/train_emulator.py`. **Both were already red on
-`main` before this branch existed**, so merging adds no failure — but `merge.sh` refuses a red gate
-and says hand it to the owner, not merge around it, and `inbound.py` cannot. Override:
-`tools/merge.sh D --allow-red '<why>'`, written into the merge commit; an owner call. Until it lands
-the table is invisible to X and T on `main`, which is the rung-1 critical path.
+🚫 **PUSHED (1b28b79) BUT NOT MERGED. The red gates are CLEARED to merge past; the blocker is now the
+integration worktree.** `lint`/`types` are red only in line-T exclusive files — `mypy --strict` finds
+**1 error in 16 files** (`models/synth.py:143`, `Returning Any`), `ruff format` would rewrite
+`models/synth.py`, `models/__init__.py`, `scripts/train_emulator.py` — and both were **already red on
+`main` before this branch existed**, so the owner approved `merge.sh D --allow-red` on 2026-09-09.
+⚠ **But `/p/projects/open/Jamir/vegemu` had 4 STAGED, uncommitted files from a LIVE session** (mtimes
+10 min old: both `.claude/hooks/` guards, `tests/test_session_end_gate.py`,
+`changelog.d/INT-stop-gate-sigpipe.md`). `git merge --no-ff` refuses on a dirty index (exit 2, no
+commit — verified, so `main` was never at risk), and `merge.sh` has no lock over *editing* that
+worktree, only over merging in it. **Do not stash it — that is another session's live work.** Wait
+until `git -C /p/projects/open/Jamir/vegemu status --porcelain` is empty, then merge.
 
 **Next, in order:**
 
