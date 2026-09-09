@@ -18,43 +18,48 @@ Read `docs/decisions/20260909-T-t3-drift-fails-below-the-null.md` first. No coll
 — which is what t3 existed to ask — but after twenty years the emulated state is a *worse*
 description of the control than the true 1999 state it was built to replace.
 
-**⚠ ALWAYS RUN A CEILING ARM.** A band leg sits inside its own band by construction, so the 100 %
-the two control seeds score is arithmetic. A THIRD control seed is a run of the real model that is
-not a band leg, and what it scores is the most any emulator could score. Two minutes on one core;
-without it a "0 of 20" has no scale at all.
-
 **Numbers** (20 cells of 54,020, temperate Europe, present-day, 2000–2019, one task per arm, seed
 pair 1/2 for the band and seed 3 for the ceiling — NOT the acceptance test):
 
 * emulated **0 of 20 cells** inside `max(10 %, two-seed spread)` on all 22 quantities, median 16/22
-* **ceiling, a third real run: 25 %, median 21/22** — so the test has power; this is a fail
+* **ceiling, a third real run: 25 %, median 21/22** — so the test has power; this is a fail. ⚠ Always
+  run that arm: the two band legs score 100 % by arithmetic, so without it a 0 % has no scale.
 * null, "twenty years change nothing" (the true 1999 state): 0 %, median **18**/22, and closer to
   the control on 14 of the 22. The sharpest statement of the failure.
-* vegetation carbon, per-cell median gap **grew 0.087 → 0.140** over the twenty years against the
-  two controls' own 0.010 → 0.097. The block TOTAL closes from −10.6 % to −1.3 %, but that is
-  opposite-sign per-cell errors cancelling in a sum. **Never quote the total alone.**
+* vegetation carbon, per-cell median gap **grew 0.087 → 0.140** against the two controls' own
+  0.010 → 0.097. The block TOTAL closes from −10.6 % to −1.3 %, but that is opposite-sign per-cell
+  errors cancelling in a sum. **Never quote the total alone.**
 * worst shortfalls against what a real run attains: leaf area 90 % → **15 %**, rooting-depth low
   tail 90 → 35, stems/patch 70 → 25, height median 95 → 50. All transplant-uncontrolled quantities.
 * unchanged: t4 carbon at year one 0.091; level map 0.0361 conjunctively; warming response −0.727.
 
 **The artifacts.** The deliverable is unchanged:
 `/p/tmp/jamirp/vegemu/runs/synth-v2/restart/restart_1999_emulated.lpj`, sha256 `64fdbf2d…`, cells
-42480–42499. ⚠ `synth-v3` is the REJECTED five-trait variant. t3 lives in
-`/p/tmp/jamirp/vegemu/runs/t3-{emulated,control,control-s2,control-s3}`, scored into
-`t3-emulated/t3_drift.json` by the new `scripts/synth_drift.py` (four arms, null and ceiling in the
-same table as the result). Config recipe: `scripts/corpus_cmodel_config.py --years 2000 2019`, then
-patch `new_seed`→true and `random_seed` for a fresh seed, then `scripts/sbatch_cmodel.sh`.
+42480–42499. ⚠ `synth-v3` is the REJECTED five-trait variant. t3 is in
+`runs/t3-{emulated,control,control-s2,control-s3}`, scored into `t3-emulated/t3_drift.json` by the
+new `scripts/synth_drift.py`. Recipe:
+`scripts/corpus_cmodel_config.py --years 2000 2019`, patch `new_seed`→true and `random_seed` for a
+fresh seed, `scripts/sbatch_cmodel.sh`, then `synth_drift.py --ceiling … --initial …`.
 
-**Next, cheapest first:**
+**THE SINGLE NEXT ACTION: give `synthesise_cell` a cell-total LEAF-MASS constraint**
+(`src/vegemu/models/synth.py`), then re-run the ladder above to score it. Leaf area is t3's largest
+single loss — 15 % of cells against an attainable 90 % — and the only one with a known mechanism:
+leaf carbon is a per-stem MASS and the transplant matches traits, so nothing targets it. Rescale the
+placed stems' leaf carbon to the predicted cell total after the type-and-trait match, and measure
+the other 21 for damage the way five-trait matching was measured. A new mechanism, not a parameter.
 
-1. **Impose the predicted trait distribution on the roster** instead of inheriting whatever the
-   two-trait match returned. t3 says this is where the loss is.
-2. **A cell-total mass constraint, leaf area first.** The worst single quantity, 15 % against an
-   attainable 90 %; leaf carbon is a per-stem mass the transplant never targets. Not built.
-3. **Do NOT widen `MATCH_TRAITS`** — measured: 11 of 22 quantities degrade, median cell 15 → 12.
-4. **Do NOT quote t3 as a pass on carbon**, and do not tune the model to chase the sealed map gate.
-5. **The response model must predict the CHANGE directly**, blocked on D's pilot corpus.
-6. **T1, the GPU path: still not built, still not needed** — boosted trees on 16 CPU cores, 4 min.
+**Then, cheapest first:**
+
+1. **Impose the predicted trait distribution on the roster** rather than inheriting the two-trait
+   match — the rest of t3's loss (wood density 70 % vs 100, height 50 vs 95, rooting depth 50 vs 85).
+2. **Do NOT widen `MATCH_TRAITS`** — measured: 11 of 22 quantities degrade, median cell 15 → 12.
+3. **Do NOT quote t3 as a pass on carbon**, and do not tune the model to chase the sealed map gate.
+4. **The response model must predict the CHANGE directly**, blocked on D's pilot corpus.
+5. **T1, the GPU path: still not built, still not needed** — boosted trees on 16 CPU cores, 4 min.
+
+**Housekeeping, clear.** Six campaigns harvested with exit codes, hashes and results;
+`tools/campaigns.py --check` green. **No verdict is owed:** t3 has no `exp_id` — `experiments/**` is
+X-exclusive, and a ladder step on the artifact goes in a decision record, as t2 and t4 did.
 
 **The merge is still blocked by line D, not by this work.** `ruff format --check .` still reports
 D's four files (`scripts/corpus_cmodel_config.py`, `scripts/corpus_convergence.py`,
@@ -110,7 +115,6 @@ measured ceiling, t4 passes on carbon at year one and fails conjunctively. t5 is
   and never on tree TYPE, so 31 % of the stems written into twenty temperate cells were tropical and
   the model killed them all in year one. The synthesis was never at fault — the file held 6.7 % MORE
   biomass than the truth. Fixed by copying type from the template at matching size rank and widening
-  the pool to a proximity band; one-year carbon 0.543 → 0.296 → 0.091. Full record:
-  `docs/decisions/20260909-T-the-roster-was-valid-but-not-viable.md`.
-* **Five-trait matching, measured and rejected** 2026-09-08: 11 of 22 quantities degrade because one
-  donor is one real stem and cannot sit at the same quantile of five distributions at once.
+  the pool to a proximity band; one-year carbon 0.543 → 0.296 → 0.091. Record: `docs/decisions/20260909-T-the-roster-was-valid-but-not-viable.md`.
+* **Five-trait matching, rejected** 2026-09-08: one donor is one real stem and cannot sit at the
+  same quantile of five distributions at once.
