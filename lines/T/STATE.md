@@ -18,12 +18,12 @@ off the synthesiser onto the level model.** Read
 `docs/decisions/20260909-T-the-roster-was-truncated-at-both-tails.md` first. Still a FAIL — but a
 different and better one, and the next action has changed line.
 
-**What was wrong.** The synthesised file held **no tree above 13.3 m** anywhere in the block while
-the truth reaches 25.8 m. The predicted quantiles are CELL quantiles, but the roster was drawn
-inside each patch at ranks 0.026–0.974 with n≈19, so every patch got the same truncated ladder and
-the stand's tallest tree (rank ~0.998) was unaddressable in every cell. The missing 16–25 m stems
-were 109 % of the leaf gap. Not a pool failure (794 admissible stems above 16 m were there), not a
-prediction failure (`height_p90` good to 7 %) — and invisible to every mean the synthesiser printed.
+**What was wrong.** The file held **no tree above 13.3 m** anywhere in the block while the truth
+reaches 25.8 m. The predicted quantiles are CELL quantiles, but the roster was drawn inside each
+patch at ranks 0.026–0.974 with n≈19, so every patch got the same truncated ladder and the stand's
+tallest tree (rank ~0.998) was unaddressable in every cell. The missing 16–25 m stems were 109 % of
+the leaf gap — not a pool failure (794 admissible stems above 16 m were there), not a prediction
+failure (`height_p90` good to 7 %), and invisible to every mean the synthesiser printed.
 
 **Numbers now** (20 cells of 54,020, temperate Europe, present-day, 2000–2019, one task per arm,
 same band and ceiling arms as t3 — NOT the acceptance test):
@@ -61,15 +61,16 @@ more than any other single prediction. Re-measure that bound after any change wi
    rescale the previous handoff called for would divide every height by 1.41. Rejected on measurement.
 4. **The response model must predict the CHANGE directly**, blocked on D's pilot corpus.
 
-**Housekeeping, clear.** Five campaigns harvested with hashes and results, `--check` green. **No
-verdict is owed:** this has no `exp_id` — `experiments/**` is X's, so a ladder step goes in a record.
+**Housekeeping, clear.** Five campaigns harvested, `--check` green. **No verdict is owed:** this has
+no `exp_id` — `experiments/**` is X's, so a ladder step goes in a record.
 
-**The merge waits on line D MERGING, not on line D fixing anything — do not merge unasked.** T is
-red on `lint` (D's four files) and `types` (`binfmt/clm.py`, `corpus/state.py:159`); T's own files
-are clean and every other gate is green. ⚠ **D ALREADY FIXED all of it in `ae08be0`, which is not an
-ancestor of `origin/main`** — verified 2026-09-09. So nothing needs writing: when D merges, rebase
-and T should go green with no `--allow-red`. Do not measure main's state in
-`/p/projects/open/Jamir/vegemu` — that clone's `origin/main` was stale and gave a wrong file set.
+**THE MERGE IS UNBLOCKED AND READY — but still do not merge unasked.** Line D merged
+(`ae08be0` is now an ancestor of `origin/main`), line/T is rebased onto it, and every gate is green
+LOCALLY: `ruff check .`, `ruff format --check .`, `mypy --strict src/vegemu`, and 195 tests. Two
+long-standing type errors in T's own `models/` files surfaced once D's fix stopped masking them and
+are fixed. `expected_gates.py` says this diff triggers budgets, lint, types, test, pathsafety,
+flags — and NOT experiments, campaigns or changelog, so do not poll for those. Run
+`tools/merge.sh T` when the owner asks; nothing else is outstanding.
 
 ## Milestones
 
