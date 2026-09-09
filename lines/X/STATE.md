@@ -15,61 +15,61 @@ does not build models (T) or generate data (D).
 
 **The kill test is sealed and the bar is 0.225690.** Line D's pilot corpus (200 cells × 30 climates,
 same cell, same seed, only the climate differs) removes the collinearity that made X1's `fail`
-non-decisive, so the warming response is separately identified for the first time.
-`X-20260909-pilot-warming-response` is sealed with seven nulls, all derived before any model exists.
-**The bar is not "no change" (0.0) — it is "every cell changes by the same fraction of what it
-already has", at 0.145690**, applied to the held-out cell's own present forest. Record:
+non-decisive. `X-20260909-pilot-warming-response` has seven nulls, all derived before any model
+exists, and **the bar is not "no change" (0.0) but "every cell changes by the same fraction of what
+it already has", 0.145690**, on the cell's own present forest. Record:
 `docs/decisions/20260909-X-the-kill-test-bar-is-a-proportional-response.md`.
 
-**Owed by line T, and this one is now the critical path: the model arm.**
-`scripts/sbatch_py.sh --exp X-20260909-pilot-warming-response T-pilot-response-v0 <script>`.
-The model gets the held-out cell's **control state** (deliberate and disclosed — production always
-holds a real restart), its baseline climate, and the design point's five axis coefficients; it
-predicts the change in the seven quantities. Folds are 15° blocked 5-fold seed 42 via
-`blocked_spatial_folds`, exactly as the nulls were derived. Re-derive any null in one job:
+**Owed by line T, now the critical path: the model arm.** `scripts/sbatch_py.sh --exp
+X-20260909-pilot-warming-response T-pilot-response-v0 <script>`. The model gets the held-out cell's
+**control state** (disclosed — production always holds a real restart), its baseline climate and the
+design point's five axis coefficients, and predicts the change in the seven quantities. Folds: 15°
+blocked 5-fold seed 42 via `blocked_spatial_folds`, as derived. Re-derive any null in one job:
 `scripts/exp_derive_nulls_pilot.py --version pilot-v1 --nproc 32 --degrees 15 --out <dir>`.
 
-Three things from the derivation that constrain how the result may be reported:
+Three things that constrain how the result may be reported:
 
 * **Copying another cell's response is worse than saying nothing changes** (nearest cell −0.281166,
-  closest climate analogue −0.239753). The response is cell-specific. But not uniformly: the analogue
-  null reaches +0.3292 on soil carbon and −0.6387 on stem count. Size transfers, composition does not.
+  analogue −0.239753) — but not uniformly: the analogue null reaches +0.3292 on soil carbon and
+  −0.6387 on stem count. Size transfers between cells, composition does not.
 * **The per-level table (29 rows) is part of the result, not an appendix.** Only 40.5 % of cells are
-  monotone in carbon across 0/+2/+4/+6 K, so a level-averaged score hides the shape. A pass pooled
-  with a fail at more than half the levels must be reported as such.
+  monotone in carbon across 0/+2/+4/+6 K. A pass pooled with a fail at more than half the levels
+  must be reported as such.
 * **380 of 6,000 runs (6.33 %) are treeless.** Counts and stocks keep those rows; the three trait
   medians score on 5,620 — where vegetation survived. Say the row count with every trait number.
 
 **X3 (`X-20260908-heldout-forcing-leg`) is sealed and still awaits line T's model arm** — unchanged
 for two sessions. Fit on the historical leg only, predict from the low-emissions 2071–2100 climate,
-assemble out-of-fold under 15° blocked folds. Launch as `scripts/sbatch_py.sh --exp
-X-20260908-heldout-forcing-leg T-heldout-leg-v0 <script>`. The model must reach **0.0837** (best
-null: same-cell persistence at 0.033749) against the 0.0361 it scores on the leg it was fitted on.
-The non-circular ceiling is **0.538490** — that, not 1.0, is what perfect means there.
+assemble out-of-fold under 15° blocked folds. `scripts/sbatch_py.sh --exp
+X-20260908-heldout-forcing-leg T-heldout-leg-v0 <script>`. It must reach **0.0837** (best null:
+same-cell persistence, 0.033749) against the 0.0361 it scores on the leg it was fitted on. The
+non-circular ceiling is **0.538490** — that, not 1.0, is what perfect means there.
 
-**X4 (the emitted restart file) stays unsealed, and the pilot corpus is what will fix it.** Its
-blocker was a 20-cell contiguous block on which all four nulls collapsed into 0.786–0.845. The pilot
-design is the counter-example: 200 cells over 164 populated 15° tiles, where the blocking radius
-moves the nulls by less than 0.003. When line T's synthesis can emit for a dispersed cell set, X4 is
-re-derivable against it. The bar is still 0.786, not zero error.
+**X4 (the emitted restart file) stays unsealed; the pilot corpus is what will fix it.** Its blocker
+was a 20-cell contiguous block on which all four nulls collapsed into 0.786–0.845. The pilot design
+is the counter-example: 200 cells over 164 tiles, blocking radius moving the nulls <0.003. Once T
+can synthesise for a dispersed cell set, X4 is re-derivable against it. Bar 0.786, not zero error.
 
 **Owed by other lines, in order:**
 
 * **line T** — the two model arms above. Also still owed: commit `synth-v1`/`v2`/`v3`, which exist
   only as scratch output, then re-score by adding the run directory to `VARIANTS` in
   `scripts/exp_derive_nulls_restart.py` (two seconds a run).
-* **line D** — rebuild the corpus against the genuine high-emissions second run (on disk at
-  `..._random_seed2_from_hist_seed2`) under a **new corpus version**: v0's hash is cited by two
-  sealed pre-registrations and must not move. Make the builder **assert** that a leg's two run files
-  differ rather than recording that they do not.
+* **line D** — rebuild the corpus against the genuine high-emissions second run
+  (`..._random_seed2_from_hist_seed2`) under a **new corpus version**: v0's hash is cited by two
+  sealed pre-registrations and must not move. Make the builder **assert** the two run files differ.
 * **line D** — the one-cell, one-year, two-binary byte comparison that closes the build question.
   Correction to the sealed wording: `docs/decisions/20260908-X-build-gate-correction-the-wrapper-exists.md`.
 * **integrator** — `PLAN.md` needs the two corrections requested last session (the t3 wording and the
   polish-run paragraph); neither has landed. `MEMORY.md` wants rows for the proportional-response bar
   and for the ceiling-arm rule below. ⚠ The cross-line channel is still unusable at budget, so this
   list is the channel.
-* **integrator** — **merging costs 15 wasted minutes per `.md`-only push**, a real bug in shared
-  `tools/`: `docs/decisions/20260909-X-gate-selector-reads-a-different-diff-than-github.md`.
+* **integrator** — two shared-`tools/` bugs, each a guard reading a different file set than it
+  guards. **`git add … && git commit` in ONE command silently disables every commit-time checker**
+  (the hook reads the index before the command runs, sees it empty, exits 0):
+  `docs/decisions/20260909-X-the-commit-guard-sees-an-empty-index.md`. And the gate selector reads a
+  different diff than GitHub, costing 15 minutes per `.md`-only push:
+  `docs/decisions/20260909-X-gate-selector-reads-a-different-diff-than-github.md`.
 
 ## Milestones
 
