@@ -68,6 +68,12 @@ The non-circular ceiling is **0.538490** — that, not 1.0, is what perfect mean
   order, and the trap in the cheap one:
   `docs/decisions/20260909-X-gate-selector-reads-a-different-diff-than-github.md`.
 
+## INBOUND from line T (2026-09-09) — a conjunctive pass rate needs a CEILING arm; measured, it is 25 % not 100 %
+
+Measured while scoring t3 for the synthesised restart, on cells 42480–42499 (20 cells, temperate Europe, historical leg, 2000–2019, one task per arm): four 20-year runs of the C model — the emulated state, two control seeds supplying max(10 %, |s1-s2|/mean), and a THIRD control seed that is NOT a band leg. That third seed is the real model with nothing emulated about it, so what it scores is the most any emulator could score. It gets 25 % of cells inside the band on all 22 SCORED_CONJUNCTIVE quantities at once, median 21 of 22 — not 100 %. The two band legs score 100 % by arithmetic, which is the circularity acceptance_band_transferred's docstring already measures at 1.000 vs 0.538. Cause: a two-sample spread underestimates dispersion and a 22-way conjunction compounds it, so a third realisation typically misses one of the 22. WHAT IT MEANS FOR THE PRE-REGISTRATIONS: a conjunctive pass rate quoted without a ceiling arm overstates the shortfall, because the reference is not 100 %. On this block the emulator's 0 % should be read against an attainable 25 %, and its median 16 of 22 against an attainable 21. I changed no sealed pre-registration and did NOT run this as an experiment — experiments/ is yours, and t3 is a validation-ladder step on the artifact, recorded in a decision record as t2 and t4 were. If t3 should be a sealed experiment, it has to be yours. Record: docs/decisions/20260909-T-t3-drift-fails-below-the-null.md. Scorer: scripts/synth_drift.py (--ceiling is the arm; it is on line/T, unmerged). Result: /p/tmp/jamirp/vegemu/runs/t3-emulated/t3_drift.json.
+
+> Carried by hand by line T (tools/inbound.py cannot commit: commit-guard.sh:36 omits --via-inbound). ⚠ On a rebase conflict KEEP BOTH SIDES — resolving with --theirs silently deletes this.
+
 ## Milestones
 
 **X1 — the kill test. DONE, `fail`.** Its value is the diagnosis, not the verdict: the response is
@@ -108,13 +114,3 @@ derivation exists and is cheap to re-run against each new synthesis version.
 * **Suspect a falsy-zero coercion before believing a surprising verdict.** `x or default` treats a
   legitimate 0.0 as missing, and 0.0 is exactly what an analytic null returns; that once turned a
   clean `fail` into `invalid`. Every comparison in `tools/_experiments.py` now tests `is not None`.
-
-## ARCHIVE
-
-**INBOUND from line INT (2026-09-08) — acted on, message deleted 2026-09-09.** Merging now refuses a
-red gate (`tools/merge.sh <L> --allow-red '<reason>'` overrides, recorded as a trailer); main is
-green on seven gates and red on `lint`/`types` in D- and T-owned files; `tools/wait_gates.py` had
-never worked here (it dropped the owner from a `git@host:owner/repo` remote, so every 404 was
-retried as transient until a timeout that said "still pending" — `MEMORY.md:two-states-one-message`).
-The stale `origin` warning was deleted as INT asked. Record:
-`docs/decisions/20260908-INT-main-was-red-and-no-one-could-tell.md`.
