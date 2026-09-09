@@ -13,104 +13,105 @@ does not build models (T) or generate data (D).
 
 ## NEXT — start here
 
-**The emitted restart file now has competitors, and it loses to all of them.** It had only ever been
-scored against the truth (carbon off by 0.534). On 20 cells and all 22 quantities the best synthesis
-version scores **0.702**, while handing the model **a random neighbouring cell's real forest scores
-0.786**. The later versions are real progress (0.582 → 0.702, line T's widened donor pool) and the
-first version's one-year collapse is fixed — but the file is still beaten by chance. Record:
-`docs/decisions/20260909-X-synthesised-restart-is-beaten-by-a-random-neighbour.md`.
+**The kill test is sealed and the bar is 0.225690.** Line D's pilot corpus (200 cells × 30 climates,
+same cell, same seed, only the climate differs) removes the collinearity that made X1's `fail`
+non-decisive, so the warming response is separately identified for the first time.
+`X-20260909-pilot-warming-response` is sealed with seven nulls, all derived before any model exists.
+**The bar is not "no change" (0.0) — it is "every cell changes by the same fraction of what it
+already has", at 0.145690**, applied to the held-out cell's own present forest. Record:
+`docs/decisions/20260909-X-the-kill-test-bar-is-a-proportional-response.md`.
 
-Two more results in the same derivation:
+**Owed by line T, and this one is now the critical path: the model arm.**
+`scripts/sbatch_py.sh --exp X-20260909-pilot-warming-response T-pilot-response-v0 <script>`.
+The model gets the held-out cell's **control state** (deliberate and disclosed — production always
+holds a real restart), its baseline climate, and the design point's five axis coefficients; it
+predicts the change in the seven quantities. Folds are 15° blocked 5-fold seed 42 via
+`blocked_spatial_folds`, exactly as the nulls were derived. Re-derive any null in one job:
+`scripts/exp_derive_nulls_pilot.py --version pilot-v1 --nproc 32 --degrees 15 --out <dir>`.
 
-* **Running the model forward is a no-op, not a repair.** +0.016 and −0.005 for the two working
-  synthesis versions, with the sign flipping between the two bands. The "short polish run" fallback
-  is dead as a repair mechanism; the lever belongs at year 0, in the synthesis.
-* **t3 as worded in `PLAN.md` is unrunnable.** "No drift beyond the two-seed spread" fails on the
-  REAL model in 71 % of cells, because a cell's interannual variability (median 16.5 % of level) is
-  larger than the band (median 10 %). The state's own drift is a median 1.75 % over 20 years and is
-  not the problem. On a 20-year window mean a real restart passes in 90.9 % — that is the ceiling.
+Three things from the derivation that constrain how the result may be reported:
 
-**X4 is deliberately NOT sealed, and that is the finding, not a gap.** On the 20-cell contiguous
-block the conjunctive statistic is pinned at its 0.05 granularity floor for every arm, and all four
-nulls collapse into 0.786–0.845 because the block is one neighbourhood. Nulls that cannot be told
-apart before the run mean no power, so sealing would pre-register a guaranteed `invalid`. It needs:
-a spatially dispersed cell set over enough 15° tiles (a requirement on **line T's** synthesis, today
-20 adjacent cells); a window-mean estimand with the reference arm at 0.909; and the year-by-year
-trajectory, since slow relaxation and transient overshoot both look identical after one step.
+* **Copying another cell's response is worse than saying nothing changes** (nearest cell −0.281166,
+  closest climate analogue −0.239753). The response is cell-specific. But not uniformly: the analogue
+  null reaches +0.3292 on soil carbon and −0.6387 on stem count. Size transfers, composition does not.
+* **The per-level table (29 rows) is part of the result, not an appendix.** Only 40.5 % of cells are
+  monotone in carbon across 0/+2/+4/+6 K, so a level-averaged score hides the shape. A pass pooled
+  with a fail at more than half the levels must be reported as such.
+* **380 of 6,000 runs (6.33 %) are treeless.** Counts and stocks keep those rows; the three trait
+  medians score on 5,620 — where vegetation survived. Say the row count with every trait number.
 
 **X3 (`X-20260908-heldout-forcing-leg`) is sealed and still awaits line T's model arm** — unchanged
-from last session. Fit on the historical leg only, predict from the low-emissions 2071–2100 climate,
-assemble out-of-fold under 15° blocked folds, launch as `scripts/sbatch_py.sh --exp
+for two sessions. Fit on the historical leg only, predict from the low-emissions 2071–2100 climate,
+assemble out-of-fold under 15° blocked folds. Launch as `scripts/sbatch_py.sh --exp
 X-20260908-heldout-forcing-leg T-heldout-leg-v0 <script>`. The model must reach **0.0837** (best
 null: same-cell persistence at 0.033749) against the 0.0361 it scores on the leg it was fitted on.
 The non-circular ceiling is **0.538490** — that, not 1.0, is what perfect means there.
 
+**X4 (the emitted restart file) stays unsealed, and the pilot corpus is what will fix it.** Its
+blocker was a 20-cell contiguous block on which all four nulls collapsed into 0.786–0.845. The pilot
+design is the counter-example: 200 cells over 164 populated 15° tiles, where the blocking radius
+moves the nulls by less than 0.003. When line T's synthesis can emit for a dispersed cell set, X4 is
+re-derivable against it. The bar is still 0.786, not zero error.
+
 **Owed by other lines, in order:**
 
-* **line T** — commit `synth-v1`/`v2`/`v3`. Two of the three numbers above describe code that exists
-  only as scratch output. Then re-score: add the run directory to `VARIANTS` in
-  `scripts/exp_derive_nulls_restart.py`, two seconds a run. The bar is 0.786, not zero error.
+* **line T** — the two model arms above. Also still owed: commit `synth-v1`/`v2`/`v3`, which exist
+  only as scratch output, then re-score by adding the run directory to `VARIANTS` in
+  `scripts/exp_derive_nulls_restart.py` (two seconds a run).
 * **line D** — rebuild the corpus against the genuine high-emissions second run (on disk at
-  `..._random_seed2_from_hist_seed2`, a third build) under a **new corpus version**: v0's hash is
-  cited by two sealed pre-registrations and must not move. Make the builder **assert** that a leg's
-  two run files differ rather than recording that they do not.
+  `..._random_seed2_from_hist_seed2`) under a **new corpus version**: v0's hash is cited by two
+  sealed pre-registrations and must not move. Make the builder **assert** that a leg's two run files
+  differ rather than recording that they do not.
 * **line D** — the one-cell, one-year, two-binary byte comparison that closes the build question.
-  The sealed pre-registration says no wrapper exists; that was true of a stale worktree and FALSE of
-  main, which has `scripts/sbatch_cmodel.sh`. Correction:
-  `docs/decisions/20260908-X-build-gate-correction-the-wrapper-exists.md`.
-* **integrator** — `PLAN.md` needs two corrections (the t3 wording and the polish-run paragraph) and
-  `MEMORY.md` two or three rows. Every requested wording is in the records named above. ⚠ The
-  cross-line channel is still unusable at budget: neither D's nor T's `STATE.md` has room for an
-  inbound block (T sits at exactly 120 lines), so this list is the channel.
-* **integrator** — **merging costs 15 wasted minutes per `.md`-only push** and it is a real bug in
-  shared `tools/`: the gate selector reads the branch diff, GitHub filters on the push diff, so a
-  gate that cannot run reports no status and `wait_gates.py` polls it to timeout. Three fixes, in
-  order, and the trap in the cheap one:
-  `docs/decisions/20260909-X-gate-selector-reads-a-different-diff-than-github.md`.
-
-## INBOUND from line T (2026-09-09) — a conjunctive pass rate needs a CEILING arm; measured, it is 25 % not 100 %
-
-Measured while scoring t3 for the synthesised restart, on cells 42480–42499 (20 cells, temperate Europe, historical leg, 2000–2019, one task per arm): four 20-year runs of the C model — the emulated state, two control seeds supplying max(10 %, |s1-s2|/mean), and a THIRD control seed that is NOT a band leg. That third seed is the real model with nothing emulated about it, so what it scores is the most any emulator could score. It gets 25 % of cells inside the band on all 22 SCORED_CONJUNCTIVE quantities at once, median 21 of 22 — not 100 %. The two band legs score 100 % by arithmetic, which is the circularity acceptance_band_transferred's docstring already measures at 1.000 vs 0.538. Cause: a two-sample spread underestimates dispersion and a 22-way conjunction compounds it, so a third realisation typically misses one of the 22. WHAT IT MEANS FOR THE PRE-REGISTRATIONS: a conjunctive pass rate quoted without a ceiling arm overstates the shortfall, because the reference is not 100 %. On this block the emulator's 0 % should be read against an attainable 25 %, and its median 16 of 22 against an attainable 21. I changed no sealed pre-registration and did NOT run this as an experiment — experiments/ is yours, and t3 is a validation-ladder step on the artifact, recorded in a decision record as t2 and t4 were. If t3 should be a sealed experiment, it has to be yours. Record: docs/decisions/20260909-T-t3-drift-fails-below-the-null.md. Scorer: scripts/synth_drift.py (--ceiling is the arm; it is on line/T, unmerged). Result: /p/tmp/jamirp/vegemu/runs/t3-emulated/t3_drift.json.
-
-> Carried by hand by line T (tools/inbound.py cannot commit: commit-guard.sh:36 omits --via-inbound). ⚠ On a rebase conflict KEEP BOTH SIDES — resolving with --theirs silently deletes this.
+  Correction to the sealed wording: `docs/decisions/20260908-X-build-gate-correction-the-wrapper-exists.md`.
+* **integrator** — `PLAN.md` needs the two corrections requested last session (the t3 wording and the
+  polish-run paragraph); neither has landed. `MEMORY.md` wants rows for the proportional-response bar
+  and for the ceiling-arm rule below. ⚠ The cross-line channel is still unusable at budget, so this
+  list is the channel.
+* **integrator** — **merging costs 15 wasted minutes per `.md`-only push**, a real bug in shared
+  `tools/`: `docs/decisions/20260909-X-gate-selector-reads-a-different-diff-than-github.md`.
 
 ## Milestones
 
-**X1 — the kill test. DONE, `fail`.** Its value is the diagnosis, not the verdict: the response is
-obtained by DIFFERENCING two level predictions, which only works where the true change is large
-compared with the level error. Stem count clears that bar (+0.35); soil carbon, whose simulated
-change is 3.5 % of its level, does not (−4.02).
+**X1 — the kill test on the ground-truth legs. DONE, `fail`.** Its value is the diagnosis: the
+response is obtained by DIFFERENCING two level predictions, which only works where the true change is
+large compared with the level error. Superseded as a *test* by X5, not as a record.
 
 **X2 — the acceptance-grade map. DONE, `fail`**, with the per-quantity breakdown reported beside the
 conjunctive number rather than instead of it.
 
-**X3 — the held-out forcing leg. SEALED, awaiting the model arm.** Every null derived before the
-seal. Its design contribution is the **non-circular band**: the tolerance comes from a different leg
-than the truth, so a single model run scores 0.5385 instead of passing by construction.
+**X3 — the held-out forcing leg. SEALED, awaiting the model arm.** Its design contribution is the
+**non-circular band**: the tolerance comes from a different leg than the truth, so a single model run
+scores 0.5385 instead of passing by construction.
 
-**X4 — the emitted restart file. NULLS DERIVED, NOT SEALED, and deliberately so** — see NEXT. The
-derivation exists and is cheap to re-run against each new synthesis version.
+**X4 — the emitted restart file. NULLS DERIVED, NOT SEALED, deliberately** — see NEXT.
+
+**X5 — the kill test where the response is identified. SEALED 2026-09-09, awaiting the model arm.**
+Seven nulls; the bar is 0.145690 and a pass needs 0.225690.
 
 ## Line X gotchas
 
-* **Derive the nulls before designing the statistic, not after.** X4's whole design collapsed on
-  contact with its own null values: the acceptance statistic had no resolution at 20 cells and the
-  nulls were mutually indistinguishable. Deriving first cost one two-second job and saved sealing a
-  guaranteed non-result.
-* **A changelog fragment's heading must be one word from Added/Changed/Deprecated/Removed/Fixed/
-  Security.** A prose title matches no heading, so every bullet is rejected as "before any section
-  heading" and every wrapped line as "prose outside a bullet" — 20 errors, none naming the heading.
-  Validate with `parse_fragment` before merging; the merge finds it only after committing the merge.
-* **A metric a null also passes has no power** — and the check that enforces it is sensitive to how
-  the nulls are chosen. Two nulls of similar strength protect each other from the no-power flag; one
-  strong null beside several weak ones trips it. That is the rule working, not a loophole.
-* **State the blocking radius with every spatial claim.** At 5° blocks the address null flips from
-  −0.142 to +0.120 on the response, because the nearest available training cell is closer. The 15°
-  primary is what makes these results mean anything; the 5° arm is reported, never substituted.
+* **Derive the nulls before designing the statistic, not after.** Twice now this has caught a dead
+  experiment before it was sealed: X4's statistic had no resolution and its nulls were mutually
+  indistinguishable; X5 would have inherited X1's `> 0.050` threshold, which **the best null itself
+  satisfies by 0.000080** — a guaranteed `invalid` under E08, before any model was fitted.
+* **A threshold is derived from the nulls, never inherited from a sibling experiment.** The no-power
+  rule scores each null on the same comparator as the model, so under `model_minus_best_null` what
+  matters is the gap between the best null and the *runner-up*, not the best null's own value.
+* **A conjunctive pass rate needs a CEILING arm** (line T, measured): a third real model seed scores
+  25 % of cells inside the band on all 22 quantities at once, not 100 %, because a two-sample spread
+  underestimates dispersion and a 22-way conjunction compounds it. Quoting a shortfall against an
+  implied 100 % overstates it. t3 correctly stays a validation-ladder step in a decision record
+  (`20260909-T-t3-drift-fails-below-the-null.md`); if it ever becomes an experiment it is line X's.
+* **A metric a null also passes has no power** — and the check is sensitive to how the nulls are
+  chosen. Two nulls of similar strength protect each other; one strong null beside several weak ones
+  trips it. That is the rule working, not a loophole.
+* **State the blocking radius with every spatial claim.** At 5° blocks the address null flipped from
+  −0.142 to +0.120 on the X2 response. On pilot-v1 it moves the nulls by <0.003, because 200 cells
+  sit in 164 tiles — a property of the cell design, so it must be re-checked per corpus, never assumed.
 * **Check that a leg's two model runs are actually two runs before deriving anything from them.**
-  Identical runs give a spread of zero, `max(10 %, spread)` silently becomes a bare 10 %, and the
-  band still reads as if it carried the model's own noise. `provenance.json` records the per-leg
-  seeds and checksums, which is how this was caught — compare them.
+  Identical runs give a spread of zero and `max(10 %, spread)` silently becomes a bare 10 %.
 * **Suspect a falsy-zero coercion before believing a surprising verdict.** `x or default` treats a
-  legitimate 0.0 as missing, and 0.0 is exactly what an analytic null returns; that once turned a
-  clean `fail` into `invalid`. Every comparison in `tools/_experiments.py` now tests `is not None`.
+  legitimate 0.0 as missing, and 0.0 is exactly what an analytic null returns.
+* **polars is not fork-safe.** A worker pool forked after the parent touched polars sits at zero CPU
+  with no error and no progress. Use spawn. Judge a silent job by `sacct` CPU time, never by its log.
