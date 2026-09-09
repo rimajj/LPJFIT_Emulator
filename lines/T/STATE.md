@@ -52,30 +52,29 @@ other 21 for damage as five-trait matching was measured. A new mechanism, not a 
    match — the rest of t3's loss (wood density 70 % vs 100, height 50 vs 95, rooting depth 50 vs 85).
 2. **Do NOT widen `MATCH_TRAITS`** — measured: 11 of 22 quantities degrade, median cell 15 → 12.
 3. **Do NOT quote t3 as a pass on carbon**, and do not tune the model to chase the sealed map gate.
-4. **The response model must predict the CHANGE directly**, blocked on D's pilot corpus. (The GPU
-   path is still not built and still not needed — see Milestones.)
+4. **The response model must predict the CHANGE directly**, blocked on D's pilot corpus.
 
 **Housekeeping, clear.** Six campaigns harvested with hashes and results, `--check` green. **No
-verdict is owed:** t3 has no `exp_id` — `experiments/**` is X's, and a ladder step on the artifact
-goes in a decision record, as t2 and t4 did.
-**The merge is blocked by line D and the decision is WITH THE OWNER — do not merge unasked.** Red:
-`lint` on D's four files (`scripts/corpus_*.py` ×2, `binfmt/restart.py`, `corpus/state.py`) and
-`types` on `binfmt/clm.py` + `corpus/state.py:159`. T's files are clean; every other gate is green.
-Measured 2026-09-09 and put to the owner: D's whole fix is 23 lines of pure reformatting plus five
-one-line edits at five named places, and **main is ALREADY red on these same two gates**, so
-`--allow-red` protects nothing — recommended one short D session instead, which also turns main
-green for the first time. If the owner says merge anyway, that measurement is the stated reason.
+verdict is owed:** t3 has no `exp_id` — `experiments/**` is X's, so a ladder step goes in a record.
 
-⚠ **Neither Outbound block below has reached its line**, and no automated path can deliver them:
-`commit-guard.sh:36` calls `check_ownership.py --staged` without `--via-inbound`, its hatch at line
-22 reads the harness env not the command prefix, and `lines/X/STATE.md` sits at exactly its 120-line
-budget so any message trips the budgets checker on a file only X may rotate. Relay both by hand.
+**The merge waits on line D MERGING, not on line D fixing anything — do not merge unasked.** T is
+red on `lint` (D's four files) and `types` (`binfmt/clm.py`, `corpus/state.py:159`); T's own files
+are clean and every other gate is green. ⚠ **D ALREADY FIXED all of it in `ae08be0`, which is not an
+ancestor of `origin/main`** — verified 2026-09-09, and it makes the older "run the formatter"
+advice stale. So nothing needs writing: when D merges, rebase and T should go green with no
+`--allow-red`. Do not measure main's state in `/p/projects/open/Jamir/vegemu` — that clone's
+`origin/main` was stale and reported a different, wrong file set.
 
-## Outbound to line D (2026-09-09) — line/T is blocked from merging by lint+types failures that are 100% in D-exclusive paths
+✅ **Both Outbound blocks below were DELIVERED by hand 2026-09-09** (owner instruction), by editing
+each recipient's file in ITS OWN worktree on ITS OWN branch, so ownership was satisfied rather than
+bypassed: `vg-D` `2689c4b`, `vg-X` `b8ee092`. Neither pushed — both lines had a live session, so
+that is theirs. Keep the copies below as evidence if a rebase eats a block.
 
-STILL UNDELIVERED as of 2026-09-09 evening: `commit-guard.sh` never passes `check_ownership.py --via-inbound`, the flag that exists to permit the one sanctioned cross-line write, and its advertised escape hatch cannot open because `commit-guard.sh:22` reads `ALLOW_COMMIT_GUARD_SKIP` from the harness environment rather than the command prefix -- the same bug `slurm-guard.sh` already fixed and regression-tested. Both files are integrator-owned. Relay by hand. MESSAGE: Line T pushed 2e2d57a; both red gates are entirely in your paths, so T cannot clear them and tools/merge.sh refuses. TYPES: 16 errors in 2 files, both yours. src/vegemu/binfmt/clm.py, 15 of them, 'ClmHeader gets multiple values for keyword argument' at lines 150/153/164/174 -- the dataclass is being constructed with both a positional and a keyword form of the same field. And src/vegemu/corpus/state.py:159, 'Name out already defined on line 139' -- the empty-summary branch and the main branch both bind 'out', which is a no-redef under strict; annotate one or rename it. src/vegemu/models is clean, so this is the entire remaining types debt in the package. LINT: 'ruff format --check .' reports 4 files, all yours: scripts/corpus_cmodel_config.py, scripts/corpus_convergence.py, src/vegemu/binfmt/restart.py, src/vegemu/corpus/state.py. Same cause the integrator diagnosed for T's three -- hand-aligned continuation lines ruff format has never produced, i.e. it was simply never run on them. Fix is 'ruff format' on those four and nothing else. SEPARATELY, AND IT MAY MATTER TO YOU SINCE corpus/state.py IS YOURS: a stem's PFT id is climatically constrained -- LPJmL-FIT kills a tropical broadleaved evergreen with certainty in a temperate cell (mort_temp reaches 1.0 at 73 days below 12.5 C, tree/mortality_tree_ind.c), and a donor pool spanning biomes had put 31 % such stems into a temperate block, half the roster dying in one simulated year. corpus/state.py already computes pft_frac_* per cell but those columns are not in SCORED_CONJUNCTIVE, so the synthesiser must copy species composition from a template rather than predict it -- which is exactly what stops an emulated warmed-climate restart from shifting composition at all. Records: docs/decisions/20260909-T-the-roster-was-valid-but-not-viable.md and 20260909-T-t3-drift-fails-below-the-null.md.
+## Outbound to line D (2026-09-09, DELIVERED as vg-D 2689c4b) — your format/type fix is done but unmerged
 
-## Outbound to line X (2026-09-09) — the conjunctive-on-22 acceptance test is only ~25% attainable by the real model at year 20 -- every pass rate needs a ceiling arm
+SENT VERBATIM: Nothing here for you to fix: `ae08be0` on line/D already clears all four lint files and the clm.py/state.py type errors, and I verified it is NOT an ancestor of origin/main. That is the whole reason line/T's `lint` and `types` are red on paths I am forbidden to touch, so tools/merge.sh refuses for me until yours lands -- please merge when convenient. Ignore the earlier queued version of this message if you see it; it told you to run the formatter, which you had already done. SEPARATELY, AND IT IS YOURS BECAUSE corpus/state.py IS: a stem's PFT id is climatically constrained -- LPJmL-FIT kills a tropical broadleaved evergreen with certainty in a temperate cell (mort_temp hits 1.0 at 73 days below 12.5 C, tree/mortality_tree_ind.c), which is what halved a synthesised roster's carbon in one simulated year. state.py already computes pft_frac_* per cell, but those columns are not in SCORED_CONJUNCTIVE, so the synthesiser has to COPY species composition from a template instead of predicting it -- and that is exactly what stops an emulated warmed-climate restart from shifting composition at all. If you add them to the scored set, that limit lifts. Records: docs/decisions/20260909-T-the-roster-was-valid-but-not-viable.md and 20260909-T-t3-drift-fails-below-the-null.md.
+
+## Outbound to line X (2026-09-09, DELIVERED as vg-X b8ee092) — the conjunctive-on-22 acceptance test is only ~25% attainable by the real model at year 20 -- every pass rate needs a ceiling arm
 
 Measured today on cells 42480-42499 (20 cells, temperate Europe, historical leg, 2000-2019, one task per arm), while scoring t3 for the synthesised restart. Four 20-year runs of the C model: the emulated state, two control seeds that supply the tolerance max(10%, |s1-s2|/mean), and a THIRD control seed that is NOT a band leg. The third seed is a run of the real model with nothing emulated about it, so what it scores is the most any emulator could score. It scores 25% of cells inside the band on all 22 SCORED_CONJUNCTIVE quantities at once, median 21 of 22 -- not 100%. The two band legs score 100% by arithmetic, which is the circularity your acceptance_band_transferred docstring already measures at 1.000 vs 0.538. Cause: a two-sample spread underestimates dispersion and a 22-way conjunction compounds it, so a third realisation typically misses one of the 22. CONSEQUENCE FOR THE PRE-REGISTRATIONS: a conjunctive pass rate reported without a ceiling arm overstates the shortfall, because the reference is not 100%. On this block the emulator's 0% should be read against an attainable 25%, and its median 16 of 22 against an attainable 21. I did not change any sealed pre-registration and did not run this as an experiment -- experiments/ is yours, and t3 is a validation-ladder step on the artifact, reported in a decision record the way t2 and t4 were. If you want t3 as a sealed experiment it has to be yours. Record: docs/decisions/20260909-T-t3-drift-fails-below-the-null.md. Scorer: scripts/synth_drift.py (--ceiling is the arm). Result JSON: /p/tmp/jamirp/vegemu/runs/t3-emulated/t3_drift.json.
 
@@ -113,8 +112,3 @@ measured ceiling, t4 passes on carbon at year one and fails conjunctively. t5 is
   exits on its first match, `git log` takes SIGPIPE, pipefail makes the pipeline 141, so the `if` is
   false however good your handoff is. Measured 2026-09-09: exit 141 with pipefail, 0 without; its
   `NEXT: unchanged` hatch fails identically. Integrator-owned; fix is `|| true` or capture first.
-
-## ARCHIVE
-
-* **The roster fault and its fix, and five-trait matching measured and rejected**, 2026-09-08/09:
-  `docs/decisions/20260909-T-the-roster-was-valid-but-not-viable.md`.
