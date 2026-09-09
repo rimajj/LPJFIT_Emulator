@@ -13,35 +13,40 @@ pre-registrations and verdicts (X).
 
 ## NEXT — start here
 
-**D2 IS DONE. The pilot corpus is a TABLE, and rung 1 is unblocked.**
-`/p/tmp/jamirp/vegemu/corpus/pilot-v1/corpus.parquet` — **6,000 rows × 181 cols**, all 6,000 runs
-decoded, 0 failures, 8.9 s on 16 procs. 86 climate features from each run's OWN perturbed forcing +
-the 5 design coefficients + fold keys + 76 state targets. `truth_stems_total` is in there and is a
-LAGGED TRUTH — diagnostic only, never a feature.
-`corpus_sha256 fbe74ed2416b265f4c874959ab8b186679a641cedf3e18df32b125f7362e1e4d`,
-`plan_sha256 bad787ade3fc609b25cf8ebc87dfd0978e4a8690`. Driver: `corpus_pilot.py --stage decode`;
-`decode.json` beside the table. `campaigns/D/ledger.jsonl` has no open campaigns.
+**D2 IS DONE. The pilot corpus is a TABLE and rung 1 is unblocked.**
+`/p/tmp/jamirp/vegemu/corpus/pilot-v1/corpus.parquet` — **6,000 rows × 181 cols**, 0 failures, 8.9 s
+on 16 procs: 86 climate features from each run's OWN perturbed forcing + the 5 design coefficients +
+fold keys + 76 state targets. `truth_stems_total` is a LAGGED TRUTH, diagnostic only, never a
+feature. `corpus_sha256 fbe74ed2416b265f4c874959ab8b186679a641cedf3e18df32b125f7362e1e4d`; driver
+`corpus_pilot.py --stage decode`, `decode.json` beside it; no open campaigns in the ledger.
 
-**The corpus was validated against the global ground truth, which nothing guaranteed.** Every one of
-the 6,000 is a single-cell subset run and `MEMORY.md:subset-diverges` says never to score one
-against global truth. Over the 183 control runs that grew a forest, stem count vs the stored
-`restart_1999`: Spearman **0.961**, ratio median **1.023**, p10/p90 **0.839/1.231**. And every
-control run's annual tas/pr/rsds reproduces the source forcing to **max abs diff 0.0** — the write
--time byte identity surviving an independent read path. First bound ever put on `subset-diverges`.
+**The corpus was validated against the global truth, which nothing guaranteed** — all 6,000 are
+single-cell subset runs and `MEMORY.md:subset-diverges` forbids scoring one against global truth.
+Over the 183 controls that grew a forest: Spearman **0.961**, ratio median **1.023**, p10/p90
+**0.839/1.231**; and all 200 controls' annual tas/pr/rsds reproduce the source to **max abs diff 0**.
 
 ⚠ **17 of the 200 control points grew NOTHING, and line X needs this before sealing rung 1.** 14 are
 real deserts (12 dry months, aridity 0.0001–0.014, soil carbon exactly 0; the driest cells that DID
 grow trees sit at 0.010–0.021, so the flip is sharp) — the model is right, and they are `maximin`
-picks doing what design rule 4 asked for. 3 are cold/wet bistable cells with real soil carbon; cell
-98 is a forest under 22 of its other 29 climates. **The same-cell baseline null is evaluated at the
+picks doing what design rule 4 asked. 3 are cold/wet bistable cells with real soil carbon; cell 98
+is a forest under 22 of its other 29 climates. **The same-cell baseline null is evaluated at the
 control point**, so at 8.5 % of cells the decisive null predicts bare ground and anything predicting
-"some forest" beats it by the full target range. Report BOTH bases: all 200, and the 183.
-Treeless overall is 380/6,000 (6.3 %), peaking at 34/200 on `lhs03` (−0.73 K, 0.67× precip) — DRYING
-empties cells, not warming. All of it: **`docs/decisions/20260909-D-corpus-v1-decoded.md`**.
+"some forest" beats it by the full target range — report BOTH bases, all 200 and the 183. Treeless
+overall is 380/6,000 (6.3 %), peaking at 34/200 on `lhs03` (−0.73 K, 0.67× precip): DRYING empties
+cells, not warming. All of it: **`docs/decisions/20260909-D-corpus-v1-decoded.md`**.
 
 ⚠ **`tools/inbound.py` is still unusable both ways, so that record IS the message to X.** It cannot
 commit (`commit-guard.sh:36` omits `--via-inbound`), and a recipient at its 120-line budget reddens
 `budgets`, which stops EVERY line's merge.
+
+🚫 **PUSHED (1368569) BUT NOT MERGED — the blocker is not line D's.** `budgets`/`test`/`pathsafety`/
+`flags` green; `lint` and `types` RED, every failure in a line-T exclusive file: `mypy --strict` finds
+**1 error in 16 files** (`models/synth.py:143`, `Returning Any`) and `ruff format` would rewrite
+`models/synth.py`, `models/__init__.py`, `scripts/train_emulator.py`. **Both were already red on
+`main` before this branch existed**, so merging adds no failure — but `merge.sh` refuses a red gate
+and says hand it to the owner, not merge around it, and `inbound.py` cannot. Override:
+`tools/merge.sh D --allow-red '<why>'`, written into the merge commit; an owner call. Until it lands
+the table is invisible to X and T on `main`, which is the rung-1 critical path.
 
 **Next, in order:**
 
@@ -64,19 +69,6 @@ commit (`commit-guard.sh:36` omits `--via-inbound`), and a recipient at its 120-
    dropping them would quietly narrow the envelope the design set out to span.
 
 ## Milestones
-
-**D0 — restart-file round-trip. DONE**, and the `.clm` reader/writer with it. The per-stem field map
-is cross-checked against a number this repo did not produce: `height` puts 51.4 % of Hainich's stems
-above the 5 m cut, against ~47 % measured independently in the predecessor.
-
-**D0b — the C-model launch path. DONE.** `scripts/sbatch_cmodel.sh` (pre-flight, run, `--manifest`
-task farm), `corpus_cmodel_config.py`, `corpus_restart_subset.py` (byte-exact control arm). A
-20-cell one-year run from the real restart takes 8 s and prints the model's own completion line.
-
-**D1 — the perturbed `.clm` writer. DONE.** `src/vegemu/corpus/perturb.py`,
-`scripts/corpus_perturb_clm.py`, `corpus_spinup_config.py`, `corpus_d1_{forcing,direction}.py`;
-`tests/test_perturb.py` is 40 tests including the byte identity.
-Record: `docs/decisions/20260908-D-perturbation-design.md`.
 
 **D2 — the pilot corpus. DONE, runs and table both.** `vegemu.corpus.select` and
 `scripts/corpus_pilot.py --stage plan|build|verify|harvest|decode`; `tests/test_select.py` is 16
