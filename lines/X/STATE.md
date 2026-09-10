@@ -13,26 +13,25 @@ does not build models (T) or generate data (D).
 
 ## NEXT — start here
 
-✅ **Merged. Line X's 11 commits are on `main`, every gate green, and this line is level with it.**
-Neither blocker was line X's. The staged Stop-hook SIGPIPE fix is committed, so **the "Stop gate
-cannot be satisfied" gotcha is dead** — refreshing the handoff in your last commit now passes, pinned
-by `tests/test_session_end_gate.py`. The three line-T files that reddened `lint` were formatted on
-`main` (that gate checks the WHOLE repo, so they reddened every branch). ⚠ One is **not** layout-only:
-the docstring of `src/vegemu/models/__init__.py` lost a deliberate indent — restoring it is T's call.
+**The kill test is sealed: bar 0.225690, ceiling 0.8697 — reachable with wide headroom.** Line D's
+pilot corpus (200 cells × 30 climates, same cell, same seed, only the climate differs) removes the
+collinearity that made X1's `fail` non-decisive. Seven nulls, all derived before any model existed;
+**the bar is not "no change" (0.0) but "every cell changes by the same fraction of what it already
+has", 0.145690**. The ceiling is a LOWER bound — a cell's arms share a seed so their noise partly
+cancels (0.9349 at half). `docs/decisions/20260909-X-the-kill-test-bar-is-a-proportional-response.md`,
+`docs/decisions/20260910-X-the-pilot-kill-test-ceiling-is-0.87.md`.
 
-**The kill test is sealed and the bar is 0.225690.** Line D's pilot corpus (200 cells × 30 climates,
-same cell, same seed, only the climate differs) removes the collinearity that made X1's `fail`
-non-decisive. `X-20260909-pilot-warming-response` has seven nulls, all derived before any model
-exists, and **the bar is not "no change" (0.0) but "every cell changes by the same fraction of what
-it already has", 0.145690**, on the cell's own present forest. Record:
-`docs/decisions/20260909-X-the-kill-test-bar-is-a-proportional-response.md`.
+⚠ **The pilot's soil carbon is systematically 2.7 % light against the global run** (−2.68 % signed
+vs a −0.36 % seed-to-seed control; only 20 % of cells inside the two-seed spread). The other six
+quantities are unbiased, so the pilot is a different *draw*, not a different *model*. **It does not
+threaten the kill test** (a within-pilot paired contrast cancels a per-cell offset) but **line T
+must not train on pilot levels and score against ground-truth levels** without a stated bridge.
 
 **Owed by line T, now the critical path: the model arm.** `scripts/sbatch_py.sh --exp
 X-20260909-pilot-warming-response T-pilot-response-v0 <script>`. The model gets the held-out cell's
-**control state** (disclosed — production always holds a real restart), its baseline climate and the
-design point's five axis coefficients, and predicts the change in the seven quantities. Folds: 15°
-blocked 5-fold seed 42 via `blocked_spatial_folds`, as derived. Re-derive any null in one job:
-`scripts/exp_derive_nulls_pilot.py --version pilot-v1 --nproc 32 --degrees 15 --out <dir>`.
+**control state** (disclosed — production always holds a real restart), baseline climate and the
+design point's five axis coefficients, and predicts the change in seven quantities. Folds: 15°
+blocked 5-fold seed 42 via `blocked_spatial_folds`. Nulls re-derive in one job from `pilot-v1`.
 
 Three things that constrain how the result may be reported:
 
@@ -43,20 +42,21 @@ Three things that constrain how the result may be reported:
 * **380 of 6,000 runs (6.33 %) are treeless.** Counts and stocks keep those rows; the three trait
   medians score on 5,620 — where vegetation survived. Say the row count with every trait number.
 
-**X3 (`X-20260908-heldout-forcing-leg`) is sealed and still awaits line T's model arm** — unchanged for
-three sessions. Fit on the historical leg only, predict from the low-emissions 2071–2100 climate, then
-assemble out-of-fold under 15° blocked folds: `scripts/sbatch_py.sh --exp X-20260908-heldout-forcing-leg
-T-heldout-leg-v0 <script>`. Must reach **0.0837** (best null 0.033749) against 0.0361 on its own leg; the non-circular ceiling is **0.538490**, not 1.0.
+**X3 (`X-20260908-heldout-forcing-leg`) is sealed and still awaits line T's model arm** — three
+sessions now. Fit on the historical leg, predict the low-emissions 2071–2100 climate, assemble
+out-of-fold under 15° blocks. Must reach **0.0837** (best null 0.033749); ceiling **0.538490**, not 1.0.
 
 **X4 (the emitted restart file) stays unsealed; the pilot corpus is what will fix it.** Its blocker
-was a 20-cell contiguous block on which all four nulls collapsed into 0.786–0.845. The pilot design
-is the counter-example: 200 cells over 164 tiles, blocking radius moving the nulls <0.003. Once T
-can synthesise for a dispersed cell set, X4 is re-derivable against it. Bar 0.786, not zero error.
+was a 20-cell contiguous block where all four nulls collapsed into 0.786–0.845; the pilot design is
+the counter-example (200 cells, 164 tiles, radius moves nulls <0.003). Bar 0.786, not zero error.
 
 **Owed by other lines, in order:**
 
 * **line T** — the two model arms above, plus the still-owed `synth-v1`/`v2`/`v3` commit (they exist
   only as scratch output); then re-score via `VARIANTS` in `scripts/exp_derive_nulls_restart.py`.
+* **line D** — cheap and high value: **a second seed for 20 pilot cells (~34 core-hours, 10 % of
+  what the pilot cost)**. It converts the kill test's ceiling from a bound (0.8697–1.0) into a
+  measurement, and would attribute the 2.7 % soil-carbon offset above.
 * **line D** — rebuild the corpus against the genuine high-emissions second run
   (`..._random_seed2_from_hist_seed2`) under a **new corpus version**: v0's hash is cited by two
   sealed pre-registrations and must not move. Make the builder **assert** the two run files differ.
