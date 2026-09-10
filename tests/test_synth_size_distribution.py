@@ -41,7 +41,7 @@ from vegemu.models.synth import (
 )
 
 
-def _stem(pft_id: int, height: float, wooddens: float = 2.0e5) -> np.ndarray:
+def _stem(pft_id: int, height: float, wooddens: float = 2.0e5, d95: float = 0.0) -> np.ndarray:
     row = np.zeros(1, dtype=TREE_DTYPE)
     row["id"] = pft_id
     row["height"] = height
@@ -51,6 +51,9 @@ def _stem(pft_id: int, height: float, wooddens: float = 2.0e5) -> np.ndarray:
     row["ind_leaf_c"] = height
     row["ind_sapwood_c"] = 100.0 * height
     row["ind_heartwood_c"] = 200.0 * height
+    # Rooting depth defaults to zero so that DONORS carry none: any non-zero value in an emitted
+    # record then proves a byte was written rather than inherited. Templates pass a real spread.
+    row["D95max"] = d95
     return row
 
 
@@ -82,7 +85,10 @@ def _template(per_patch: list[list[tuple[int, float]]]) -> dict[str, Any]:
                         "items": np.zeros(22),
                     },
                 },
-                "pftlist": _pftlist([_stem(t, h) for t, h in stems]),
+                # Template stems carry a real rooting-depth spread, correlated with height the way
+                # a real stand's is, so the imposition exercises the template path rather than the
+                # degenerate-sample fallback.
+                "pftlist": _pftlist([_stem(t, h, d95=0.5 + 0.1 * h) for t, h in stems]),
                 "frac_g": np.zeros(6),
             }
         )
@@ -92,8 +98,12 @@ def _template(per_patch: list[list[tuple[int, float]]]) -> dict[str, Any]:
     }
 
 
-def _pool(heights: list[float]) -> DonorPool:
-    stems = [_stem(3, h) for h in heights]
+def _pool(heights: list[float], d95_spread: bool = False) -> DonorPool:
+    # Donors carry a DIFFERENT rooting-depth law from the template's, so a placed value that
+    # matches the prediction cannot have been inherited. Off by default: with every donor at zero
+    # the imposition clamp (which is bounded by what real pool stems exhibit) pins everything to
+    # zero, which is the clamp working, not the write failing.
+    stems = [_stem(3, h, d95=(0.1 + 0.2 * h) if d95_spread else 0.0) for h in heights]
     raw = np.stack([s.view(np.uint8).reshape(PFT_TREE_BYTES) for s in stems])
     return DonorPool(raw=raw, fields=np.concatenate(stems), source_cells=(0,))
 
@@ -118,6 +128,15 @@ def _prediction(n_per_patch: float, p10: float, p50: float, p90: float) -> dict[
         "wooddens_p50": 2.0e5,
         "wooddens_p90": 2.0e5,
     }
+
+
+def _placed_trait(rec: dict[str, Any], name: str) -> np.ndarray:
+    out = [
+        trees_of(p["pftlist"])[name].astype(float)
+        for p in rec["stands"][0]["patches"]
+        if trees_of(p["pftlist"]).size
+    ]
+    return np.concatenate(out) if out else np.zeros(0)
 
 
 def _placed_heights(rec: dict[str, Any]) -> np.ndarray:
@@ -331,3 +350,99 @@ def test_the_cell_total_count_is_unchanged_by_cell_level_ranks() -> None:
     assert report.stems_placed == report.stems_requested
     # 15.4 per patch over 4 patches: stochastic rounding gives 61 or 62, never 60 in every patch.
     assert 60 <= report.stems_placed <= 64
+
+
+# ---------------------------------------------------------------------------------------------
+# Imposed traits: written into the stem's bytes rather than obtained by choosing a donor.
+# ---------------------------------------------------------------------------------------------
+def test_an_imposed_trait_is_actually_written_into_the_stem_bytes() -> None:
+    """The donor's own rooting depth must not survive into the emitted record.
+
+    The point of imposition is that donor selection provably cannot deliver this quantity: with a
+    perfect prediction the match still leaves D95max_p50 at 0.127. So the test is on the BYTES of
+    the placed stem, not on the target that was requested.
+    """
+    tmpl = _template(STAND)
+    pool = _pool(SKEWED, d95_spread=True)
+    p10, p50, p90 = np.percentile(np.array(SKEWED), [10.0, 50.0, 90.0])
+    pred = _prediction(len(SKEWED), p10, p50, p90)
+    pred |= {"D95max_p10": 1.5, "D95max_p50": 2.5, "D95max_p90": 4.0}
+    rec, report = synthesise_cell(
+        tmpl, pred, pool, Layout(), cell=1, template_cell=1, seed=0, impose_traits=("D95max",)
+    )
+    placed = _placed_trait(rec, "D95max")
+    assert report.imposed == {"D95max": "template"}
+    # A handful of the very shallowest stems hit the pool's own floor; that is the clamp working.
+    assert report.imposed_clamped <= 5, f"{report.imposed_clamped} of 60 clamped, expected a few"
+    # THE CONTRACT: the PLACED marginal carries the predicted quantiles. Donors follow a different
+    # rooting-depth law entirely, so this cannot have been inherited. p10 is excluded because it is
+    # the one the floor touches.
+    got = np.percentile(placed, [50.0, 90.0])
+    assert np.allclose(got, [2.5, 4.0], rtol=0.05), f"placed median/p90 {got}"
+
+
+def test_the_report_describes_what_was_written_not_the_donor() -> None:
+    """`achieved` must read back the imposed value, or the report lies about its own file.
+
+    Reading a donor's value back after overwriting it is exactly the mistake that once made a
+    whole decision record's diagnosis wrong, so it gets its own assertion.
+    """
+    tmpl = _template(STAND)
+    pool = _pool(SKEWED, d95_spread=True)
+    p10, p50, p90 = np.percentile(np.array(SKEWED), [10.0, 50.0, 90.0])
+    pred = _prediction(len(SKEWED), p10, p50, p90)
+    pred |= {"D95max_p10": 1.5, "D95max_p50": 2.5, "D95max_p90": 4.0}
+    rec, report = synthesise_cell(
+        tmpl,
+        pred,
+        pool,
+        Layout(),
+        cell=1,
+        template_cell=1,
+        seed=0,
+        match_traits=("height", "wooddens", "D95max"),
+        impose_traits=("D95max",),
+    )
+    placed = _placed_trait(rec, "D95max")
+    assert np.isclose(report.achieved["D95max_p50"], float(np.percentile(placed, 50)))
+
+
+def test_imposing_nothing_leaves_the_stem_byte_identical_to_its_donor() -> None:
+    """The escape hatch must be exact: an empty tuple is the old no-edit behaviour."""
+    tmpl = _template(STAND)
+    pool = _pool(SKEWED)
+    p10, p50, p90 = np.percentile(np.array(SKEWED), [10.0, 50.0, 90.0])
+    pred = _prediction(len(SKEWED), p10, p50, p90)
+    pred |= {"D95max_p10": 1.5, "D95max_p50": 2.5, "D95max_p90": 4.0}
+    rec, report = synthesise_cell(
+        tmpl, pred, pool, Layout(), cell=1, template_cell=1, seed=0, impose_traits=()
+    )
+    placed = np.concatenate(
+        [
+            trees_of(p["pftlist"])["D95max"].astype(float)
+            for p in rec["stands"][0]["patches"]
+            if trees_of(p["pftlist"]).size
+        ]
+    )
+    assert report.imposed == {}
+    assert placed.max() == 0.0, "with imposition off, the donor's own value must survive"
+
+
+def test_an_imposed_value_is_clamped_to_what_real_stems_exhibit() -> None:
+    """A stretched prediction must not write a rooting depth no tree in the pool has."""
+    tmpl = _template(STAND)
+    pool = _pool(SKEWED, d95_spread=True)  # real stems reach 4.9 at most
+    p10, p50, p90 = np.percentile(np.array(SKEWED), [10.0, 50.0, 90.0])
+    pred = _prediction(len(SKEWED), p10, p50, p90)
+    # Asks for 5-20 m of rooting depth, which no stem in the pool exhibits: all must clamp.
+    pred |= {"D95max_p10": 5.0, "D95max_p50": 9.0, "D95max_p90": 20.0}
+    rec, report = synthesise_cell(
+        tmpl, pred, pool, Layout(), cell=1, template_cell=1, seed=0, impose_traits=("D95max",)
+    )
+    # THE CONTRACT: nothing written may exceed what a real stem in the pool exhibits, however far
+    # the prediction reaches. Most stems clamp here; the few that do not are the shallow tail.
+    ceiling = float(np.max(pool.trait("D95max")))
+    assert float(np.max(_placed_trait(rec, "D95max"))) <= ceiling + 1e-9
+    assert report.imposed_clamped > 0.8 * report.stems_placed, (
+        f"only {report.imposed_clamped} of {report.stems_placed} clamped"
+    )
