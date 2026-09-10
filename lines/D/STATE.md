@@ -21,14 +21,14 @@ end of year one (112,763 vs 100,691 gC), then sheds it to −1.6 % by 2019, insi
 (0.102). "Halved carbon" describes only rosters the model REJECTED. Narrative is in the journal;
 record: `20260910-D-the-halved-carbon-is-gone-verified-from-the-committed-synthesiser.md`.
 ⚠ **`MEMORY.md` is integrator-only (O04), so a line CANNOT promote a fact into it** — four rows are
-requested in `changelog.d/D-ssp370-second-seed-provenance.md`, including a correction to
+requested in `CHANGELOG.md` on main (collated 2026-09-10), including a correction to
 `restart-loads`, whose "0.53 off" is a roster the model later rejected. Keep the sign here until
 they land.
 
 **Next, in order:**
 
-1. **Corpus v2 is blocked on TWO decisions, neither of them D's. BOTH ASKED 2026-09-10 via a
-   changelog fragment (`changelog.d/D-ssp370-second-seed-provenance.md`) — awaiting answers.**
+1. **Corpus v2 is blocked on TWO decisions, neither of them D's. BOTH ASKED 2026-09-10 — the ask
+   is on main in `CHANGELOG.md` under Changed (the fragment was collated away) — awaiting answers.**
    D's half is now verified and recorded; do not re-measure it.
    - **Integrator:** the configured `ground_truth.ssp370_seed2` is a **byte-clone of seed 1**
      (both `restart_2100.lpj` exactly 133,559,375,490 B; the directory carries its own
