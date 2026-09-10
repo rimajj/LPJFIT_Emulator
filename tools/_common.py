@@ -18,10 +18,63 @@ import os
 import re
 import subprocess
 import sys
-import tomllib
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+
+# --------------------------------------------------------------------------------------------------
+# `tomllib` is stdlib only from Python 3.11, and the contract at the top of this file says the THREE
+# CALLERS MUST NOT HAVE TO CARE. One of them is a hook that runs `python3` from whatever PATH it
+# happens to inherit, and on this cluster's login nodes that is 3.9 -- so every checker died on this
+# one import and the commit guard refused every commit with five tracebacks where five findings
+# should have been. A guard that fails closed on its own environment is not a guard; it is an outage
+# that looks like a verdict, and its documented escape hatch does not help because the hook reads
+# ALLOW_COMMIT_GUARD_SKIP from its own environment rather than the caller's.
+#
+# So a checker started by too old an interpreter re-execs itself, once, under the one named in
+# config/paths.yaml -- the same interpreter CI and the job wrappers use. `tools/_paths.py` is
+# deliberately written against 3.9's standard library alone, which is what makes it safe to ask.
+_REEXEC_SENTINEL = "VEGEMU_TOML_REEXEC"
+
+
+def _reexec_under_configured_python() -> None:
+    """Replace this process with the configured interpreter. Does not return, or raises SystemExit.
+
+    The sentinel makes the retry happen at most once: if the configured interpreter ALSO lacks
+    tomllib then the configuration is wrong, and saying so beats looping forever.
+    """
+    if os.environ.get(_REEXEC_SENTINEL):
+        raise SystemExit(
+            "checker: the interpreter named by cluster.python also lacks tomllib. It needs to be "
+            "Python 3.11 or newer; fix config/paths.yaml."
+        )
+    here = os.path.dirname(os.path.abspath(__file__))
+    try:
+        found = subprocess.run(
+            [sys.executable, os.path.join(here, "_paths.py"), "cluster.python"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError) as exc:  # pragma: no cover - config failure
+        raise SystemExit(
+            f"checker: running under Python {sys.version_info.major}.{sys.version_info.minor}, "
+            f"which has no tomllib, and cluster.python could not be read ({exc}). "
+            "Invoke this checker with Python 3.11 or newer."
+        ) from exc
+    if not found or os.path.realpath(found) == os.path.realpath(sys.executable):
+        raise SystemExit(  # pragma: no cover - config failure
+            "checker: needs Python 3.11 or newer for tomllib, and cluster.python names no other "
+            "interpreter. Invoke it with a newer one."
+        )
+    os.execve(found, [found, *sys.argv], {**os.environ, _REEXEC_SENTINEL: "1"})
+
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - only on an interpreter older than 3.11
+    _reexec_under_configured_python()
+    raise  # unreachable: execve does not return
 
 # --------------------------------------------------------------------------------------------------
 # Repo location. Derived from THIS FILE, never from the working directory and never hardcoded.

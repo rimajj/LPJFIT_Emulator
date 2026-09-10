@@ -41,7 +41,24 @@ while (($#)); do
   esac
 done
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-INT="$(python3 "$REPO/tools/_paths.py" project.root)"
+
+# --- the two pythons ---------------------------------------------------------------------------
+# `python3` on a login node here is 3.9, and every repo tool called below reaches tools/_common.py,
+# which imports `tomllib` -- stdlib only from 3.11. So invoking them as bare `python3` makes this
+# script die on a traceback in any shell with no environment activated, which is exactly the shell
+# an agent starts in. tools/_paths.py is deliberately written against 3.9's stdlib alone, so it is
+# the one thing the bootstrap interpreter may run, and it names the interpreter everything else
+# wants.
+#
+# The same defect was found and fixed in scripts/sbatch_py.sh on 2026-09-10, where it had been
+# losing the campaign ledger row on every launch from an unactivated shell -- silently, and after
+# the job was already queued.
+BOOTSTRAP_PY="python3"
+PY="$($BOOTSTRAP_PY "$REPO/tools/_paths.py" cluster.python)" || {
+  echo "merge: cannot resolve cluster.python from config/paths.yaml; refusing to guess." >&2
+  exit 2
+}
+INT="$($BOOTSTRAP_PY "$REPO/tools/_paths.py" project.root)"
 LOCK="$INT/.git/vegemu-integrate.lock"
 
 command -v flock >/dev/null || { echo "merge: flock is required" >&2; exit 2; }
@@ -71,7 +88,7 @@ if [[ "$LOCAL" != "$REMOTE" ]]; then
   exit 1
 fi
 
-if ! python3 "$REPO/tools/campaigns.py" --check; then
+if ! "$PY" "$REPO/tools/campaigns.py" --check; then
   echo "merge: refusing -- an open campaign is past its harvest deadline (above)." >&2
   echo "  Harvest it, or close it with a reason:" >&2
   echo "    tools/campaigns.py harvest|dead|abandon --tag <tag> --reason '<why>'" >&2
@@ -79,13 +96,13 @@ if ! python3 "$REPO/tools/campaigns.py" --check; then
 fi
 
 echo "merge: CI gates for this diff, on the pushed sha $LOCAL:"
-python3 "$REPO/tools/expected_gates.py" | sed 's/^/  /'
+"$PY" "$REPO/tools/expected_gates.py" | sed 's/^/  /'
 
 # ENFORCED, not advised. wait_gates.py polls exactly the triggered gates and nothing else, so this
 # does not hang on a prose-only commit: it exits 0 at once when the diff triggers nothing. Its exit
 # 2 ("cannot tell which gates would run, or no API token") is a refusal too -- an unverifiable sha
 # is not a green one.
-if python3 "$REPO/tools/wait_gates.py" --timeout "${MERGE_GATE_TIMEOUT:-900}"; then
+if "$PY" "$REPO/tools/wait_gates.py" --timeout "${MERGE_GATE_TIMEOUT:-900}"; then
   :
 else
   rc=$?
@@ -127,7 +144,7 @@ fi
 
 # Chore (4). You hold the lock => you are the integrator for this moment. Editing CHANGELOG.md here
 # does not violate "never edit it from a line": this is main, in the integration worktree.
-( cd "$INT" && python3 tools/collate_changelog.py )
+( cd "$INT" && "$PY" tools/collate_changelog.py )
 if ! git -C "$INT" diff --quiet -- CHANGELOG.md changelog.d; then
   git -C "$INT" add CHANGELOG.md changelog.d
   git -C "$INT" -c commit.gpgsign=false commit -q \
@@ -144,7 +161,7 @@ echo
 # pushed -- but it makes main's status a REPORTED fact instead of a paragraph of advice, and the
 # non-zero exit is what tells the session it owns a repair.
 echo "merge: verifying main's own gates (base $PREV_MAIN)..."
-if python3 "$INT/tools/wait_gates.py" --ref "$PREV_MAIN" --timeout "${MERGE_GATE_TIMEOUT:-900}"; then
+if "$PY" "$INT/tools/wait_gates.py" --ref "$PREV_MAIN" --timeout "${MERGE_GATE_TIMEOUT:-900}"; then
   echo "merge: main is green on every gate this push triggered."
 else
   rc=$?

@@ -55,18 +55,59 @@ def _budget_for(rel: str, budgets: list[dict]) -> dict | None:
     return best
 
 
+# A cross-line message, as `tools/inbound.py` writes it into the recipient's file and mirrors it
+# into the sender's. Matched loosely on purpose: the subject line is free text.
+_INBOUND_HEADING = re.compile(r"^##\s+(INBOUND from line|Outbound to line)\b", re.IGNORECASE)
+
+
+def _without_inbound(lines: list[str]) -> list[str]:
+    """The file minus any cross-line message block, for the purposes of the line budget.
+
+    WHY THESE LINES ARE NOT CHARGED TO THE OWNER. `tools/inbound.py` is the one sanctioned
+    cross-line write, and the budget is a repo-wide gate over every tracked file. Charged
+    naively, the two combine into a trap: line X sitting at 117 of its 120 lines has three lines
+    of headroom, an inbound block costs eight whatever its body says, and so ANY message from
+    another line turns the build red for everyone -- through no action of the recipient, who
+    cannot pre-empt it and may not open a session for days. That happened on 2026-09-10 and is
+    what prompted this.
+
+    An inbound is also not what the budget is defending against. The budget keeps DURABLE state
+    short and forces rotation; an inbound is transient by construction -- it is read, actioned,
+    and rotated away, and the tool's own header tells the recipient so. The recipient's own
+    content is still counted exactly as before, so a line cannot buy headroom by being messaged.
+
+    A block runs from its heading to the next `## ` heading, or to the end of the file.
+    """
+    out: list[str] = []
+    skipping = False
+    for ln in lines:
+        if _INBOUND_HEADING.match(ln):
+            skipping = True
+            continue
+        if skipping and ln.startswith("## "):
+            skipping = False
+        if not skipping:
+            out.append(ln)
+    return out
+
+
 def check_line_budgets(rel: str, lines: list[str], budgets: list[dict], rep: Report) -> None:
     b = _budget_for(rel, budgets)
     if b is None:
         return
     limit = int(b["max_lines"])
-    n = len(lines)
+    n = len(_without_inbound(lines)) if rel.endswith("STATE.md") else len(lines)
     if n > limit:
         over = n - limit
+        # Say both numbers when they differ, so "123 lines" in the editor and "115 lines" in the
+        # finding do not read as a bug in the gate.
+        counted = (
+            f"{n} lines" if n == len(lines) else f"{n} of {len(lines)} lines (inbound uncounted)"
+        )
         rep.add(
             rel,
             "B01",
-            f"{n} lines, budget {limit} (over by {over})",
+            f"{counted}, budget {limit} (over by {over})",
             hint=b.get("note", "")
             or "rotate with tools/rotate_state.py, or move depth to a reference file",
         )

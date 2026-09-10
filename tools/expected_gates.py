@@ -36,12 +36,14 @@ import argparse
 import json
 import subprocess
 import sys
-import tomllib
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _common import BASE_OK, changed_vs, diff_base, glob_match, repo_root, tracked_files
+# `tomllib` is 3.11+. Import it FROM `_common`, which re-execs this process under the
+# configured interpreter when the caller started it with an older one -- see the long note
+# there. Importing it directly here would reintroduce exactly the failure that note describes.
+from _common import BASE_OK, changed_vs, diff_base, glob_match, repo_root, tomllib, tracked_files
 
 
 def load_gates() -> tuple[list[dict], dict]:
