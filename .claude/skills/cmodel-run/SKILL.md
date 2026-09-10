@@ -8,25 +8,34 @@ description: Run the LPJmL-FIT C model on SLURM — the module set it needs, the
 `scripts/slurm-guard.sh` denies calling `bin/lpjml` from a session and points here. This skill
 existed only as that pointer until 2026-09-09, when its absence cost three failed jobs in a row.
 
-## The module set, and why the wrapper does not supply it
+## The module set — the wrapper now supplies it, and you no longer need to
 
-⚠ **`scripts/sbatch_cmodel.sh` submits with `--export=ALL` and no `module load` line, so the job
-inherits whatever the SUBMITTING SHELL happens to have loaded.** A session whose shell has no
-modules submits a job with no modules, and the model dies in under a second with
-
-```
-/home/jamirp/lpjml56fit/bin/lpjml: error while loading shared libraries: libnetcdf.so.19: ...
-```
-
-then `libudunits2.so.0`, then the next one — one library per attempt if you chase them singly.
-Load the whole set in the SAME command as the submission, because a fresh shell forgets:
+✅ **Fixed 2026-09-10: `scripts/sbatch_cmodel.sh` pins and loads its own module set**, for both the
+job and the `--check` pre-flight, so nothing below depends on what your shell has loaded. Just:
 
 ```bash
-source /usr/share/lmod/lmod/init/bash
-module load netcdf-c/4.9.2 hdf5/1.14.5 udunits/2.2.28 szip/2.1.1 zlib/1.3.1 zstd/1.5.6 \
-            curl/8.4.0 openssl/3.6.0 libxml2/2.11.0 m4/4-1.4.19 expat/2.5.0 json-c/0.17 \
-            eccodes/2.32.1 proj/9.5.1 intel/oneAPI/2024.0.0 gcc/15.2.0
 TIME=00:30:00 scripts/sbatch_cmodel.sh <tag> <config.js> <run-dir>
+```
+
+Override with `LPJ_MODULES="…"` if the binary is rebuilt against a different set. The job also
+runs `ldd` on the binary before spending its allocation, so a wrong set now fails with the missing
+library named, instead of a cryptic one-second death.
+
+⚠ **The history, because it explains three lost jobs.** The wrapper used to submit with
+`--export=ALL` and no `module load`, so the job inherited whatever the SUBMITTING SHELL happened to
+have. From a shell with no modules the model died in under a second with
+
+```
+error while loading shared libraries: libnetcdf.so.19: ...
+```
+
+then `libudunits2.so.0` — with no modules the binary is short **exactly those two**, and the loader
+names one per attempt, so chasing them singly costs a job each. The pinned set is:
+
+```
+netcdf-c/4.9.2 hdf5/1.14.5 udunits/2.2.28 szip/2.1.1 zlib/1.3.1 zstd/1.5.6 curl/8.4.0
+openssl/3.6.0 libxml2/2.11.0 m4/4-1.4.19 expat/2.5.0 json-c/0.17 eccodes/2.32.1 proj/9.5.1
+intel/oneAPI/2024.0.0 gcc/15.2.0
 ```
 
 **Recovering the set from a run that worked** — better than trusting this list, which will age:
@@ -47,8 +56,14 @@ biting. The durable fix belongs in the wrapper (line D owns it), not in every ca
 scripts/sbatch_cmodel.sh --check <tag> <config.js> <run-dir>
 ```
 
-Validates the config and every input path without running, and needs no modules. A `WARNING035`
-about a missing soil code is normal on this grid and is not a failure.
+Validates the config and every input path without running. A `WARNING035` about a missing soil
+code is normal on this grid and is not a failure.
+
+⚠ **This skill said "and needs no modules" until 2026-09-10, and that was wrong.** `lpjcheck`
+links the same libraries as `lpjml`, so from a module-free shell the pre-flight died with the
+identical `libnetcdf.so.19` message — in the one command whose whole purpose is to tell you the
+config is good, where a missing environment reads as a broken config. The wrapper now loads the
+set for `--check` too; verified passing from a shell with no modules loaded.
 
 ## ⚠ Judging the result: only one line counts
 
@@ -59,16 +74,12 @@ mid-century. Require the model's own line:
 grep '^lpjml successfully terminated' logs/<tag>.<jobid>.out
 ```
 
-⚠ **Anchor the pattern.** `grep -c 'successfully terminated'` returns 1 on a *failed* job, because
-the wrapper's own advice text contains that phrase:
-
-```
-=== NOTE: the exit code is NOT the verdict. Require the model's own line:
-===   'lpjml successfully terminated, <n> grid cells processed.'
-```
-
-Measured 2026-09-09: a job that failed with exit 127 in zero seconds still matched an unanchored
-`grep -c`. Anchor with `^`, or check the cell count.
+⚠ **Anchor the pattern**, always — `^lpjml successfully terminated`. Measured 2026-09-09: a job
+that failed with exit 127 in zero seconds still matched an unanchored `grep -c`, because the
+wrapper echoed the phrase into every log as advice. ✅ **Fixed 2026-09-10**: the wrapper's trailing
+NOTE no longer contains the phrase, and every harvest command it writes into the ledger is
+anchored — so on a run submitted after that date the only match is the model's own line. Anchor
+anyway: logs from before the fix still carry the decoy.
 
 ## Reading a silent job
 

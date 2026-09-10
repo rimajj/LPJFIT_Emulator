@@ -13,45 +13,37 @@ pre-registrations and verdicts (X).
 
 ## NEXT — start here
 
-✅ **MERGED. The three-session blocker is gone.** `line/D` is on `main` at `6bcb2ca`, and `main` is
-green on all eight gates that push triggered. **No `--allow-red` was needed** — do not carry the
-2026-09-09 override forward, the condition it was approved for no longer exists. The integration
-worktree's four staged files were committed by the integrator, and the Stop-gate SIGPIPE fix landed
-(`0e6fc9f`), so both of last session's blockers are retired. Nothing of line D's is in flight:
-`campaigns.py --check` is green, and the `W-lpjml-*` jobs in `squeue` are another project's
-(`WorkDir=…/clustering/wt-paper2`), not this one's.
+✅ **The three-session carbon blocker is CLOSED, and it closed in the opposite direction from its
+name.** Re-emitted the restart from `main`'s committed synthesiser at `5cc59c0` and ran year 2000
+over the 20-cell block: block vegetation carbon is **112,763 vs 100,691 gC, i.e. 12.0 % HIGH** —
+not halved, not low. The model sheds the excess over ~4 years and reaches **−1.6 % by 2019**,
+inside the two-seed band (0.102). The re-emitted file is **byte-identical** to the one line T's
+20-year `t5` arm was scored on (`1e856119…`), which independently confirms T's "verified inert"
+claim and makes `t5`'s numbers citable against a versioned synthesiser — they were not yesterday.
+Record: `20260910-D-the-halved-carbon-is-gone-verified-from-the-committed-synthesiser.md`.
+⚠ Say the sign right: T measured the FILE 6.7 % high, the model takes it to 12.0 % high at year
+end. "Halved carbon" describes only rosters the model REJECTED, and that roster is gone.
 
-⚠ **`main` MOVED UNDER ME MID-SESSION, and it fabricated a convincing false problem.** After a clean
-rebase, `mypy --strict` was red at `models/synth.py:143` and `models/emulator.py:192` — both
-T-owned, both byte-identical to my `origin/main` — so it read exactly like the recorded "repo-wide
-gate red on another line's files" case, whose remedy is to fix it centrally as integrator. **That
-remedy would have been wrong and would have hand-edited another line's source.** Line T merged
-(`f133867`) *while I worked*: their own fixes were already on the real `main` and my base had gone
-stale between my `pull` and my `diff`. **The tell:** the integration worktree reported clean at
-`origin/main` yet its `synth.py` differed from mine on disk. **So: re-`fetch` immediately before
-diagnosing any gate failure in another line's files, and compare worktrees on disk (`diff -rq`), not
-just `git diff`, which answers against whatever ref you last fetched.** Only a cache-free
-`mypy --strict --cache-dir=/dev/null` proves a red gate real — the warm cache reinforced the error.
+✅ **Item 2 of the last handoff was answered by line T, not by me — do not re-run it.** The model
+never recomputes `D95max`: every write is at tree birth, and `allocation_tree.c` writes `D95`, a
+different field. Imposition works, makes fidelity WORSE than the donor accident, and **ships
+switched off** (`IMPOSED_TRAITS = ()`). Record: `20260909-T-imposing-rooting-depth-works-…`.
+
+✅ **The C-model submission wrapper — all three defects fixed, each verified by running it.**
+It now **pins and loads its own module set** for the job AND for the `--check` pre-flight, so a
+run no longer depends on who submitted it; it `ldd`-checks the binary before spending the
+allocation. ⚠ **The skill's claim that the pre-flight "needs no modules" was WRONG** — `lpjcheck`
+links the same libraries, so `--check` died with the same `libnetcdf.so.19` message, in the one
+command meant to tell you the config is fine. Measured and corrected. And the wrapper **no longer
+echoes the completion phrase** into the log, so the unanchored `grep -c 'successfully terminated'`
+that returned 1 on a dead job cannot match a decoy; every harvest command it writes is anchored
+`^lpjml successfully terminated`. Proven by submitting from a shell with NO modules: pre-flight
+passed, the job ran 20/20 cells in 9 s, and the phrase now appears exactly once — on the model's
+own line.
 
 **Next, in order:**
 
-1. **The halved carbon is line T's FIX, now on `main` — but D's verification run is still owed and
-   must NOT be run against `synth-v6`.** T's diagnosis: tree type was a free field, so 31 % of stems
-   in a temperate block were tropical evergreen, which the model killed inside year one
-   (`mort_temp` in `tree/mortality_tree_ind.c`). Type is now COPIED from the target cell's own
-   template roster and `inadmissible_placed` must be zero. At FILE level T measures above-ground
-   biomass **4,030 vs 3,777 gC/m², 6.7 % HIGH, not halved** — the loss happened *during the run*, to
-   a roster the model rejected. ⚠ `/p/tmp/jamirp/vegemu/runs/synth-v6` (written 08:57 today,
-   `inadmissible_stems_total: 0`) came from line T's **uncommitted** `synth.py` and carries an
-   in-flight rooting-depth imposition (`imposed: {D95max: template}`, `imposed_clamped: 9`). A number
-   measured against it would cite an unversioned synthesiser and be superseded within the hour.
-   **Re-emit from `main`'s committed synthesiser, then run the year** (20 cells, 1 yr ≈ 8 s, via
-   `scripts/sbatch_cmodel.sh`).
-2. **The rooting-depth question T flagged is a MODEL-RUN question, so it is D's.** T imposes `D95max`
-   as a stored per-tree field (`binfmt/restart.py:358`, offset 337) but the model derives it from
-   height. **Does the model recompute it at the first allocation and overwrite the imposed value?**
-   T calls that "the whole risk" and it cannot be answered from the file — only by loading it.
-3. **Corpus v2 is still blocked on TWO decisions, neither of them D's. Ask, do not assume.**
+1. **Corpus v2 is still blocked on TWO decisions, neither of them D's. Ask, do not assume.**
    - **Integrator:** `config/paths.yaml` needs a `ssp370_seed2_from_hist_seed2` key. The genuine
      second run is on disk and verified — different size (133,580,962,759 vs 133,559,375,490),
      written 2026-08-03 — but it came from the Jul-21 build, not Feb-05, so the corrected pair
@@ -61,12 +53,20 @@ just `git diff`, which answers against whatever ref you last fetched.** Only a c
      exactly what stops an emulated warmed restart shifting composition at all.
    - ⚠ **ONE rebuild or the other, never two** — each is a new corpus version and a changed corpus
      is a changed question. v0/v1 hashes are untouched either way.
-   - **Inbound budget, re-checked today:** `lines/X/STATE.md` is **117/120** (3 lines of headroom —
-     tight, verify the block fits before sending), `lines/T/STATE.md` is **120/120, still blocked**.
-     Always `wc -l lines/<to>/STATE.md` first; over budget reddens `budgets` and stops EVERY merge.
-4. **The 17 empty controls are NOT a reason to re-select cells** — 14 are the model being right, and
-   dropping them narrows the envelope the design spans. Detail, plus the both-bases warning line X
-   needs before sealing rung 1: `20260909-D-corpus-v1-decoded.md`.
+   - **Inbound budgets, re-measured today:** D **100**/120, T **115**/120, X **117**/120. D is
+     reachable again (it was at 120 and blocked, which is why T's wrapper defects arrived via the
+     changelog rather than the inbound channel). Always `wc -l lines/<to>/STATE.md` first.
+2. **`tools/rotate_state.py D` is due** — this file was at 100 of 120 before this block landed.
+3. **The 17 empty controls are NOT a reason to re-select cells** — 14 are the model being right,
+   and dropping them narrows the envelope the design spans. Detail, plus the both-bases warning
+   line X needs before sealing rung 1: `20260909-D-corpus-v1-decoded.md`.
+4. **Nothing of D's is in flight.** Both of today's campaigns are harvested and
+   `campaigns.py --check` is green.
+
+⚠ **Still true from yesterday, and it cost a near-miss:** re-`fetch` immediately before diagnosing
+any gate failure in another line's files, and compare worktrees on disk (`diff -rq`), not just
+`git diff`, which answers against whatever ref you last fetched. Only a cache-free
+`mypy --strict --cache-dir=/dev/null` proves a red gate real.
 
 ## Milestones
 
