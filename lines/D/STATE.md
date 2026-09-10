@@ -13,60 +13,44 @@ pre-registrations and verdicts (X).
 
 ## NEXT — start here
 
-✅ **The three-session carbon blocker is CLOSED, and it closed in the opposite direction from its
-name.** Re-emitted the restart from `main`'s committed synthesiser at `5cc59c0` and ran year 2000
-over the 20-cell block: block vegetation carbon is **112,763 vs 100,691 gC, i.e. 12.0 % HIGH** —
-not halved, not low. The model sheds the excess over ~4 years and reaches **−1.6 % by 2019**,
-inside the two-seed band (0.102). The re-emitted file is **byte-identical** to the one line T's
-20-year `t5` arm was scored on (`1e856119…`), which independently confirms T's "verified inert"
-claim and makes `t5`'s numbers citable against a versioned synthesiser — they were not yesterday.
-Record: `20260910-D-the-halved-carbon-is-gone-verified-from-the-committed-synthesiser.md`.
-⚠ Say the sign right: T measured the FILE 6.7 % high, the model takes it to 12.0 % high at year
-end. "Halved carbon" describes only rosters the model REJECTED, and that roster is gone.
-
-✅ **Item 2 of the last handoff was answered by line T, not by me — do not re-run it.** The model
-never recomputes `D95max`: every write is at tree birth, and `allocation_tree.c` writes `D95`, a
-different field. Imposition works, makes fidelity WORSE than the donor accident, and **ships
-switched off** (`IMPOSED_TRAITS = ()`). Record: `20260909-T-imposing-rooting-depth-works-…`.
-
-✅ **The C-model submission wrapper — all three defects fixed, each verified by running it.**
-It now **pins and loads its own module set** for the job AND for the `--check` pre-flight, so a
-run no longer depends on who submitted it; it `ldd`-checks the binary before spending the
-allocation. ⚠ **The skill's claim that the pre-flight "needs no modules" was WRONG** — `lpjcheck`
-links the same libraries, so `--check` died with the same `libnetcdf.so.19` message, in the one
-command meant to tell you the config is fine. Measured and corrected. And the wrapper **no longer
-echoes the completion phrase** into the log, so the unanchored `grep -c 'successfully terminated'`
-that returned 1 on a dead job cannot match a decoy; every harvest command it writes is anchored
-`^lpjml successfully terminated`. Proven by submitting from a shell with NO modules: pre-flight
-passed, the job ran 20/20 cells in 9 s, and the phrase now appears exactly once — on the model's
-own line.
+**Nothing of D's is in flight** — the 2026-09-10 campaigns are harvested and `tools/campaigns.py
+--check` is green. The three-session carbon blocker is **closed**, in the opposite direction from
+its name: the emulated restart starts **high**, not halved, and converges into the two-seed band.
+Say the sign right — T measured the FILE 6.7 % high, the model takes it to **12.0 % high** at the
+end of year one (112,763 vs 100,691 gC), then sheds it to −1.6 % by 2019, inside the two-seed band
+(0.102). "Halved carbon" describes only rosters the model REJECTED. Narrative is in the journal;
+record: `20260910-D-the-halved-carbon-is-gone-verified-from-the-committed-synthesiser.md`.
+⚠ **`MEMORY.md` is integrator-only (O04), so a line CANNOT promote a fact into it** — four rows are
+requested in `changelog.d/D-ssp370-second-seed-provenance.md`, including a correction to
+`restart-loads`, whose "0.53 off" is a roster the model later rejected. Keep the sign here until
+they land.
 
 **Next, in order:**
 
-1. **Corpus v2 is still blocked on TWO decisions, neither of them D's. Ask, do not assume.**
-   - **Integrator:** `config/paths.yaml` needs a `ssp370_seed2_from_hist_seed2` key. The genuine
-     second run is on disk and verified — different size (133,580,962,759 vs 133,559,375,490),
-     written 2026-08-03 — but it came from the Jul-21 build, not Feb-05, so the corrected pair
-     straddles a build boundary and that must be disclosed.
+1. **Corpus v2 is blocked on TWO decisions, neither of them D's. BOTH ASKED 2026-09-10 via a
+   changelog fragment (`changelog.d/D-ssp370-second-seed-provenance.md`) — awaiting answers.**
+   D's half is now verified and recorded; do not re-measure it.
+   - **Integrator:** the configured `ground_truth.ssp370_seed2` is a **byte-clone of seed 1**
+     (both `restart_2100.lpj` exactly 133,559,375,490 B; the directory carries its own
+     `INVALID_NOT_A_SECOND_SEED.md`). The genuine run is on disk at `…_from_hist_seed2`
+     (133,580,962,759 B) and **completed** — anchored terminate line, all 67,420 cells. It needs a
+     **NEW** `ssp370_seed2_from_hist_seed2` key: repointing the existing key in place would
+     silently change what three sealed pre-registrations cite. It ran on the **Jul-21** build, not
+     Feb-05, so the corrected pair straddles a build boundary that must be disclosed — and
+     `paths.yaml`'s own comment does not mention that build at all.
    - **Line X:** does v2 also put `pft_frac_*` in `SCORED_CONJUNCTIVE`? Those columns are computed
      but not scored, so the synthesiser must COPY species composition from a template — which is
      exactly what stops an emulated warmed restart shifting composition at all.
    - ⚠ **ONE rebuild or the other, never two** — each is a new corpus version and a changed corpus
      is a changed question. v0/v1 hashes are untouched either way.
-   - **Inbound budgets, re-measured today:** D **100**/120, T **115**/120, X **117**/120. D is
-     reachable again (it was at 120 and blocked, which is why T's wrapper defects arrived via the
-     changelog rather than the inbound channel). Always `wc -l lines/<to>/STATE.md` first.
-2. **`tools/rotate_state.py D` is due** — this file was at 100 of 120 before this block landed.
-3. **The 17 empty controls are NOT a reason to re-select cells** — 14 are the model being right,
+   - ⚠ **Nothing is silently wrong meanwhile:** `check_seeds_differ` fails the build on an
+     identical RNG triple, and its six tests pass. Record:
+     `20260910-D-the-ssp370-second-seed-exists-and-the-configured-path-is-its-clone.md`.
+   - **Always `wc -l lines/<to>/STATE.md` before writing** — X was at 117/120, which is why both
+     asks went via the changelog; an inbound block would have blocked X's own commits.
+2. **The 17 empty controls are NOT a reason to re-select cells** — 14 are the model being right,
    and dropping them narrows the envelope the design spans. Detail, plus the both-bases warning
    line X needs before sealing rung 1: `20260909-D-corpus-v1-decoded.md`.
-4. **Nothing of D's is in flight.** Both of today's campaigns are harvested and
-   `campaigns.py --check` is green.
-
-⚠ **Still true from yesterday, and it cost a near-miss:** re-`fetch` immediately before diagnosing
-any gate failure in another line's files, and compare worktrees on disk (`diff -rq`), not just
-`git diff`, which answers against whatever ref you last fetched. Only a cache-free
-`mypy --strict --cache-dir=/dev/null` proves a red gate real.
 
 ## Milestones
 
