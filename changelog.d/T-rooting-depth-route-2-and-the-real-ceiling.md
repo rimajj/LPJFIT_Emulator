@@ -22,6 +22,14 @@
   failure.
 - The same wrapper could not submit a script that takes no arguments at all — the job died in five
   seconds on an empty argument the wrapper itself inserted.
+- ⚠ **FOR THE INTEGRATOR — one line to add to `pyproject.toml`, which no work line may edit.**
+  `scikit-learn` belongs in `[project.dependencies]`. The emulator is built on LightGBM's
+  scikit-learn wrapper, and that wrapper refuses to construct a model unless scikit-learn is
+  installed — but only lightgbm is declared. So a clean install from this file, which is exactly
+  what CI performs, yields a package whose emulator cannot fit anything. It went unnoticed because
+  no test had ever fitted a model in CI until now; the new tests do, and they are skipped with a
+  named reason until this lands. This is the same defect the file's own comment already describes
+  for scipy and lightgbm: a dependency the package imports is not optional.
 - A message from one work line to another no longer spends the recipient's file-length budget.
   Charged to the recipient, it meant any line could turn the whole repository's build red by
   telling another line something, and the recipient could neither pre-empt nor quickly fix it. It
