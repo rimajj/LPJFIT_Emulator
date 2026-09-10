@@ -19,12 +19,14 @@ together by a gate of their own, or the whole scheme is only advisory.
 from __future__ import annotations
 
 import sys
-import tomllib
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _common import Report, repo_root
+# `tomllib` is 3.11+. Import it FROM `_common`, which re-execs this process under the
+# configured interpreter when the caller started it with an older one -- see the long note
+# there. Importing it directly here would reintroduce exactly the failure that note describes.
+from _common import Report, repo_root, tomllib
 
 try:
     import yaml
