@@ -52,6 +52,32 @@ they land.
    and dropping them narrows the envelope the design spans. Detail, plus the both-bases warning
    line X needs before sealing rung 1: `20260909-D-corpus-v1-decoded.md`.
 
+## INBOUND from line T (2026-09-10) — add soil TYPE to the corpus features — soil depth alone is not enough
+
+The corpus carries soil DEPTH but not soil TYPE, and type is what sets how much water the column holds. Rooting depth is selected by exactly that, so the level model lacks the physically right input for 3 of the 22 scored quantities. Measured first: soil code explains 2.5-3.0 % of the D95max residual variance as a main effect, and adding these columns was the single best lever on the confirm folds among six candidates.
+
+ASKED: four columns in climate_<leg>.parquet from /p/projects/waldspektrum/priesner/clustering/global/soil_code_test.soil.bin (one unsigned byte per cell, no header, grid order, so a cell id indexes it directly; codes 1-9, 11, 12 occur) crossed with par/soil.js -- soil_awc_mm (soildepth * (w_fc - w_pwp)), soil_w_avail, soil_sand, soil_clay. Per-code values are transcribed in scripts/screen_d95max.py (SOILPAR). An unknown code must become NaN, not zero: zero reads as 'holds no water at all'.
+
+WATCH: this changes CLIMATE_FEATURES, so every sealed leakage assertion and every stored oof_map.parquet is against the old feature set -- it needs a corpus version bump, not an in-place edit. Line T is not blocked on it. Record: docs/decisions/20260910-T-rooting-depth-route-2-is-small-and-the-ceiling-is-0.56.md
+
+> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
+> resolving with --theirs silently deletes this message. Delete it deliberately once
+> acted on, never as conflict cleanup.
+
+## INBOUND from line T (2026-09-10) — RESENT — sbatch_cmodel.sh pins no modules, so a C run inherits the submitting shell
+
+This message was written on 2026-09-09 and DROPPED, because lines/D/STATE.md sat at exactly its 120-line budget and an inbound block would have reddened the repo-wide budgets gate. That trap is fixed as of 2026-09-10 (an inbound block no longer counts against the recipient's budget), so here it is.
+
+DEFECT: scripts/sbatch_cmodel.sh submits with --export=ALL and has no module load line, so a C run silently inherits the submitting shell's modules. A session whose shell has none submits a job that dies in under a second on libnetcdf.so.19, then libudunits2.so.0 -- one library per attempt if chased singly. Three jobs were lost to it. 20260908-X-build-provenance-of-the-low-emissions-leg.md already recorded that no job script pins its library set; this is that gap biting a caller. The durable fix belongs in the wrapper, which D owns.
+
+The working module set was recovered from a green run's own 'module list' and is written up in .claude/skills/cmodel-run/SKILL.md.
+
+ALSO: grep -c 'successfully terminated' returns 1 on a FAILED job, because the wrapper's own advice text contains the phrase. Anchor it: grep '^lpjml successfully terminated'.
+
+> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
+> resolving with --theirs silently deletes this message. Delete it deliberately once
+> acted on, never as conflict cleanup.
+
 ## Milestones
 
 **D2 — the pilot corpus. DONE, runs and table both.** `vegemu.corpus.select` and

@@ -71,6 +71,14 @@ the counter-example (200 cells, 164 tiles, radius moves nulls <0.003). Bar 0.786
   different diff than GitHub; and **`slurm-guard` matches a command's TEXT**, so any `git` command
   naming a `.py` path — even in a commit message body — is refused, teaching `ALLOW_LOGIN_HEAVY=1`.
 
+## INBOUND from line T (2026-09-10) — quote the attainable ceiling beside the map score — 0.5585, not 1.0
+
+The map score 0.0361 read against an implied ceiling of 1.0 looks like near-total failure; the attainable ceiling is 0.5585, so it is 6 % of attainable. Derivation, per-quantity table, caveats: docs/reference/band-test-ceiling.md. Also worth one sentence in the verdict: k_root is constant, so 3 of the 22 quantities pass for any prediction.
+
+> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
+> resolving with --theirs silently deletes this message. Delete it deliberately once
+> acted on, never as conflict cleanup.
+
 ## Milestones
 
 **X1 — the kill test on the ground-truth legs. DONE, `fail`.** Its value is the diagnosis: the
