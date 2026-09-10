@@ -101,7 +101,9 @@ def check_line_budgets(rel: str, lines: list[str], budgets: list[dict], rep: Rep
         over = n - limit
         # Say both numbers when they differ, so "123 lines" in the editor and "115 lines" in the
         # finding do not read as a bug in the gate.
-        counted = f"{n} lines" if n == len(lines) else f"{n} of {len(lines)} lines (inbound uncounted)"
+        counted = (
+            f"{n} lines" if n == len(lines) else f"{n} of {len(lines)} lines (inbound uncounted)"
+        )
         rep.add(
             rel,
             "B01",

@@ -121,9 +121,7 @@ class Recipe:
         if self.bounds is None:
             return np.exp(z)
         low, high = self.bounds
-        out: npt.NDArray[np.float64] = low + (high - low) / (
-            1.0 + np.exp(-np.clip(z, -40.0, 40.0))
-        )
+        out: npt.NDArray[np.float64] = low + (high - low) / (1.0 + np.exp(-np.clip(z, -40.0, 40.0)))
         return out
 
 

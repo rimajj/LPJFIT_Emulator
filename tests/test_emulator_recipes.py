@@ -59,7 +59,9 @@ def test_an_empty_recipe_map_changes_nothing() -> None:
     x, y = _problem()
     plain = Emulator(QUANTITIES, CFG).fit(x, y).predict(x)
     empty = Emulator(QUANTITIES, CFG, recipes={}).fit(x, y).predict(x)
-    assert np.array_equal(plain, empty), "an empty recipe map must reproduce the shipped fit exactly"
+    assert np.array_equal(plain, empty), (
+        "an empty recipe map must reproduce the shipped fit exactly"
+    )
 
 
 def test_a_recipe_head_is_not_also_logged() -> None:

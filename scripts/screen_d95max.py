@@ -51,7 +51,7 @@ import sys
 import time
 import warnings
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import numpy as np
@@ -141,7 +141,7 @@ class Arm:
     transform: str = "log"
     objective: str = "regression"  # "regression" is L2; "regression_l1" is L1
     soil: bool = False
-    config: EmulatorConfig = EmulatorConfig()
+    config: EmulatorConfig = field(default_factory=EmulatorConfig)
     note: str = ""
 
 
@@ -231,6 +231,7 @@ def score_arm(
     truth: Array,
     band: Array,
     folds: npt.NDArray[np.int64],
+    *,
     stored: Array,
     all_truth: Array,
     all_band: Array,
@@ -258,9 +259,7 @@ def score_arm(
             }
         out[label] = {
             "per_quantity": per,
-            "conjunctive": band_frac_conjunctive(
-                swapped[sel], all_truth[sel], all_band[sel]
-            ),
+            "conjunctive": band_frac_conjunctive(swapped[sel], all_truth[sel], all_band[sel]),
         }
     return out
 
@@ -319,7 +318,9 @@ def main() -> int:
             continue
         t0 = time.time()
         pred, diag = fit_arm(arm, a.features, truth, a.folds, soil)
-        s = score_arm(pred, truth, band, a.folds, stored, a.truth, a.band, idx)
+        s = score_arm(
+            pred, truth, band, a.folds, stored=stored, all_truth=a.truth, all_band=a.band, idx=idx
+        )
         secs = time.time() - t0
         entry = {
             "note": arm.note,
@@ -329,7 +330,9 @@ def main() -> int:
             "seconds": secs,
             **diag,
             "score": s,
-            "bias_by_truth_decile": {q: bias_profile(pred, truth, j) for j, q in enumerate(TARGETS)},
+            "bias_by_truth_decile": {
+                q: bias_profile(pred, truth, j) for j, q in enumerate(TARGETS)
+            },
         }
         if arm.name == "baseline":
             # THE CONTROL. This arm re-implements the shipped recipe, so it must land on the

@@ -26,7 +26,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
-from check_budgets import _without_inbound  # noqa: E402
+from check_budgets import _without_inbound
 
 OWN = [
     "# Line X — experiments",
@@ -76,5 +76,5 @@ def test_the_owners_own_lines_are_still_counted() -> None:
 
 def test_a_heading_that_merely_mentions_inbound_is_still_counted() -> None:
     """Narrow by design — only the headings the tool actually writes are exempt."""
-    sneaky = OWN + ["## Notes on the INBOUND process", "", "prose", ""] + TAIL
+    sneaky = [*OWN, "## Notes on the INBOUND process", "", "prose", "", *TAIL]
     assert _without_inbound(sneaky) == sneaky
