@@ -6,6 +6,7 @@
 #
 # Env knobs: NTASKS=1 TIME=00:30:00 PARTITION=priority QOS= ACCOUNT=waldspektrum
 #            LPJ_DEFINES="-DFROM_RESTART"   preprocessor flags; set to "" for a SPIN-UP run
+#            LPJ_MODULES="..."              the module set the job loads; default is pinned below
 #
 # ─── WHY A WRAPPER ─────────────────────────────────────────────────────────────────────────────
 # A PreToolUse hook denies calling `bin/lpjml` from a session: it needs its module environment, it
@@ -13,12 +14,12 @@
 # is denied because this wrapper is what writes the campaign ledger row -- the only reason a later
 # session can find, judge and harvest a job whose results arrive after the launching session ended.
 #
-# ─── THE FOUR TRAPS, ALL MEASURED, ALL SPECIFIC TO THE C MODEL ─────────────────────────────────
+# ─── THE SIX TRAPS, ALL MEASURED, ALL SPECIFIC TO THE C MODEL ──────────────────────────────────
 # 1. NEVER JUDGE A C RUN BY ITS EXIT CODE. The stock job files always exit 0, so a run that died
 #    mid-century leaves a plausible truncated output behind a green row. The only evidence of
 #    success is the model's OWN line, `lpjml successfully terminated, <n> grid cells processed.`,
-#    in a NON-EMPTY log. This wrapper writes that requirement into the ledger row as the harvest
-#    command, so the next session checks the right thing.
+#    at the START of a line (see trap 6) in a NON-EMPTY log. This wrapper writes that requirement
+#    into the ledger row as the harvest command, so the next session checks the right thing.
 # 2. A ZERO-BYTE LOG AFTER MINUTES IS A DEAD JOB, not early days -- the opposite of the Python
 #    case. A healthy run creates its output files within ~15 seconds. Check the output directory a
 #    minute after launch; do not wait out a silent job.
@@ -31,6 +32,17 @@
 #    opposite case and needs the spin-up branch, so set LPJ_DEFINES="" for it. Note the ground
 #    truth's own spin-up job passes NO -D flag at all (not `-DSPINUP`), so "" is the faithful
 #    setting and `-DSPINUP` would silently be a different spin-up.
+# 5. THE JOB LOADS ITS OWN MODULES, and did not until 2026-09-10. `--export=ALL` used to hand the
+#    job whatever the SUBMITTING SHELL happened to have loaded, so the same command was a green run
+#    from one session and a one-second death from another. With no modules the binary is short
+#    exactly two libraries -- `libnetcdf.so.19` and `libudunits2.so.0` -- and the loader names one
+#    per attempt, so chasing them singly costs a job each. The job now purges and loads the pinned
+#    LPJ_MODULES set, and CHECKS the binary resolves before spending an allocation on it.
+# 6. ANCHOR THE COMPLETION-LINE GREP: `^lpjml successfully terminated`. This wrapper used to echo
+#    the phrase into the job log as advice, so an unanchored `grep -c 'successfully terminated'`
+#    returned 1 on a job that died in zero seconds with exit 127 -- a failed run wearing a pass.
+#    Both halves are fixed: the recorded harvest commands are anchored, AND the advice text no
+#    longer contains the phrase, so even a careless grep cannot match a decoy.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -72,6 +84,31 @@ fi
 # The preprocessor flags select which BRANCH of the config is compiled, so they are part of the
 # run's identity: the same config file under a different LPJ_DEFINES is a different simulation.
 # Recorded in the ledger row for exactly that reason.
+# ─── the module set, used by BOTH the pre-flight and the job (trap 5) ─────────────────────────
+# Recovered from a run that worked (`D-cmodel-t2-control`, job 2080497) and reduced to the set the
+# binaries actually need: with none of these loaded, `ldd` reports exactly libnetcdf.so.19 and
+# libudunits2.so.0 unresolved, and lmod pulls the rest of the tree in as dependencies. Override
+# with LPJ_MODULES when the binary is rebuilt against something else -- and when you do, recover
+# the new set from a green log rather than guessing:
+#   sed -n '/Currently Loaded Modules/,/^ *$/p' logs/<green-tag>.<jobid>.out
+LPJ_MODULES="${LPJ_MODULES:-netcdf-c/4.9.2 hdf5/1.14.5 udunits/2.2.28 szip/2.1.1 zlib/1.3.1 \
+zstd/1.5.6 curl/8.4.0 openssl/3.6.0 libxml2/2.11.0 m4/4-1.4.19 expat/2.5.0 json-c/0.17 \
+eccodes/2.32.1 proj/9.5.1 intel/oneAPI/2024.0.0 gcc/15.2.0}"
+
+# ⚠ THE PRE-FLIGHT IS NOT MODULE-FREE, though the skill said it was until 2026-09-10. `lpjcheck`
+# links the same libraries as `lpjml`, so from a shell with no modules `--check` dies with the
+# identical `libnetcdf.so.19` message -- which reads as a broken config rather than a missing
+# environment, in the one command whose whole job is to tell you the config is fine. So load the
+# set HERE too, in the wrapper's own shell, before lpjcheck runs.
+load_lpj_modules() {
+  [[ -f /usr/share/lmod/lmod/init/bash ]] || { echo "sbatch_cmodel: no lmod init; using the inherited environment" >&2; return 0; }
+  # shellcheck disable=SC1091
+  source /usr/share/lmod/lmod/init/bash
+  module purge 2>/dev/null || true
+  module load $LPJ_MODULES 2>/dev/null || { echo "sbatch_cmodel: 'module load' failed for: $LPJ_MODULES" >&2; return 1; }
+  return 0
+}
+
 DEFINES="${LPJ_DEFINES--DFROM_RESTART}"
 read -r -a DEFS <<< "$DEFINES"
 echo "sbatch_cmodel: defines = ${DEFINES:-(none, i.e. the spin-up branch)}"
@@ -79,6 +116,7 @@ echo "sbatch_cmodel: defines = ${DEFINES:-(none, i.e. the spin-up branch)}"
 # ─── t1: the config pre-flight. Validates without running, so it is free. ──────────────────────
 if (( CHECK )); then
   echo "sbatch_cmodel: pre-flight with lpjcheck (validates the config and every input, no run)"
+  load_lpj_modules || exit 3
   rc=0
   if [[ -n "$MANIFEST" ]]; then
     # Every member, because a manifest whose members differ only in a filename is exactly the case
@@ -171,7 +209,7 @@ wait
 ok=0
 while IFS=$'\t' read -r name cfg rdir; do
   [ -z "${name// }" ] && continue
-  if grep -q 'successfully terminated' "$rdir/lpjml.$name.log" 2>/dev/null; then
+  if grep -q '^lpjml successfully terminated' "$rdir/lpjml.$name.log" 2>/dev/null; then
     ok=$((ok+1))
   else
     echo "MEMBER FAILED (no completion line): $name  -> $rdir/lpjml.$name.log"
@@ -215,11 +253,31 @@ JOBID=$(sbatch --parsable \
 set -uo pipefail
 export LPJROOT="$LPJROOT"
 echo "=== JOB START tag=$TAG host=\$(hostname) ntasks=$NTASKS runs=$NRUNS defines='$DEFINES' ==="
+
+# Trap 5: load the PINNED set, so this job's libraries do not depend on the submitting shell.
+if [[ -f /usr/share/lmod/lmod/init/bash ]]; then
+  source /usr/share/lmod/lmod/init/bash
+  module purge 2>/dev/null || true
+  module load $LPJ_MODULES || { echo "FATAL: 'module load' failed for: $LPJ_MODULES" >&2; exit 3; }
+else
+  echo "WARNING: no lmod init found; the job is running with the inherited environment." >&2
+fi
 module list 2>&1 || true
+
+# Cheap, and it converts a cryptic one-second loader death into a named diagnosis.
+if ldd "$LPJBIN" 2>/dev/null | grep -q 'not found'; then
+  echo "FATAL: the module set does not resolve the binary's libraries:" >&2
+  ldd "$LPJBIN" 2>&1 | grep 'not found' >&2
+  echo "Recover a working set from a green log, then pass it as LPJ_MODULES. Skill: cmodel-run." >&2
+  exit 3
+fi
+
 $BODY
 echo "=== JOB DONE tag=$TAG exit=\$rc ==="
-echo "=== NOTE: the exit code is NOT the verdict. Require the model's own line:"
-echo "===   'lpjml successfully terminated, <n> grid cells processed.'"
+echo "=== NOTE: the exit code is NOT the verdict, and this log deliberately does NOT repeat the"
+echo "===       model's completion phrase -- an unanchored grep for it used to match this very"
+echo "===       advice and pass a dead job. Judge the run with the ledger's harvest command:"
+echo "===   python3 tools/campaigns.py status --line $LINE     (or see skill cmodel-run)"
 exit \$rc
 SLURM
 )
@@ -232,10 +290,10 @@ if [[ -n "$MANIFEST" ]]; then
   # Each member logs to its own run directory, so the job log alone cannot prove all of them
   # finished. The harvest command counts the members that printed the model's own line, and the
   # answer must be $NRUNS -- anything less is a partial campaign wearing a green exit code.
-  HARVEST="grep -l 'successfully terminated' \$(awk -F'\t' 'NF{print \$3\"/lpjml.\"\$1\".log\"}' $MANIFEST) | wc -l   # must be $NRUNS"
+  HARVEST="grep -l '^lpjml successfully terminated' \$(awk -F'\t' 'NF{print \$3\"/lpjml.\"\$1\".log\"}' $MANIFEST) | wc -l   # must be $NRUNS"
   CMDLINE="LPJ_DEFINES='$DEFINES' scripts/sbatch_cmodel.sh --manifest $MANIFEST $TAG"
 else
-  HARVEST="grep 'successfully terminated' logs/$TAG.$JOBID.out"
+  HARVEST="grep '^lpjml successfully terminated' logs/$TAG.$JOBID.out"
   CMDLINE="LPJ_DEFINES='$DEFINES' scripts/sbatch_cmodel.sh $TAG $CONFIG $RUN_DIR"
 fi
 echo "  $HARVEST"
