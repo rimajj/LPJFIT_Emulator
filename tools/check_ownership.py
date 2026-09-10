@@ -30,6 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _common import (
     Report,
+    _git,
     base_parser,
     config,
     glob_match,
@@ -96,13 +97,59 @@ def accepted_adr_modified(files: list[str]) -> list[str]:
     return out
 
 
+INBOUND_SENTINEL = "> Sent by tools/inbound.py."
+
+
+def _staged_inbound_only(rel: str, sender: str) -> bool:
+    """Is the staged change to `rel` nothing but an inbound block written by line `sender`?
+
+    WHY THIS IS DERIVED FROM THE DIFF AND NOT FROM A FLAG. `--via-inbound` was the original design
+    and it never once worked: nothing passed it. The commit guard calls this checker with `--staged`
+    alone, so every message `tools/inbound.py` wrote was blocked at commit time by O01 -- the one
+    sanctioned cross-line write was unusable, in both directions, for as long as it has existed.
+
+    Reading the diff is also strictly SAFER than the flag would have been. A flag is a claim by the
+    caller and permits any edit whatsoever to another line's STATE.md; this permits only an edit
+    that is provably an inbound block, and only from the line doing the committing. Three
+    conditions, all necessary:
+
+      * nothing is REMOVED -- an inbound write only ever inserts, so a deletion is somebody editing
+        another line's state under cover of sending it a message;
+      * every added heading is an `## INBOUND from line <sender>` header, so arbitrary content
+        cannot ride along under a section of its own;
+      * the tool's sentinel line is present, which is what ties the block to the tool.
+
+    The message BODY is deliberately unconstrained. It is prose for another line to read.
+    """
+    diff = _git("diff", "--cached", "-U0", "--", rel).splitlines()
+    added: list[str] = []
+    for ln in diff:
+        if ln.startswith(("+++", "---", "@@", "diff ", "index ")):
+            continue
+        if ln.startswith("-"):
+            return False  # a removal is never part of sending a message
+        if ln.startswith("+"):
+            added.append(ln[1:])
+    if not added:
+        return False
+
+    header = f"## INBOUND from line {sender} ("
+    headings = [ln for ln in added if ln.startswith("## ")]
+    if not headings or any(not ln.startswith(header) for ln in headings):
+        return False
+    return any(ln.startswith(INBOUND_SENTINEL) for ln in added)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = base_parser(__doc__ or "")
     ap.add_argument("--line", default=None, help="override the detected work line")
     ap.add_argument(
         "--via-inbound",
         action="store_true",
-        help="set by tools/inbound.py: permit the one sanctioned cross-line write",
+        help=(
+            "deprecated and ignored: the sanctioned cross-line write is now recognised from the "
+            "staged diff, because nothing ever passed this flag"
+        ),
     )
     args = ap.parse_args(argv)
 
@@ -150,7 +197,11 @@ def main(argv: list[str] | None = None) -> int:
             and line is not None
             and owner != line
         ):
-            if args.via_inbound and glob_match("lines/*/STATE.md", rel):
+            if (
+                line is not None
+                and glob_match("lines/*/STATE.md", rel)
+                and _staged_inbound_only(rel, line)
+            ):
                 continue
             rep.add(
                 rel,

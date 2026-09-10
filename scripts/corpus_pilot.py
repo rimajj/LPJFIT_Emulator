@@ -18,6 +18,10 @@
     # 5. the single harvest command for the whole campaign, however many shards it took.
     scripts/sbatch_py.sh D-pilot-harvest scripts/corpus_pilot.py --stage harvest --version v1
 
+    # 6. the corpus table itself: every restart record and its own forcing, decoded and joined.
+    NCPUS=16 TIME=00:30:00 scripts/sbatch_py.sh D-pilot-decode scripts/corpus_pilot.py \\
+        --stage decode --version v1 --workers 16
+
 WHAT THIS IS. The corpus rung 1 is scored on. Every existing ground-truth leg holds exactly ONE
 climate per location, so climate and geography are collinear and a warming response is not
 separately identified (`MEMORY.md:ident-limit`) -- the predecessor's kill test failed on precisely
@@ -62,6 +66,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 import traceback
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import UTC, datetime
@@ -74,6 +79,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 import numpy as np
 import polars as pl
 
+from vegemu.binfmt.restart import RestartReader
+from vegemu.corpus import climate as climate_mod
+from vegemu.corpus import state as state_mod
 from vegemu.corpus.perturb import DESIGN_SEED, VARS, pilot_design
 from vegemu.corpus.select import pilot_cells
 from vegemu.paths import paths, scratch
@@ -559,9 +567,280 @@ def stage_harvest(version: str) -> int:
     return 0 if complete else 1
 
 
+# ------------------------------------------------------------------------------------------------
+# stage: decode -- the 6,000 restarts and their forcing become the corpus table
+# ------------------------------------------------------------------------------------------------
+
+# The state a run produces is the end of 1000 spin-up years that CYCLE these 30 forcing years, and
+# LPJmL-FIT labels the restart it writes with the last of them. So `state_year` is bookkeeping, not
+# a date: nothing here is "the state of 1999", and the climate summary is over the whole window
+# rather than any single year. Asserted per run against the restart's own header.
+STATE_YEAR = 1999
+
+
+def _decode_run(args: tuple[str, int, str, str, str]) -> dict[str, Any]:
+    """One run: its restart record and its own perturbed forcing, as one corpus row."""
+    name, cell, point, rdir, fdir = args
+    perturb = _load("corpus_perturb_clm")
+    restart = Path(rdir) / "restart" / f"restart_{name}.lpj"
+
+    # Two opens of the same file on purpose. The year label is a header read of 92 bytes, and doing
+    # it here keeps the "a per-cell restart holds ONE record" assertion in `single_cell_state`,
+    # where every future caller gets it, instead of copied into this script.
+    restart_year = RestartReader(restart).generic.firstyear
+    row: dict[str, Any] = {
+        "name": name,
+        "cell": cell,
+        "point": point,
+        "seed": SEED,
+        "restart_year": restart_year,
+        "restart_bytes": restart.stat().st_size,
+    }
+    row.update(state_mod.single_cell_state(restart, cell))
+
+    # ⚠ `climate_columns`, NEVER `climate_table`: this runs in a forked worker, and polars' thread
+    # pool does not survive a fork -- a DataFrame touched here hangs the child forever with no
+    # error, so the job burns its whole wall-clock limit and produces nothing.
+    window = climate_mod.Window("pilot", *perturb.BASE_WINDOW, STATE_YEAR)
+    files = {v: str(Path(fdir) / perturb.OUT_NAME[v]) for v in climate_mod.VARS}
+    cl = climate_mod.climate_columns(window, files=files)
+    if cl["cell"].size != 1:
+        raise AssertionError(f"{name}: forcing describes {cl['cell'].size} cells, expected 1")
+    if int(cl["cell"][0]) != cell:
+        raise AssertionError(
+            f"{name}: forcing declares cell {int(cl['cell'][0])}, the run is cell {cell}. The "
+            "`.clm` header's firstcell is the only record of which cell a subset file holds."
+        )
+    row["lon"] = float(cl["lon"][0])
+    row["lat"] = float(cl["lat"][0])
+    row["leg"] = str(cl["leg"][0])
+    row["state_year"] = int(cl["state_year"][0])
+    for feat in climate_mod.CLIMATE_FEATURES:
+        row[feat] = float(cl[feat][0])
+    return row
+
+
+def _decode_run_guarded(args: tuple[str, int, str, str, str]) -> dict[str, Any]:
+    # One unreadable restart must not lose the other 5,999, and `stage_decode` exits non-zero on
+    # any of them, so a partial corpus table is never silently green.
+    try:
+        return _decode_run(args)
+    except Exception:
+        return {"name": args[0], "cell": args[1], "error": traceback.format_exc(limit=6)}
+
+
+def _decode_all(
+    jobs: list[tuple[str, int, str, str, str]], nproc: int
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Every run decoded, split into the rows that worked and the ones that raised."""
+    done: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+    if nproc > 1:
+        with ProcessPoolExecutor(max_workers=nproc) as pool:
+            results = pool.map(_decode_run_guarded, jobs, chunksize=8)
+            for i, res in enumerate(results, 1):
+                (failed if "error" in res else done).append(res)
+                if i % 500 == 0 or i == len(jobs):
+                    print(f"  {i}/{len(jobs)} runs  ({len(failed)} failed)", flush=True)
+    else:
+        for i, j in enumerate(jobs, 1):
+            res = _decode_run_guarded(j)
+            (failed if "error" in res else done).append(res)
+            if i % 500 == 0 or i == len(jobs):
+                print(f"  {i}/{len(jobs)} runs  ({len(failed)} failed)", flush=True)
+    return done, failed
+
+
+def _corpus_frame(
+    done: list[dict[str, Any]], design: pl.DataFrame, cells: pl.DataFrame
+) -> pl.DataFrame:
+    """The decoded rows joined to the design and the cell table, in the corpus column order.
+
+    Column order is the contract: the keys a fold is built from, then the design coefficients that
+    NAME the climate a row was grown under, then the features a model may see, then the targets.
+    `cell`, `lon` and `lat` sit with the keys because the geographic address is a pre-registered
+    NULL, not a feature (`vegemu.corpus.climate` header) -- a feature set that quietly contains it
+    turns any per-cell score into a spatial-interpolation score.
+    """
+    keys = ("name", "cell", "point", "kind", "tile", "stage", "seed", "leg", "state_year")
+    coeff = ("dtemp_k", "fprec", "sprec", "frad", "fiav")
+    targets = tuple(c for c in state_mod.STATE_COLUMNS if c != "cell")
+    # `truth_stems_total` is the stem count the STORED GROUND TRUTH holds at this cell, carried in
+    # so the control point can be checked against it. It is a diagnostic, never a feature: it is a
+    # lagged truth, and a model that saw it would score beautifully on a held-out cell.
+    from_cells = cells.select("cell", "tile", "stage", "stems_total").rename(
+        {"stems_total": "truth_stems_total"}
+    )
+    # `summarise_cell` reports every state column as a float, `cell` included, so the raw rows
+    # carry a f64 cell number and joining it against an integer key is a `SchemaError`.
+    return (
+        pl.DataFrame(done)
+        .with_columns(pl.col("cell").cast(pl.Int32))
+        .join(design, on="point", how="left")
+        .join(from_cells, on="cell", how="left")
+        .select(
+            [
+                *keys,
+                *coeff,
+                "lon",
+                "lat",
+                *climate_mod.CLIMATE_FEATURES,
+                *targets,
+                "restart_year",
+                "restart_bytes",
+                "truth_stems_total",
+            ]
+        )
+    )
+
+
+def _decode_parts(frame: pl.DataFrame) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame]:
+    """The three slices every decode number is quoted against: treeless, control, treeless control.
+
+    ⚠ THE CONTROL POINT IS THE CORPUS'S OWN SANITY CHECK, and it is the first number to look at.
+    Its forcing is byte-identical to the historical baseline, so a control run should grow roughly
+    the forest the stored ground truth holds at that cell. It does NOT have to match exactly -- the
+    ground truth ran a 1000-year spin-up plus a historical transient with the real year-by-year
+    climate under the 2026-02-05 binary, while this cycles 30 years under the 2026-08-12 one
+    (`MEMORY.md:subset-diverges`) -- but a control that is EMPTY where the truth has a forest means
+    the corpus is not describing the same model, and no rung-1 score computed on it would mean
+    anything.
+    """
+    treeless = frame.filter(pl.col("stems_total") <= 0)
+    control = frame.filter(pl.col("point") == "control")
+    return treeless, control, control.filter(pl.col("stems_total") <= 0)
+
+
+def _report_decode(frame: pl.DataFrame, summary: dict[str, Any], dest: Path) -> None:
+    treeless, control, ctrl_treeless = _decode_parts(frame)
+    print(f"\ncorpus table: {frame.height} rows x {frame.width} cols in {summary['seconds']} s")
+    print(f"  features / targets              {summary['nfeature']} / {summary['ntarget']}")
+    print(
+        f"  treeless rows (stems_total = 0) {treeless.height}/{frame.height} "
+        f"({100 * treeless.height / frame.height:.1f} %)"
+    )
+    print(
+        f"  treeless CONTROL rows           {ctrl_treeless.height}/{control.height} "
+        f"({summary['treeless_control_cells_treed_in_ground_truth']} of those cells are "
+        "tree-bearing in the stored ground truth)"
+    )
+    if ctrl_treeless.height:
+        print(
+            "  ⚠ a control point is byte-identical forcing, so an EMPTY control at a cell the "
+            "ground truth holds a forest at is a corpus defect, not a climate response. First "
+            f"few: {ctrl_treeless['name'].to_list()[:5]}"
+        )
+    alive = frame.filter(pl.col("stems_total") > 0)
+    for col in ("stems_total", "agb", "vegc", "height_p50", "soilc"):
+        qs = "/".join(f"{alive[col].quantile(q):,.3g}" for q in (0.05, 0.5, 0.95))
+        print(f"  {col:14s} p5/p50/p95 over the {alive.height} tree-bearing rows  {qs}")
+    print(f"  table         {dest}")
+    print(f"  corpus_sha256 {summary['corpus_sha256']}")
+
+
+def stage_decode(version: str, nproc: int, limit: int | None) -> int:
+    out = meta_dir(version)
+    runs = pl.read_csv(out / "runs.csv")
+    design = pl.read_csv(out / "design.csv")
+    cells = pl.read_csv(out / "cells.csv")
+    if limit:
+        runs = runs.head(limit)
+
+    jobs = [
+        (str(n), int(c), str(p), str(r), str(f))
+        for n, c, p, r, f in zip(
+            runs["name"].to_list(),
+            runs["cell"].to_list(),
+            runs["point"].to_list(),
+            runs["run_dir"].to_list(),
+            runs["forcing"].to_list(),
+            strict=True,
+        )
+    ]
+    print(f"decoding {len(jobs)} runs of pilot corpus {version} on {nproc} processes", flush=True)
+
+    t0 = time.time()
+    done, failed = _decode_all(jobs, nproc)
+    if failed:
+        print(f"⚠ {len(failed)} runs FAILED to decode:", file=sys.stderr)
+        for f in failed[:5]:
+            print(f"  {f['name']}:\n{f['error']}", file=sys.stderr)
+    if not done:
+        print("no run decoded; nothing to write", file=sys.stderr)
+        return 1
+
+    frame = _corpus_frame(done, design, cells)
+    bad_year = frame.filter(pl.col("restart_year") != STATE_YEAR).height
+    if bad_year:
+        raise AssertionError(
+            f"{bad_year} restarts are not labelled year {STATE_YEAR}; the window a row's climate "
+            "summary covers would not be the window its state came from"
+        )
+
+    # A smoke run writes its own filenames. `is_smoke` in the JSON is not enough on its own: the
+    # table is the artefact a pre-registration cites by hash, and a 30-row file sitting at the name
+    # the corpus lives under is one `--limit` away from being cited as the corpus.
+    stem = "corpus_smoke" if limit else "corpus"
+    dest = out / f"{stem}.parquet"
+    frame.write_parquet(dest)
+    treeless, control, ctrl_treeless = _decode_parts(frame)
+    truth_treed = ctrl_treeless.filter(pl.col("truth_stems_total") > 0).height
+
+    summary: dict[str, Any] = {
+        "created_utc": datetime.now(UTC).isoformat(timespec="seconds"),
+        "built_by": "scripts/corpus_pilot.py --stage decode",
+        "corpus_version": version,
+        "plan_sha256": json.loads((out / "provenance.json").read_text())["plan_sha256"],
+        "git_commit": _git_commit(),
+        "is_smoke": limit is not None,
+        "limit": limit,
+        "rows": frame.height,
+        "cols": frame.width,
+        "runs_promised": runs.height,
+        "runs_failed": len(failed),
+        "failures": failed,
+        "seconds": round(time.time() - t0, 1),
+        "nfeature": len(climate_mod.CLIMATE_FEATURES),
+        "ntarget": len(state_mod.STATE_COLUMNS) - 1,
+        "state_year": STATE_YEAR,
+        "state_year_note": (
+            "the label LPJmL-FIT writes on a spin-up restart, not a date: the state is the end of "
+            f"{NSPINUP} years CYCLING the {perturb_window()[0]}-{perturb_window()[1]} forcing"
+        ),
+        "treeless_rows": treeless.height,
+        "treeless_control_rows": ctrl_treeless.height,
+        "control_rows": control.height,
+        "treeless_control_cells_treed_in_ground_truth": truth_treed,
+        "corpus_sha256": sha256_of(dest),
+        "co2": "untouched, not a feature (MEMORY.md:co2-closed)",
+    }
+    report = out / ("decode_smoke.json" if limit else "decode.json")
+    report.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", "utf-8")
+    _report_decode(frame, summary, dest)
+    if failed:
+        print("verdict: INCOMPLETE -- fix the failures before any score cites this table")
+        return 1
+    print("verdict: DECODED -- this table is what rung 1 is scored on")
+    return 0
+
+
+def perturb_window() -> tuple[int, int]:
+    return tuple(_load("corpus_perturb_clm").BASE_WINDOW)  # type: ignore[return-value]
+
+
+def sha256_of(p: Path) -> str:
+    h = hashlib.sha256()
+    with p.open("rb") as fh:
+        for block in iter(lambda: fh.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--stage", choices=("plan", "build", "verify", "harvest"), required=True)
+    ap.add_argument(
+        "--stage", choices=("plan", "build", "verify", "harvest", "decode"), required=True
+    )
     ap.add_argument("--version", default="v1", help="corpus version; a new design is a new version")
     ap.add_argument("--ncell", type=int, default=NCELL)
     ap.add_argument("--npoint", type=int, default=NPOINT)
@@ -572,7 +851,13 @@ def main() -> int:
         "--workers",
         type=int,
         default=int(os.environ.get("SLURM_CPUS_PER_TASK", "1")),
-        help="build stage: worker processes; defaults to the job's own cpus-per-task",
+        help="build and decode stages: worker processes; defaults to the job's own cpus-per-task",
+    )
+    ap.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="decode stage: first N runs only -- a smoke test, never a corpus",
     )
     args = ap.parse_args()
 
@@ -582,6 +867,8 @@ def main() -> int:
         return stage_build(args.version, args.workers, args.shard, args.nshard, args.npoint)
     if args.stage == "verify":
         return stage_verify(args.version)
+    if args.stage == "decode":
+        return stage_decode(args.version, args.workers, args.limit)
     return stage_harvest(args.version)
 
 
