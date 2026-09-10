@@ -80,6 +80,77 @@ LOG_TARGETS: frozenset[str] = frozenset(
 
 
 @dataclass(frozen=True)
+class Recipe:
+    """A per-head departure from the default log-target, squared-error fit.
+
+    WHY A HEAD WOULD WANT ONE, measured rather than assumed
+    (`docs/decisions/20260910-T-rooting-depth-route-2-is-small-and-the-ceiling-is-0.56.md`):
+
+    * `bounds` -- a trait the model itself confines to an interval. LPJmL-FIT draws rooting depth
+      inside [51, high] mm, and 3.3 % of cells sit within a millimetre of the floor on
+      `D95max_p10`, which is exactly where the score is worst: the lowest decile of `D95max_p50`
+      passed 16 % of cells. The target is fitted as log((y-low)/(high-y)) and inverted through a
+      logistic, which STRETCHES the region next to the floor so that the loss pays attention
+      there. That reshaping is the point. Keeping the prediction inside the interval is a side
+      effect and a small one -- the unbounded fit already stays inside for all but 0.19 % of cells
+      on `D95max_p10`, because a boosted tree's output is built out of averages of the training
+      targets.
+    * `objective="regression_l1"` -- the band test asks whether a prediction is within a tolerance
+      of the truth, which is a criterion on the conditional MEDIAN. Squared error returns the
+      conditional MEAN, and near a bound the conditional distribution is a pile-up with a long
+      tail, so the mean sits well above the median. That is the whole of the shrinkage signature:
+      mean log residual +0.576 in the lowest truth decile of `D95max_p50` and -0.294 in the
+      highest.
+
+    Not a tuning knob. Each field is here because a specific structural fact about the target
+    demanded it, and the measured effect is small -- about +0.003 on a conjunctive score of 0.036.
+    """
+
+    objective: str = "regression"
+    bounds: tuple[float, float] | None = None
+
+    def forward(self, y: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        if self.bounds is None:
+            return np.log(y)
+        low, high = self.bounds
+        eps = (high - low) * 1e-4
+        u = np.clip(y, low + eps, high - eps)
+        return np.log((u - low) / (high - u))
+
+    def inverse(self, z: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        if self.bounds is None:
+            return np.exp(z)
+        low, high = self.bounds
+        out: npt.NDArray[np.float64] = low + (high - low) / (
+            1.0 + np.exp(-np.clip(z, -40.0, 40.0))
+        )
+        return out
+
+
+# The rooting-depth interval, from the parameter file the corpus runs actually used --
+# `par/pft_lpjmlfit.js`, reached via `param_lpjmlfit.js` (NOT `par/pft.js`, which belongs to the
+# stock LPJmL configuration and disagrees).
+#
+# ⚠ IT IS AN ENVELOPE, NOT ONE PFT'S INTERVAL. The floor is 51 mm for all seven PFT entries, but
+# the ceiling is PFT-dependent: 1800, 1000, 1000, 500, 500, 500, 300. A scored quantity is a
+# CELL-level quantile over whatever PFTs live there, so the widest interval is the only one that is
+# certainly not violated -- and it is looser than the truth in most cells. Tightening it would need
+# the cell's PFT composition, which this model does not predict. Stated so nobody reads 1800 as a
+# physical rooting depth for every cell.
+D95MAX_BOUNDS: tuple[float, float] = (51.0, 1800.0)
+
+# The measured recipe for the three rooting-depth heads, ready to pass to `Emulator`. NOT applied
+# by default: `Emulator`'s `recipes` argument is empty, so the shipped model stays byte-identical
+# and no reported score silently changes meaning. Switch it on at the next full refit, together
+# with the soil-texture features requested from line D -- the two were measured together and the
+# combination is what earned +0.0034 rather than +0.0017.
+ROOTING_DEPTH_RECIPES: dict[str, Recipe] = {
+    name: Recipe(objective="regression_l1", bounds=D95MAX_BOUNDS)
+    for name in ("D95max_p10", "D95max_p50", "D95max_p90")
+}
+
+
+@dataclass(frozen=True)
 class EmulatorConfig:
     """Hyperparameters, fixed in advance. Not tuned on the held-out folds.
 
@@ -109,18 +180,33 @@ class Emulator:
     config: EmulatorConfig = field(default_factory=EmulatorConfig)
     heads: dict[str, object] = field(default_factory=dict)
     logged: set[str] = field(default_factory=set)
+    # Per-head departures from the default fit. EMPTY IS THE SHIPPED STATE: with no recipes this
+    # class is exactly the log-target squared-error model whose score is on the record, and a
+    # head that has no recipe here is untouched by the ones that do.
+    recipes: dict[str, Recipe] = field(default_factory=dict)
 
     def fit(self, x: npt.NDArray[np.float64], y: npt.NDArray[np.float64]) -> Emulator:
         cfg = self.config
         for j, name in enumerate(self.quantities):
             target = y[:, j]
             ok = np.isfinite(target) & np.isfinite(x).all(axis=1)
+            recipe = self.recipes.get(name)
             use_log = name in LOG_TARGETS and bool(np.all(target[ok] > 0))
-            if use_log:
+            if recipe is not None:
+                # A recipe replaces the transform wholesale, so `logged` must not also claim this
+                # head -- `predict` would otherwise exponentiate a value the recipe already mapped
+                # back, and the error would be a plausible-looking number rather than a crash.
+                if not use_log:
+                    raise ValueError(
+                        f"{name!r} has a recipe but is not a positive log target; a recipe "
+                        "assumes a strictly positive quantity fitted on a transformed scale"
+                    )
+                target = recipe.forward(target)
+            elif use_log:
                 self.logged.add(name)
                 target = np.log(target)
             model = LGBMRegressor(
-                objective="regression",
+                objective="regression" if recipe is None else recipe.objective,
                 n_estimators=cfg.n_estimators,
                 learning_rate=cfg.learning_rate,
                 num_leaves=cfg.num_leaves,
@@ -142,7 +228,11 @@ class Emulator:
         for j, name in enumerate(self.quantities):
             model = self.heads[name]
             pred = np.asarray(model.predict(x))  # type: ignore[attr-defined]
-            out[:, j] = np.exp(pred) if name in self.logged else pred
+            recipe = self.recipes.get(name)
+            if recipe is not None:
+                out[:, j] = recipe.inverse(pred)
+            else:
+                out[:, j] = np.exp(pred) if name in self.logged else pred
         return out
 
     def importances(self) -> dict[str, npt.NDArray[np.float64]]:
@@ -161,6 +251,7 @@ def fit_out_of_fold(
     apply_to: Sequence[npt.NDArray[np.float64]],
     *,
     config: EmulatorConfig | None = None,
+    recipes: dict[str, Recipe] | None = None,
     verbose: bool = True,
 ) -> tuple[list[npt.NDArray[np.float64]], dict[int, Emulator]]:
     """Fit once per fold and predict every held-out row, for one or more feature matrices.
@@ -189,7 +280,9 @@ def fit_out_of_fold(
                 f"  fold {f}: fit on {int(train.sum())} cells, predict {int(test.sum())}",
                 flush=True,
             )
-        model = Emulator(quantities, cfg).fit(x_train_source[train], y_train_source[train])
+        model = Emulator(quantities, cfg, recipes=dict(recipes or {})).fit(
+            x_train_source[train], y_train_source[train]
+        )
         models[int(f)] = model
         for i, features in enumerate(apply_to):
             preds[i][test] = model.predict(features[test])
