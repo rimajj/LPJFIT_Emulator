@@ -13,35 +13,33 @@ the corpus (D), pre-registrations and verdicts (X).
 
 ## NEXT — start here
 
-**The height tail is NOT the binding constraint — rooting depth and biomass are.** Read
-`docs/decisions/20260909-T-the-height-tail-is-not-the-binding-constraint.md` first. The previous
-handoff's single next action was re-measured: every number in it held, the priority it implied did
-not. Re-run it with `scripts/diag_level_binding.py` — read-only over the out-of-fold file the
-level-map job already wrote; seconds, no SLURM, no `exp_id`, no new skill number. Basis: 56,950
-cells, historical leg, state 1999, blocked folds; `band_frac_conjunctive` 0.0361 vs null 0.0187.
+**Where the level model's score lives** (record: `…-the-height-tail-is-not-the-binding-
+constraint.md`; re-derive with `scripts/diag_level_binding.py` — read-only, seconds, no SLURM).
+Basis 56,950 cells, blocked folds, `band_frac_conjunctive` 0.0361 vs null 0.0187. Rooting depth's
+three quantiles are worth **+0.0419**, biomass +0.0097, soil carbon +0.0090 — perfecting
+`height_p90` outright only **+0.0006**. But biomass IS the height tail amplified
+(`d log(agb)/d log(height_p90)` = +2.885), so the tail keeps a target: **`height_p90` under 3.5 %
+median error**. ⚠ Post-hoc repair of the height heads is CLOSED — unbiased, no shrinkage, and
+restoring its spread makes the band test worse; it needs new features or a new learner.
 
-**Perfecting `height_p90` outright moves that score +0.0006** — 37 cells of 56,950. Rooting
-depth's three quantiles are worth **+0.0419**, as much as all four stocks together and 70× the
-height tail. Biomass +0.0097, soil carbon +0.0090.
+**ROOTING DEPTH, ROUTE 1 (impose it) IS DONE AND IT DID NOT HELP — route 2 is all that is left.**
+Read `docs/decisions/20260909-T-imposing-rooting-depth-works-and-does-not-help.md`. The stated risk
+was the wrong risk: the model NEVER recomputes `D95max` (every write is at tree birth,
+`new_tree.c:124,179,209,233`; `allocation_tree.c` writes `D95`, a different field) and it drives no
+physics (`getrootdepth` takes `k_root`). So imposition is safe, and it works: the file's error
+against its own input fell 0.072 → **0.007** (p50) and 0.119 → **0.003** (p10). **The
+SYNTHESISER's cap is solved and is nobody's next action any more.**
 
-**Four cheap fixes to the height tail: all measured, all rejected.** Unbiased (median
-predicted/true 0.9991), no shrinkage (slope 0.993); restoring its spread makes the band test WORSE
-(68.5 → 67.8 %); fusing it with the biomass head gains 0.5 % (the two log errors correlate +0.776).
-**Post-hoc repair of the height heads is closed** — it needs new features or a new learner.
+But fidelity got WORSE — 20-year conjunctive 5 % → 0 %, median 18/22 → 17/22 — because the level
+model's own error (|pred−true| 0.141 p50, 0.179 p10) is bigger than the donor accident it replaced
+(0.119 / 0.177). Shipped **switched off**: `IMPOSED_TRAITS = ()`, verified inert (the default
+reproduces `synth-v5` byte-identically). Turn it on when `D95max` beats |pred−true| ≈ 0.12 at the
+median, and **on regardless before quoting any warmed climate** — a donor's rooting depth is a
+present-day value and cannot shift, and the warming response is the binding clause.
 
-**Biomass IS the height tail amplified**, `d log(agb)/d log(height_p90)` = **+2.885** (2.885 ×
-6.3 % = 18.1 % vs 18.7 % observed). So the tail keeps its place with a target instead of an
-adjective: **`height_p90` under 3.5 % median error** — what puts biomass inside a 10 % band.
-
-**THE SINGLE NEXT ACTION: rooting depth (`D95max`).** Biggest oracle gain of any quantity, and the
-one quantity the SYNTHESISER also caps (0.146 even under a perfect prediction) — both scored
-objects point at it. Two routes, not exclusive:
-
-* **Impose it on the roster.** A stored per-tree field (`binfmt/restart.py:358`, offset 337) but
-  derived from height inside the model — check whether the model recomputes it at the first
-  allocation before trusting an imposed value. That check is the whole risk.
-* **Predict it better.** Only 1.11× outside tolerance, so a modest gain flips many cells — but 53 %
-  of cells exceed the 10 % floor (median two-seed spread 22 %), so do not chase it past that.
+**THE SINGLE NEXT ACTION: predict `D95max` better** — now the whole rooting-depth gap, with the
+synthesiser out of its way. Only 1.11× outside tolerance so a modest gain flips many cells, but
+53 % of cells exceed the 10 % floor (median two-seed spread 22 %): do not chase it past that.
 
 **Then:**
 

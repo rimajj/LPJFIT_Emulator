@@ -15,12 +15,22 @@ So: **template-conditioned synthesis with rank-matched stem transplant.** Every 
     COPIED    the whole fast soil block, the climate buffer, the crop and nitrogen fields, the
               sapling pool -- taken from a real record for the same cell
     FREE      per-stem index numbers, renumbered
+    IMPOSED   `IMPOSED_TRAITS` -- today just `D95max` -- overwritten in the stem's bytes
 
-and crucially **no individual stem is ever edited**. Each transplanted stem is a byte-exact copy of
-a stem the real model itself produced, so its height, crown area, sapwood and heartwood carbon,
-bad-years counter and trait values are consistent with each other by construction. What the
-emulator controls is HOW MANY stems there are and WHICH ONES -- the count and the distribution --
-which is exactly what it predicts.
+and a transplanted stem is otherwise a byte-exact copy of a stem the real model itself produced, so
+its height, crown area, sapwood and heartwood carbon, bad-years counter and trait values are
+consistent with each other by construction. What the emulator controls is HOW MANY stems there are
+and WHICH ONES -- the count and the distribution -- which is exactly what it predicts.
+
+⚠ "NO INDIVIDUAL STEM IS EVER EDITED" WAS THIS MODULE'S RULE AND IS NOW A RULE WITH ONE NAMED
+EXCEPTION. It held for good reason: every field of a real stem is consistent with every other, and
+an edit can break a relation the C will then enforce or trip over. It was relaxed only after the
+measurement that showed selection ALONE cannot deliver rooting depth -- with a PERFECT prediction
+the donor match still leaves `D95max_p50` at 0.127 -- and only for a field that passes all three
+tests in `IMPOSED_TRAITS`: the model never recomputes it, it drives no physics, and it is still
+load-bearing for the state. Adding a second field to that tuple means re-reading the C for that
+field, not reasoning by analogy from this one. Leaf carbon looks similar and FAILS, because
+`allometry_tree.c:39-41` derives height from it.
 
 The price, stated plainly: the achievable distribution is limited to what the donor pool contains.
 A cell predicted to hold trees taller than anything in the pool cannot get them. That is why the
@@ -139,6 +149,55 @@ QUANTILE_LEVELS: tuple[float, ...] = (0.10, 0.50, 0.90)
 # nearest compromise reproduces every marginal worse than a two-trait match reproduces two. Getting
 # further needs more donors or a different objective, not more terms in this one.
 MATCH_TRAITS: tuple[str, ...] = ("height", "wooddens")
+
+# Traits IMPOSED on the placed stem by overwriting its bytes, rather than obtained by choosing a
+# donor that happens to carry them. Exactly one qualifies today, and the bar is deliberately high.
+#
+# ⚠ THIS BREAKS "no individual stem is ever edited", SO IT NEEDS A LICENCE, AND THE LICENCE IS READ
+# OFF THE MODEL'S SOURCE, NOT ASSUMED. A field may be imposed only if all three hold:
+#   1. THE MODEL NEVER RECOMPUTES IT. Every write to `tree->D95max` in the C is at tree BIRTH
+#      (`tree/new_tree.c:124,179,209,233`), plus the sapling copy (`getsapling.c:94`) and the cell
+#      trait template (`celldata.c:291`). `allocation_tree.c` writes `tree->D95` -- a DIFFERENT
+#      field -- and never touches `D95max`. So an imposed value survives; it is not quietly undone.
+#   2. IT DRIVES NO PHYSICS. Rooting depth is computed by `getrootdepth(height, k_root, model)`,
+#      which takes `k_root`, not `D95max`. Every other appearance of `D95max` in the source is
+#      file IO, an output histogram, or birth. Imposing it therefore cannot bend growth, mortality
+#      or the water balance, which is what `-DSAFE` would otherwise be entitled to complain about.
+#   3. IT IS STILL LOAD-BEARING FOR THE STATE. It is not inert decoration: offspring inherit it
+#      from a parent in the treelist WITH MUTATION (`new_tree.c:179-182`), so the roster's D95max
+#      distribution seeds the next generation's. And its three quantiles are 3 of the 22 scored.
+#
+# Contrast leaf carbon, which FAILS test 2 and is refused for that reason: `allometry_tree.c:39-41`
+# derives height from it, so rescaling leaf carbon by 1.41 divides every tree's height by 1.41.
+# That contrast is the whole point of the rule -- see `docs/decisions/20260909-T-the-roster-was-
+# truncated-at-both-tails.md`.
+#
+# WHY IMPOSE RATHER THAN MATCH HARDER. Measured: with a PERFECT prediction the donor-choice
+# mechanism still leaves D95max_p50 at 0.127 and its low tail at 0.146, because one donor is one
+# real stem and cannot sit at the right quantile of three distributions at once. Adding D95max to
+# `MATCH_TRAITS` is the thing already shown not to work (11 of 22 quantities worse). Imposition is
+# the only mechanism that can close a gap the selection itself cannot reach.
+#
+# ⚠ DEFAULT EMPTY, AND THAT IS A MEASURED VERDICT ON THE PREDICTION, NOT ON THE MECHANISM. Imposing
+# `D95max` does exactly what it promises: the synthesiser's own rooting-depth error against its
+# input collapses from 0.072 to 0.007 at the median and from 0.119 to 0.003 in the low tail, so the
+# cap that selection could not pass is gone. Fidelity to the TRUTH still got worse -- 20-year
+# conjunctive 5 % -> 0 %, median 18/22 -> 17/22, `D95max_p50` 0.119 -> 0.133 -- because the level
+# model's own rooting-depth error is LARGER than the donor accident it replaces: |pred-true| is
+# 0.141 at the median and 0.179 in the low tail, against the 0.119/0.177 the inherited donor values
+# happened to achieve. Reproducing a wrong prediction faithfully is worse than inheriting a lucky
+# one, today.
+#
+# TURN THIS ON when the level model's `D95max` prediction beats roughly |pred-true| = 0.12 at the
+# median, and turn it on REGARDLESS before any warmed-climate product is quoted: a donor's rooting
+# depth is a present-day value from a neighbouring cell, so the accident that currently helps
+# cannot shift with climate, and the acceptance criterion's binding clause is the warming response.
+# Re-measure with `synthesise_cell(..., impose_traits=("D95max",))` and the year-0 table; there is
+# no need to touch this line to test it.
+IMPOSED_TRAITS: tuple[str, ...] = ()
+
+# Byte offset and format of each imposable field within a tree entry, from `binfmt.restart`.
+_TRAIT_BYTES: dict[str, tuple[int, int]] = {"D95max": (337, 8)}
 
 
 @dataclass
@@ -306,6 +365,12 @@ class SynthReport:
     tail_shortfall: dict[str, float] = field(default_factory=dict)
     tallest_placed: float = 0.0
     tallest_in_template: float = 0.0
+    # Fields written into the stem rather than inherited from its donor, and where each one's
+    # shape came from. `imposed_clamped` counts stems whose imposed value hit the range real stems
+    # in the pool actually exhibit -- a large count means the prediction is asking for a tree the
+    # corpus does not contain, which is a finding, not something to absorb silently.
+    imposed: dict[str, str] = field(default_factory=dict)
+    imposed_clamped: int = 0
 
 
 def template_ladder(template: dict[str, Any]) -> Any:
@@ -358,6 +423,34 @@ def _rank_index(size: int, u: npt.NDArray[np.float64]) -> npt.NDArray[np.int64]:
 def _types_for(ladder: npt.NDArray[np.uint8], u: npt.NDArray[np.float64]) -> npt.NDArray[np.int64]:
     """The template's type at each predicted size rank."""
     return np.asarray(ladder[_rank_index(ladder.size, u)], dtype=np.int64)
+
+
+def _impose(
+    chosen: npt.NDArray[np.uint8],
+    placed: Any,
+    imposed: dict[str, npt.NDArray[np.float64]],
+    mine: npt.NDArray[np.int64],
+    pool_range: dict[str, tuple[float, float]],
+) -> int:
+    """Write the imposed fields into the transplanted stems' bytes. Returns the clamp count.
+
+    `placed` is updated in step, because the report must describe the file that was WRITTEN and
+    not the donors that were picked -- reading a donor's value back after overwriting it is
+    exactly the mistake that once made a whole decision record's diagnosis wrong.
+    """
+    clamped = 0
+    for name, values in imposed.items():
+        off, width = _TRAIT_BYTES[name]
+        want = values[mine]
+        lo, hi = pool_range[name]
+        clipped = np.clip(want, lo, hi)
+        clamped += int(np.count_nonzero(clipped != want))
+        for k in range(clipped.size):
+            chosen[k][off : off + width] = np.frombuffer(
+                struct.pack("<d", float(clipped[k])), dtype=np.uint8
+            )
+        placed[name] = clipped
+    return clamped
 
 
 def _tally(types: npt.NDArray[np.int64] | None) -> dict[int, int]:
@@ -458,6 +551,7 @@ def synthesise_cell(  # noqa: PLR0915 -- one pass over the patches; splitting it
     template_cell: int,
     seed: int = 0,
     match_traits: tuple[str, ...] = MATCH_TRAITS,
+    impose_traits: tuple[str, ...] = IMPOSED_TRAITS,
 ) -> tuple[dict[str, Any], SynthReport]:
     """Replace a template record's roster and soil totals with a predicted state.
 
@@ -516,6 +610,16 @@ def synthesise_cell(  # noqa: PLR0915 -- one pass over the patches; splitting it
     want_types_cell = _types_for(ladder, u_cell) if (ladder.size and n_cell) else None
     report.type_requested = _tally(want_types_cell)
 
+    # IMPOSED fields: same ladder, same recalibration, but written into the stem instead of used
+    # to pick one. The clamp range is what REAL stems of any type in the pool actually exhibit, so
+    # a stretched prediction can never write a rooting depth no tree in the corpus has.
+    imposed_cell, imposed_shapes = _targets(rungs, u_cell, prediction, impose_traits)
+    report.imposed = imposed_shapes
+    pool_range = {
+        name: (float(np.min(pool.trait(name))), float(np.max(pool.trait(name))))
+        for name in imposed_cell
+    }
+
     new_patches: list[dict[str, Any]] = []
     placed_fields: list[Any] = []
     for p_index, patch in enumerate(stand["patches"]):
@@ -554,6 +658,14 @@ def synthesise_cell(  # noqa: PLR0915 -- one pass over the patches; splitting it
             )
             report.type_fallbacks += fell_back
             chosen = pool.raw[picks]
+            # IMPOSED fields, written into the bytes rather than obtained by choosing a donor that
+            # carries them. Licensed only for fields the model never recomputes and that drive no
+            # physics -- see IMPOSED_TRAITS for the three tests and for why leaf carbon fails them.
+            # The value is the TEMPLATE stem's own value at this height rank, recalibrated onto the
+            # predicted knots, so the template's height-to-rooting-depth association survives while
+            # the marginal becomes the emulator's.
+            placed = pool.fields[picks].copy()
+            report.imposed_clamped += _impose(chosen, placed, imposed_cell, mine, pool_range)
             for k in range(n):
                 row = chosen[k].copy()
                 # FREE field: renumber `index` so two copies of one donor are distinct.
@@ -574,7 +686,7 @@ def synthesise_cell(  # noqa: PLR0915 -- one pass over the patches; splitting it
                 if admissible and pft_id not in admissible:
                     report.inadmissible_placed += 1
                 parts.append(row.tobytes())
-            placed_fields.append(pool.fields[picks])
+            placed_fields.append(placed)
             report.stems_placed += n
 
         soil["litter"] = lit
