@@ -164,7 +164,34 @@ for v in $FORWARD; do [[ -n "${!v-}" ]] && FWD_ECHO="$FWD_ECHO $v=${!v}"; done
 DEPFLAG=()
 [[ -n "${DEPENDENCY-}" ]] && DEPFLAG=(--dependency="$DEPENDENCY")
 
-PY_BIN="$(python3 "$REPO/tools/_paths.py" cluster.python 2>/dev/null || echo python3)"
+# ─── the two pythons, and why they are not the same one ────────────────────────────────────────
+# BOOTSTRAP_PY is whatever `python3` means on the login node -- 3.9 here. It is only allowed to run
+# tools/_paths.py, which is written to need nothing but the standard library of that version.
+# PY_BIN is the configured cluster interpreter and is what the JOB and every repo tool runs under.
+#
+# ⚠ THEY WERE CONFLATED, AND IT COST A CAMPAIGN LEDGER ROW. The ledger write below used to call
+# bare `python3`, and `tools/campaigns.py` reaches `tools/_common.py`, which imports `tomllib` --
+# absent before 3.11. So campaigns.py died with a traceback AFTER the job was already submitted:
+# the submission printed success, the job ran, and nothing recorded it. It only bites in a shell
+# whose `python3` is the system one, which is why earlier launches from an activated environment
+# worked and this was invisible until 2026-09-10. That makes it worse, not better -- the wrapper's
+# correctness depended on the caller's shell.
+#
+# And the fallback that used to be here (`|| echo python3`) turned a missing config key into a job
+# silently running under 3.9. Resolution now fails loudly instead.
+BOOTSTRAP_PY="python3"
+PY_BIN="$($BOOTSTRAP_PY "$REPO/tools/_paths.py" cluster.python)" || {
+  echo "sbatch_py: cannot resolve cluster.python from config/paths.yaml." >&2
+  echo "  Refusing to guess: a job that runs under the wrong interpreter fails in the middle," >&2
+  echo "  hours after this session ends." >&2
+  exit 2
+}
+
+# The job's argument list. `printf '%q ' "$@"` with NO arguments prints the format once against an
+# empty argument, so the job line gained a bare '' and argparse rejected it -- every job submitted
+# with no script arguments died in five seconds on "unrecognized arguments:". Guard on $#.
+SCRIPT_ARGS=""
+if (( $# > 0 )); then SCRIPT_ARGS="$(printf '%q ' "$@")"; fi
 
 JOBID=$(sbatch --parsable \
   --job-name="$TAG" \
@@ -186,7 +213,7 @@ export PYTHONUNBUFFERED=1     # a silent log is indistinguishable from a hung jo
 cd "$REPO"
 echo "=== JOB START tag=$TAG exp=${EXP_ID:-none} host=\$(hostname) ==="
 echo "=== env forwarded:${FWD_ECHO:- (none)} ==="
-"$PY_BIN" "$SCRIPT" $(printf '%q ' "$@")
+"$PY_BIN" "$SCRIPT" $SCRIPT_ARGS
 rc=\$?
 echo "=== JOB DONE tag=$TAG exit=\$rc ==="
 exit \$rc
@@ -197,12 +224,30 @@ echo "submitted $TAG as job $JOBID  (log: logs/$TAG.$JOBID.out)"
 echo "env forwarded:${FWD_ECHO:- (none)}"
 
 # ─── the ledger row. THIS is why raw sbatch is denied. ─────────────────────────────────────────
-python3 "$REPO/tools/campaigns.py" launch \
-  --line "$LINE" --tag "$TAG" --job "$JOBID" \
-  ${EXP_ID:+--exp "$EXP_ID"} ${PREREG_SHA:+--prereg-sha256 "$PREREG_SHA"} \
-  --partition "$PARTITION" --cpus "$NCPUS" \
-  --log-glob "logs/$TAG.$JOBID.out" \
-  --cmd "scripts/sbatch_py.sh ${EXP_ID:+--exp $EXP_ID} $TAG $SCRIPT $*" \
-  ${HARVEST_CMD:+--harvest-cmd "$HARVEST_CMD"} \
-  ${HARVEST_BY:+--harvest-by "$HARVEST_BY"} \
-  ${EXPECT:+--expect $EXPECT}
+# Under PY_BIN, not the bootstrap python -- see the note above. And loud on failure: the job is
+# already queued by the time we get here, so a silent ledger failure leaves a running job nobody
+# will come back for, which is the one outcome this wrapper exists to make impossible.
+LEDGER_ARGS=(
+  launch
+  --line "$LINE" --tag "$TAG" --job "$JOBID"
+  --partition "$PARTITION" --cpus "$NCPUS"
+  --log-glob "logs/$TAG.$JOBID.out"
+  --cmd "scripts/sbatch_py.sh ${EXP_ID:+--exp $EXP_ID} $TAG $SCRIPT $*"
+)
+# Written as `if` blocks so the optional knobs are one readable list; the point of the rewrite is
+# the QUOTING below, not the control flow.
+if [[ -n "$EXP_ID" ]]; then LEDGER_ARGS+=(--exp "$EXP_ID"); fi
+if [[ -n "${PREREG_SHA-}" ]]; then LEDGER_ARGS+=(--prereg-sha256 "$PREREG_SHA"); fi
+if [[ -n "${HARVEST_CMD-}" ]]; then LEDGER_ARGS+=(--harvest-cmd "$HARVEST_CMD"); fi
+if [[ -n "${HARVEST_BY-}" ]]; then LEDGER_ARGS+=(--harvest-by "$HARVEST_BY"); fi
+# Quoted as ONE argument: an EXPECT with spaces used to word-split into several positionals.
+if [[ -n "${EXPECT-}" ]]; then LEDGER_ARGS+=(--expect "$EXPECT"); fi
+
+if ! "$PY_BIN" "$REPO/tools/campaigns.py" "${LEDGER_ARGS[@]}"; then
+  echo "" >&2
+  echo "sbatch_py: ⚠ JOB $JOBID IS QUEUED BUT NOT IN THE LEDGER." >&2
+  echo "  The submission succeeded; only the record failed. Either write the row by hand" >&2
+  echo "  or cancel the job -- an unrecorded job is one nobody replays at session start:" >&2
+  echo "    scancel $JOBID" >&2
+  exit 1
+fi
