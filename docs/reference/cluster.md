@@ -66,6 +66,39 @@ a job needs must be warmed on the login node first. GitHub HTTPS is blocked ever
 
 ---
 
+## Five more of the same kind, found on line D
+
+Same failure mode as the four above — the job exits 0 and the log agrees with itself, so only a
+second, independent signal catches it. Recorded here rather than in a line's `STATE.md` because
+every line hits them.
+
+**5. Never judge a C model run by its exit code.** Require the model's own line `lpjml successfully
+terminated, <n> grid cells processed.` in a non-empty log. `sbatch_cmodel.sh` writes that grep into
+the ledger row as the harvest command, so the check is the artifact rather than a habit.
+
+**6. `srun` forwards its stdin to the task**, and inside `while read … done < manifest` that stdin
+IS the manifest. It swallowed 18 of 25 lines, the job exited 0, and the log said "7 of 7" because
+the counter came from the same starved loop. Redirect the member from `/dev/null`; count off the
+file, never off the loop.
+
+**7. polars does not survive `fork`: a forked worker that touches a DataFrame hangs forever** — no
+error, no traceback — so the job burns its wall-clock limit with an empty log, which reads as a slow
+filesystem. Workers return plain dicts and the parent builds the frame. `corpus.climate` splits
+`climate_columns` (numpy, fork-safe) from `climate_table` (parent only).
+
+**8. A complete campaign is not a usable corpus.** Judge the runs by the model's own completion
+line, then judge the CORPUS separately. Restart byte size is a free proxy — ≈360 KB with no
+vegetation, ≈1.9 MB with a forest — and cost tracks it (1 min treeless, 3–8 min forested). The
+pilot agreed two ways: 374/6,000 treeless by bytes against 380/6,000 by decoded stem count.
+
+**9. Do not export `ALLOW_LOGIN_HEAVY` before running the test suite.** The login-node guard allows
+unconditionally when it, `ALLOW_RAW_SBATCH` or `SLURM_JOB_ID` is set, and it inherits the session
+environment — so every must-deny case in `tests/test_slurm_guard.py` went red at once, which reads
+as "the guard is broken". The test now strips all three; the trap is the general one, so strip the
+environment you are asserting about.
+
+---
+
 ## Flaky nodes
 
 `standard` nodes intermittently misbehave: exit `0:53` with no log, hung MPI, or a ~20× slowdown. If a
