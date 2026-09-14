@@ -69,6 +69,63 @@ RESPONSE_QUANTITIES: tuple[str, ...] = (
     "sla_p50",
 )
 
+# --------------------------------------------------------------------------------------------
+# COMPOSITION -- which tree types the cell holds, as a share of its stems.
+#
+# ⚠ A SEPARATE TUPLE, DELIBERATELY NOT AN EXTENSION OF `RESPONSE_QUANTITIES`. That tuple IS the
+# estimand of a sealed pre-registration (`X-20260909-pilot-warming-response`, "the unweighted mean
+# of the seven"), and its recorded model score of 0.5453 is reproducible only while the tuple has
+# exactly those seven members. Appending to it would silently redefine what that sealed experiment
+# measures and make its own result unreproducible -- so composition is scored as its OWN arm,
+# against its own nulls, and the two numbers are quoted separately.
+#
+# WHY THIS IS WORTH SCORING AT ALL. `models/synth.py` COPIES tree type from the target cell's
+# template roster, so an emulated warmed forest is structurally forbidden from shifting its species
+# mix; that limit is disclosed in the synthesiser's own docstring and is waiting on these columns
+# entering a scored set. On the pilot ensemble the truth moves a great deal -- a type's stem share
+# shifts with an RMS of 0.15-0.22 and more than 5 percentage points in ~30 % of (cell, climate)
+# pairs -- so there is real variance here to explain or fail to explain.
+#
+# WHAT THE NUMBER IS: the share of the cell's STEMS carried by tree type i, counted per individual
+# and NOT weighted by biomass (`corpus/state.py` builds it with `np.bincount(ids) / ids.size`). A
+# type that is numerically rare but holds the canopy therefore scores small. That is a property of
+# the definition, not of the emulator, and it must be stated with any number derived from it.
+#
+# THE SUM IS 1, SO ONLY SIX OF THE SEVEN ARE FREE. Measured on the pilot, the seven sum to 1 on
+# every treed row to within 2e-16. A skill score that is the unweighted mean of seven terms whose
+# changes sum to zero is therefore mildly redundant -- it is still a legitimate statistic and every
+# null is scored under the identical redundancy, but no term should be read as independent evidence.
+COMPOSITION_QUANTITIES: tuple[str, ...] = tuple(f"pft_frac_{i}" for i in range(7))
+
+
+def blank_treeless_composition(state: pl.DataFrame) -> pl.DataFrame:
+    """`pft_frac_*` -> NaN on every row with no stems. Apply before any composition contrast.
+
+    ⚠ WITHOUT THIS THE COLLAPSE IS DOUBLE-COUNTED AND MASQUERADES AS A COMPOSITION SHIFT.
+    `corpus/state.py:_empty_summary` writes 0.0 into every `pft_frac_*` of a treeless cell, because
+    it zeroes all of `STATE_COLUMNS` and then re-blanks only the trait quantiles. For a LEVEL that
+    is defensible; for a CHANGE it is not. A cell that goes treeless then reads as "type 3's share
+    fell from 0.81 to 0.00", which is not a shift in the mix -- there is no mix -- and it is the
+    same event `stems_per_patch` already scores in full. Measured on pilot-v1 it inflates the total
+    squared change by 15-18 % on most types.
+
+    The rule this restores is the one the trait medians already use, for the identical reason: a
+    wood density of zero is not light wood, it is no wood, and a type share of zero is not a rare
+    type, it is no forest. A pair drops per quantity when the arm OR the control has no stems --
+    542 of 5,800 pilot pairs, 493 of them from the 17 cells already treeless under their control.
+
+    Not fixed at source because `src/vegemu/corpus/**` is line D's exclusively, and every cached
+    state table already on disk carries the zeros; masking here is idempotent and needs no
+    re-decode.
+    """
+    missing = [c for c in ("stems_total", *COMPOSITION_QUANTITIES) if c not in state.columns]
+    if missing:
+        raise ValueError(f"state table has no composition to blank: missing {missing}")
+    treeless = pl.col("stems_total") <= 0
+    return state.with_columns(
+        [pl.when(treeless).then(None).otherwise(pl.col(c)).alias(c) for c in COMPOSITION_QUANTITIES]
+    )
+
 
 def unit_sphere(
     lon: npt.NDArray[np.float64], lat: npt.NDArray[np.float64]
