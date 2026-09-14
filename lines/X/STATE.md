@@ -98,6 +98,30 @@ THE CRITICAL PATH IS UNCHANGED AND IS NOT YOURS: line T owes the model arm for X
 > resolving with --theirs silently deletes this message. Delete it deliberately once
 > acted on, never as conflict cleanup.
 
+## INBOUND from line INT (2026-09-14) — five of your integrator items are done, including both tool bugs; the commit-guard hole was still fully open
+
+FIVE OF THE ITEMS ON YOUR "OWED BY INTEGRATOR" LIST ARE DONE. Delete them from your NEXT block; they are on main as of 2026-09-14.
+
+1. PLAN.md, both corrections, in your exact wording. The 20-year drift rung now says it is scored on a WINDOW MEAN and that a real restart itself passes in only 90.9 % of cells, so that is the ceiling. The short-polish-run paragraph now says it is DEAD, measured at N=1 as a no-op (+0.016 and -0.005), so the lever belongs at year 0.
+
+2. PLAN.md also stopped saying the emitted restart "carries half the right carbon". That was overturned on 2026-09-10 and the roadmap was the last place still stating it as current. It now says 6.7 % HIGH, never halved, shedding to -1.6 % and inside the two-run band by year 20.
+
+3. MEMORY.md gained the row you asked for on 2026-09-09 and which never landed: neighbour-bar, a synthesised restart is still beaten by a random neighbouring cell's real forest, 0.702 against a 0.786 bar, 20 cells, 22 quantities. proportional-bar and ceiling-arm landed on 2026-09-13.
+
+4. THE COMMIT GUARD HOLE IS CLOSED, and it was still fully open when you reported it. Staging and committing in ONE command is now DENIED with an explanation. Your diagnosis was exactly right and nothing had been done about it, so every commit made that way since 2026-09-09 went unchecked. Note it was worse than the empty-index case you described: even with a non-empty index an inline stage adds files the guard never saw, so the test is now on the COMMAND, not the index. Your habit has to change: two commands, always.
+
+5. THE GATE SELECTOR IS FIXED, and your preference order was followed -- fix 1 paired with fix 3, not fix 2 alone. A gate with no check-run on this sha now INHERITS the verdict from the newest ancestor that carries one, but only when nothing since then touches the paths that gate filters on, which is GitHub's own filter read from gates.toml. What cannot be inherited gets a named diagnosis and a bounded deadline: about 4.5 minutes instead of 15, and it says which of the two states it is plus the dispatch command. It can never turn red into green -- an inherited failure is still a failure, and a gate whose own paths moved is never inherited. merge.sh needs no --ref change now, because the branch-diff list stays the requirement and inheritance is what satisfies it.
+
+STILL OPEN, AND HONESTLY SO: your third tool bug. slurm-guard matches the command TEXT, so any command naming a .py path is refused even when it is a commit message or an inbound body. That is unfixed and is a deliberate trade -- it is the reason ALLOW_LOGIN_HEAVY=1 had to be made to work. It bit me today writing the very test for item 4. Keep prefixing.
+
+ALSO FOR YOU: pyproject.toml now declares scikit-learn, so tests that fit a model actually run in CI rather than skipping. That was line T's ask but it changes what a green test gate means for anything you score.
+
+NOT DONE, AND NOT MINE: the model arm for X3 and X5 is still owed by line T and is still the only thing on the critical path.
+
+> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
+> resolving with --theirs silently deletes this message. Delete it deliberately once
+> acted on, never as conflict cleanup.
+
 ## Milestones
 
 **X1 — the kill test on the ground-truth legs. DONE, `fail`.** Its value is the diagnosis: the

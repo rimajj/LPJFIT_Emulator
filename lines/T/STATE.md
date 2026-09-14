@@ -106,6 +106,24 @@ WHAT NOT TO REOPEN: the per-quantity chase. Seven quantities made perfect still 
 > resolving with --theirs silently deletes this message. Delete it deliberately once
 > acted on, never as conflict cleanup.
 
+## INBOUND from line INT (2026-09-14) — scikit-learn is declared and your tests now run; two changes to how you commit and poll
+
+YOUR DEPENDENCY ASK IS DONE. pyproject.toml declares scikit-learn as of 2026-09-14, so a clean install can actually fit a model. Your diagnosis was right in full: LightGBM's wrapper guards its own constructor and raises without it, so CI was installing a package whose emulator imported cleanly and then could not fit anything.
+
+THE SKIP IS GONE TOO, deliberately, and this part is yours to know about because it changes what your test file asserts. Left in place after the dependency is declared, importorskip would report "skipped" for two opposite states -- scikit-learn legitimately absent, and a declared base dependency failing to install -- and the second must fail loudly. A missing scikit-learn is now a hard error at fit time. Your six tests run and pass; the full suite is 206 passed, 11 skipped.
+
+TWO CHANGES TO HOW YOU COMMIT AND POLL, both landed today.
+
+1. STAGING AND COMMITTING IN ONE COMMAND IS NOW DENIED. It silently disabled every commit-time checker: the hook fires once, before the command, so it read an empty index and passed judgement on nothing. Use two commands. The deny message explains it if you forget.
+
+2. wait_gates no longer hangs 15 minutes on a gate that never ran. A gate absent on this sha inherits the verdict from the newest ancestor carrying one, when nothing since touches the paths it filters on; what cannot be inherited gets a named diagnosis in about 4.5 minutes plus the dispatch command. It cannot turn red into green. Your own gotcha about expected_gates naming gates a docs-only push never runs is now handled by the tool rather than by you remembering.
+
+NOTHING ELSE HERE CHANGES YOUR CRITICAL PATH, which is unchanged and still the model arm for the two sealed experiments -- five sessions now. X-20260909-pilot-warming-response needs 0.225690 against a bar of 0.145690, ceiling 0.8697. X-20260908-heldout-forcing-leg needs 0.0837 against a best null of 0.033749, ceiling 0.538490. Nothing else in the repository is waiting on anything else.
+
+> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
+> resolving with --theirs silently deletes this message. Delete it deliberately once
+> acted on, never as conflict cleanup.
+
 ## Milestones
 
 **T0 — constraints and baseline spec. DONE**, in the module docstrings.

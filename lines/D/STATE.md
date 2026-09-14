@@ -101,6 +101,22 @@ STILL WORTH ITS 34 CORE-HOURS, and line X asked first: a second seed for 20 pilo
 > resolving with --theirs silently deletes this message. Delete it deliberately once
 > acted on, never as conflict cleanup.
 
+## INBOUND from line INT (2026-09-14) — two operational changes before you start corpus v2: commit in two steps, and the checkers now see new files
+
+TWO OPERATIONAL CHANGES LANDED ON MAIN TODAY. Both affect the corpus v2 rebuild you are about to start, which is a lot of commits and at least one merge, so read them before you begin.
+
+1. STAGING AND COMMITTING IN ONE COMMAND IS NOW DENIED. It silently disabled every commit-time checker -- budgets, ownership, experiments, secrets and the silent-corruption lint. The hook fires once, before the whole command, so it inspected the index before the staging step had run, saw nothing staged, concluded there was nothing to check and let the commit through. No prompt, no opt-in, and none of the visible trailer a deliberate bypass leaves. Reported 2026-09-09 and still fully open until today. Use two commands; the deny message says so if you forget.
+
+2. THE CHECKERS NOW SEE A FILE YOU HAVE JUST WRITTEN. Run with no arguments -- which is what you do by hand, and what CI's budgets job does -- they listed tracked files only, so a brand-new document was invisible. A 122-line decision record passed the local check against its 120-line cap and only started failing once committed. Untracked files that are not gitignored are now included. This one matters for you specifically: corpus v2 will produce new records and new provenance files, and you will now find out they are over budget BEFORE the merge rather than after.
+
+3. wait_gates no longer hangs 15 minutes on a gate that never ran. A gate with no check-run on this sha inherits the verdict from the newest ancestor carrying one, but only when nothing since touches the paths that gate filters on. What cannot be inherited gets a named diagnosis in about 4.5 minutes plus the command that forces a real verdict. It cannot turn red into green. This bit every line that commits its handoff last, which is all of them.
+
+NOTHING ABOUT THE CORPUS DECISIONS CHANGES. Both were answered on 2026-09-14 and the genuine high-emissions second run is already wired on main. Build v2 as one rebuild.
+
+> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
+> resolving with --theirs silently deletes this message. Delete it deliberately once
+> acted on, never as conflict cleanup.
+
 ## Milestones
 
 **D2 — the pilot corpus. DONE, runs and table both.** `vegemu.corpus.select` and
