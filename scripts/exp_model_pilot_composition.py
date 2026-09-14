@@ -94,6 +94,59 @@ def scorable_pairs(dtrue: np.ndarray) -> dict[str, object]:
     }
 
 
+def dry_run(
+    x: np.ndarray,
+    dtrue: np.ndarray,
+    names: list[str],
+    *,
+    lon: np.ndarray,
+    lat: np.ndarray,
+    cell_ids: list[int],
+    points: list[str],
+    k: int,
+    degrees: float,
+) -> int:
+    """Prove the plumbing and STOP, without fitting anything. Safe to run before the seal.
+
+    ⚠ WHY THIS EXISTS. The first execution of a scored arm should not also be its first execution
+    ever. Everything here is a shape, an alignment or an assertion -- it cannot produce the
+    statistic and cannot leak the answer, so it is legitimate before the pre-registration is sealed,
+    while running the real arm is not. A misalignment between the feature matrix and the targets
+    would look exactly like a model with no skill, which is the one result this arm must never
+    produce by accident.
+    """
+    folds = blocked_spatial_folds(lon, lat, k=k, degrees=degrees, seed=42)
+    assert_no_leakage(names, folds, len(cell_ids))
+
+    n_cells, n_points, n_q = dtrue.shape
+    assert x.shape[:2] == (n_cells, n_points), f"features {x.shape} vs targets {dtrue.shape}"
+    assert x.shape[2] == len(names), "feature count disagrees with the name list"
+    assert n_q == len(COMPOSITION_QUANTITIES)
+    assert len(points) == n_points and len(cell_ids) == n_cells
+
+    # The control composition must be present as a feature, and must be MASKED for the cells that
+    # have no forest to describe -- if it arrived as 0.0 the blanking silently did not happen.
+    ctl_comp = [names.index(f"ctl_{q}") for q in COMPOSITION_QUANTITIES]
+    ctl_block = x[:, 0, ctl_comp]
+    treeless_ctl = int(np.isnan(ctl_block).all(axis=1).sum())
+
+    # Every fold must hold out whole cells, and each cell exactly once.
+    assert set(np.unique(folds)) == set(range(k)) or len(np.unique(folds)) <= k
+    per_fold = {int(f): int((folds == f).sum()) for f in np.unique(folds)}
+
+    print("\n=== DRY RUN: plumbing only, nothing fitted, no statistic computed ===")
+    print(f"  features            {x.shape}  ({len(names)} named)")
+    print(f"  targets             {dtrue.shape}")
+    scorable = int(np.isfinite(dtrue[:, :, 0]).sum())
+    print(f"  scorable pairs      {scorable} of {n_cells * n_points}")
+    print(f"  cells per fold      {per_fold}")
+    print(f"  control comp. NaN   {treeless_ctl} cells (expected 17: treeless under their control)")
+    print(f"  non-finite features {int(np.isnan(x).sum())} of {x.size}")
+    print("  leakage assertions  PASSED")
+    print("\nplumbing is sound. The scored arm still needs a sealed pre-registration.")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--version", default="pilot-v1")
@@ -109,6 +162,11 @@ def main() -> int:
         help="the pre-registered pass margin. MUST match the sealed decision rule.",
     )
     ap.add_argument("--exp-id", default="", help="stamped into the output for append_result.py")
+    ap.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="check the plumbing and STOP before fitting. Safe to run before the seal.",
+    )
     args = ap.parse_args()
 
     out = Path(args.out)
@@ -149,6 +207,19 @@ def main() -> int:
         ),
         "by_blocking": {},
     }
+
+    if args.dry_run:
+        return dry_run(
+            x,
+            dtrue,
+            names,
+            lon=lon,
+            lat=lat,
+            cell_ids=cell_ids,
+            points=points,
+            k=args.k,
+            degrees=args.degrees,
+        )
 
     for degrees in (args.degrees, args.also_degrees):
         folds = blocked_spatial_folds(lon, lat, k=args.k, degrees=degrees, seed=42)

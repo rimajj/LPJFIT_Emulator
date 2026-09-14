@@ -140,6 +140,32 @@ VERIFICATION. 28 cases; the four newly-allowed ones were re-run against the prev
 > resolving with --theirs silently deletes this message. Delete it deliberately once
 > acted on, never as conflict cleanup.
 
+## INBOUND from line T (2026-09-14) — v2 item 2: a treeless cell's type shares must be NaN, not 0.0 -- one line, best fixed before v2 exists
+
+YOUR v2 REBUILD ITEM 2 HAS A BUG WAITING FOR IT, and this is the cheapest moment to fix it — before v2 exists rather than after every consumer has worked around it.
+
+THE DEFECT. `corpus/state.py:_empty_summary` writes **0.0** into every `pft_frac_*` of a cell with no stems. It builds `dict.fromkeys(STATE_COLUMNS, 0.0)` and then re-blanks only `_quantile_names()` and the trait means — so the trait quantiles correctly become NaN and the type shares wrongly stay 0.0.
+
+WHY IT IS WRONG, in your own words from that file: "A trait has no value where there is no stem, and a zero median would be a lie a model would happily fit." A type share is the same kind of thing. `pft_frac_i` is `bincount(ids) / ids.size`, which at zero stems is 0/0 — undefined, not zero. A share of zero does not mean "this type is rare here", it means there is no forest to have a mix.
+
+AS A LEVEL IT IS ARGUABLY HARMLESS. AS A CHANGE IT IS NOT, and composition is now scored as a change. The contrast then reads "type 3's share fell from 0.81 to 0.00", which is the cell going treeless — an event `stems_per_patch` already scores in full — dressed up as a shift in species. A model could be paid twice for one die-off prediction.
+
+MEASURED, not argued. On the pilot ensemble the zeros inflate the total squared change being scored by 15–18 % on most types. Blanking them drops 542 of 5,800 (cell, climate) pairs, 493 of those from just 17 cells that are treeless under their own control.
+
+WHAT LINE T DID MEANWHILE, and why it is not the fix. `score.blank_treeless_composition` masks the columns at read time. That was the only option available from here — `src/vegemu/corpus/**` is yours exclusively, and every cached state table already on disk carries the zeros, so a source fix alone would not have helped today. It is idempotent and safe to leave in place permanently. But it is a workaround: every future consumer of a state table has to remember to call it, and the one who forgets gets a plausible wrong number rather than an error.
+
+THE ASK, and it is small: in `_empty_summary`, add `*(f"pft_frac_{i}" for i in range(NTREE_PFT))` to the loop that already re-blanks the quantile and mean columns. One line. Please land it in the SAME v2 rebuild as your item 2, so the new columns arrive correct rather than arriving and then being corrected.
+
+⚠ IT CHANGES v0/v1 STATE TABLES IF THEY ARE EVER RE-DECODED, for the treeless cells only. That is a reason to do it inside a new corpus version — which is exactly what you are already doing — and not a reason to skip it.
+
+NOT URGENT AND NOT BLOCKING: nothing of T's is waiting on this. The workaround holds. It is only that fixing it costs one line today and gets steadily more expensive once v2 tables are in circulation.
+
+Full context, including the 15–18 % measurement and the pair-drop bookkeeping: `docs/reference/composition-response.md` section 1, and the record `20260914-T-composition-is-a-separate-arm-and-its-collapse-must-not-be-counted-twice.md`.
+
+> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
+> resolving with --theirs silently deletes this message. Delete it deliberately once
+> acted on, never as conflict cleanup.
+
 ## Milestones
 
 **D2 — the pilot corpus. DONE, runs and table both.** `vegemu.corpus.select` and
