@@ -212,13 +212,23 @@ def scorable_pairs(
     }
 
 
-def decide(model: dict[str, object], nulls: dict[str, dict[str, object]]) -> dict[str, object]:
+def decide(
+    model: dict[str, object],
+    nulls: dict[str, dict[str, object]],
+    threshold: float = 0.080,
+    statistic: str = "skill_response_mean",
+) -> dict[str, object]:
     """The pre-registered decision rule, computed rather than eyeballed.
 
     Also counts the levels at which the model fails to beat the best null, because the
     pre-registration requires it: the response is not monotone in temperature, and a pass on the
     pooled statistic accompanied by a fail at more than half of the 29 levels MUST be reported as
     such in the verdict rather than summarised away.
+
+    `threshold` and `statistic` default to the values `X-20260909-pilot-warming-response` was sealed
+    with, so this script's own behaviour is unchanged. They are parameters only so that the
+    composition arm -- a different estimand, with its own pre-registration and its own bar -- can
+    reuse this exact arithmetic instead of restating it and risking a different rule.
     """
     ranked = sorted(((float(v["pooled"]), k) for k, v in nulls.items()), reverse=True)
     best_value, best_name = ranked[0]
@@ -231,14 +241,14 @@ def decide(model: dict[str, object], nulls: dict[str, dict[str, object]]) -> dic
     n_lose = sum(1 for v in beaten.values() if v <= 0.0)
 
     return {
-        "statistic": "skill_response_mean",
+        "statistic": statistic,
         "model_pooled": pooled,
         "best_null": best_name,
         "best_null_value": best_value,
         "margin_model_minus_best_null": margin,
-        "threshold": 0.080,
-        "required_model_value": best_value + 0.080,
-        "verdict": "pass" if margin > 0.080 else "fail",
+        "threshold": threshold,
+        "required_model_value": best_value + threshold,
+        "verdict": "pass" if margin > threshold else "fail",
         "levels_total": len(beaten),
         "levels_model_not_above_best_null": n_lose,
         "levels_majority_fail": n_lose > len(beaten) / 2,

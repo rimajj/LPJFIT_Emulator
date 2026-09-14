@@ -212,34 +212,24 @@ def _per_level_and_pooled(
     }
 
 
-def derive_nulls(
+def build_null_predictions(
     dtrue: npt.NDArray[np.float64],
     control: npt.NDArray[np.float64],
     cells: pl.DataFrame,
     points: list[str],
     *,
-    quantities: tuple[str, ...],
     k: int,
     degrees: float,
-) -> dict[str, dict[str, object]]:
-    """Every null, assembled OUT OF FOLD under whole-tile blocking, then scored once.
+) -> dict[str, npt.NDArray[np.float64]]:
+    """Every null's out-of-fold PREDICTION array, before anything is scored.
 
-    Out of fold by construction: each cell is held out exactly once, so the statistic is computed on
-    the assembled prediction rather than averaged over folds. The four borrowing nulls all take
-    their donor from the TRAINING folds only -- a null that could copy its own cell would be
-    measuring nothing.
+    Split out of `derive_nulls` so that a second estimand can reuse this arithmetic instead of
+    re-implementing it -- the composition arm (`exp_derive_nulls_composition.py`) needs the raw
+    predictions in order to put every arm on a common denominator before scoring. `derive_nulls`
+    still returns exactly what it returned before; this is a pure extraction, checked against the
+    sealed values of `X-20260909-pilot-warming-response` in `tests/test_nulls_pilot_refactor.py`.
 
-    The proportional pair is the ADDITIVE null's obvious partner and was missing from the first
-    derivation. The estimand is a difference of levels, and the cells run from Amazon to Sahel, so
-    "every cell changes by the same fraction of what it already has" is the competitor a scientist
-    would actually propose against "every cell changes by the same amount".
-
-    ⚠ BOTH FORMS ARE REPORTED BECAUSE THE OBVIOUS ONE IS UNUSABLE. Aggregating the donor fractions
-    with a MEAN scores -27.4 pooled and -173.8 on above-ground biomass: the fraction has a near-zero
-    control in its denominator at the cells that go treeless, so a handful of enormous donor ratios
-    are multiplied onto the standing state of large cells. The median is what a heavy-tailed
-    ratio requires, and the mean form is kept in the output so that "unusable" stays a measurement
-    rather than a remark.
+    See `derive_nulls` for why each null is built the way it is.
     """
     lon = cells["lon"].to_numpy().astype(np.float64)
     lat = cells["lat"].to_numpy().astype(np.float64)
@@ -289,15 +279,49 @@ def derive_nulls(
         shuffled[:, j, :] = dtrue[rng.permutation(dtrue.shape[0]), j, :]
 
     return {
-        "no_response": _per_level_and_pooled(np.zeros_like(dtrue), dtrue, points, quantities),
-        "level_mean_response": _per_level_and_pooled(level_mean, dtrue, points, quantities),
-        "proportional_median_response": _per_level_and_pooled(
-            prop_median, dtrue, points, quantities
-        ),
-        "proportional_mean_response": _per_level_and_pooled(prop_mean, dtrue, points, quantities),
-        "nearest_cell_response": _per_level_and_pooled(geographic, dtrue, points, quantities),
-        "nearest_analogue_response": _per_level_and_pooled(analogue, dtrue, points, quantities),
-        "shuffled_cells": _per_level_and_pooled(shuffled, dtrue, points, quantities),
+        "no_response": np.zeros_like(dtrue),
+        "level_mean_response": level_mean,
+        "proportional_median_response": prop_median,
+        "proportional_mean_response": prop_mean,
+        "nearest_cell_response": geographic,
+        "nearest_analogue_response": analogue,
+        "shuffled_cells": shuffled,
+    }
+
+
+def derive_nulls(
+    dtrue: npt.NDArray[np.float64],
+    control: npt.NDArray[np.float64],
+    cells: pl.DataFrame,
+    points: list[str],
+    *,
+    quantities: tuple[str, ...],
+    k: int,
+    degrees: float,
+) -> dict[str, dict[str, object]]:
+    """Every null, assembled OUT OF FOLD under whole-tile blocking, then scored once.
+
+    Out of fold by construction: each cell is held out exactly once, so the statistic is computed on
+    the assembled prediction rather than averaged over folds. The four borrowing nulls all take
+    their donor from the TRAINING folds only -- a null that could copy its own cell would be
+    measuring nothing.
+
+    The proportional pair is the ADDITIVE null's obvious partner and was missing from the first
+    derivation. The estimand is a difference of levels, and the cells run from Amazon to Sahel, so
+    "every cell changes by the same fraction of what it already has" is the competitor a scientist
+    would actually propose against "every cell changes by the same amount".
+
+    ⚠ BOTH FORMS ARE REPORTED BECAUSE THE OBVIOUS ONE IS UNUSABLE. Aggregating the donor fractions
+    with a MEAN scores -27.4 pooled and -173.8 on above-ground biomass: the fraction has a near-zero
+    control in its denominator at the cells that go treeless, so a handful of enormous donor ratios
+    are multiplied onto the standing state of large cells. The median is what a heavy-tailed
+    ratio requires, and the mean form is kept in the output so that "unusable" stays a measurement
+    rather than a remark.
+    """
+    predictions = build_null_predictions(dtrue, control, cells, points, k=k, degrees=degrees)
+    return {
+        name: _per_level_and_pooled(pred, dtrue, points, quantities)
+        for name, pred in predictions.items()
     }
 
 
