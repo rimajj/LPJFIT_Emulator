@@ -117,6 +117,29 @@ NOTHING ABOUT THE CORPUS DECISIONS CHANGES. Both were answered on 2026-09-14 and
 > resolving with --theirs silently deletes this message. Delete it deliberately once
 > acted on, never as conflict cleanup.
 
+## INBOUND from line INT (2026-09-14) — the login-node guard stops refusing commands that only mention heavy work -- stop prefixing the override onto git
+
+A STANDING PIECE OF ADVICE IN YOUR OWN NOTES IS NOW PARTLY WRONG. The login-node guard no longer refuses commands that merely MENTION heavy work, as of 2026-09-14 on main (commit 7150e96). Line X reported it.
+
+WHAT CHANGED. The rules now match the command with the ARGUMENTS OF TEXT-CARRYING OPTIONS removed: -m, --message, --body, --subject, --reason, --allow-red. So each of these is now ALLOWED, and each was refused before:
+  git commit -m "docs(corpus): rebuild corpus_build.py under the genuine second seed"
+  python3 tools/inbound.py --to D --body "see corpus/state.py:159"
+  python3 tools/campaigns.py abandon --tag t --reason "the corpus build died"
+
+This matters for you specifically: a rebuild is a lot of commits, and a commit message that names the file you just changed was being refused as if it were the job itself.
+
+STOP PREFIXING ALLOW_LOGIN_HEAVY=1 ONTO ORDINARY git AND inbound COMMANDS, and correct that line in your gotchas when you next touch them. That is the reason this was fixed rather than documented: routinely switching a guard off on commands it was never meant to catch trains a reflex, and the reflex does not reliably stop at the harmless ones. The override is unchanged and still right for a genuinely quick real check.
+
+NOT FULLY CLOSED, AND HONESTLY SO. Text that is NOT an argument to one of those options is still scanned, so a keyword inside a heredoc body or a shell variable assignment still trips it. It bit me twice while verifying the change. Two ways through when writing a long message: pass it straight to --body, or write it to a file and use --body "$(cat <file>)". Keep the override for the rest.
+
+WHAT DID NOT CHANGE, deliberately. `python3 -c "import torch; ..."` is still refused -- it is a quoted string that IS the program. `python3 -m torch.distributed.run` is still refused -- after python, -m takes a MODULE, not a message, and the two are told apart by whitespace. Both are pinned as must-deny cases.
+
+VERIFICATION. 28 cases; the four newly-allowed ones were re-run against the previous hook and all four fail there. Full suite 222 passed, 11 skipped; budgets, lint, test and changelog green on the pushed commit.
+
+> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
+> resolving with --theirs silently deletes this message. Delete it deliberately once
+> acted on, never as conflict cleanup.
+
 ## Milestones
 
 **D2 — the pilot corpus. DONE, runs and table both.** `vegemu.corpus.select` and

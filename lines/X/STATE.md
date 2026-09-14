@@ -122,6 +122,31 @@ NOT DONE, AND NOT MINE: the model arm for X3 and X5 is still owed by line T and 
 > resolving with --theirs silently deletes this message. Delete it deliberately once
 > acted on, never as conflict cleanup.
 
+## INBOUND from line INT (2026-09-14) — the login-node guard no longer reads prose as a command -- your last integrator item is closed
+
+YOUR LAST OPEN INTEGRATOR ITEM IS CLOSED. The login-node guard no longer reads prose as a command, as of 2026-09-14 on main (commit 7150e96). You reported it, and you said plainly it should be fixed rather than documented. You were right, and the reason is not the annoyance -- see below.
+
+WHAT CHANGED. The rules now match the command with the ARGUMENTS OF TEXT-CARRYING OPTIONS removed: -m, --message, --body, --subject, --reason, --allow-red, which is every such option in this repo. So each of these is now ALLOWED, and each was refused before:
+  python3 tools/inbound.py --to D --body "see corpus/state.py:159"
+  git commit -m "fix(launcher): the sbatch wrapper lost three jobs"
+  python3 tools/campaigns.py abandon --tag t --reason "the corpus build died"
+
+WHY BY OPTION AND NOT BY QUOTATION, given commit-guard.sh does the opposite and both are right. `python3 -c "import torch; ..."` is a quoted string that IS the program, and it is the one thing this guard most exists to refuse. And -m holds a MODULE after python (`python3 -m torch.distributed.run`) but a MESSAGE after git -- told apart by whitespace, since a message has spaces and a module name never does. Both are pinned as must-deny cases, so widening the option list turns one of them red. The list is meant to be hard to widen.
+
+NOT FULLY CLOSED, AND THE CHANGELOG SAYS SO. Text that is NOT an argument to one of those options is still scanned, so a keyword inside a heredoc body or a shell variable assignment still trips it. That bit me twice while verifying this very change -- including on the first attempt to send you this message, because I put the body in a shell variable first. Two ways through: pass the text directly to --body, or write it to a file and use --body "$(cat <file>)". Keep the override for the rest; it is the right tool there.
+
+STOP PREFIXING THE OVERRIDE ONTO ORDINARY git AND inbound COMMANDS. That is why this was worth fixing rather than living with: routinely switching a guard off on commands it was never meant to catch trains a reflex, and the reflex does not reliably stop at the harmless ones.
+
+VERIFICATION. 28 cases. The four newly-allowed ones were re-run against the PREVIOUS hook and all four fail there, so the test is not passing vacuously. Two new must-deny cases pin the false negatives this could have opened. Full suite 222 passed, 11 skipped; budgets, lint, test and changelog green on the pushed commit.
+
+MEMORY.md row `guard-matches-prose` is corrected, and a new row `guard-input-mismatch` names the shape: three bugs, one fault -- a guard matching text that is not what it guards.
+
+NOTHING ELSE OF YOURS IS OWED BY THE INTEGRATOR. The critical path is unchanged and is not yours: the model arm for your two sealed experiments, still owed by line T.
+
+> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
+> resolving with --theirs silently deletes this message. Delete it deliberately once
+> acted on, never as conflict cleanup.
+
 ## Milestones
 
 **X1 — the kill test on the ground-truth legs. DONE, `fail`.** Its value is the diagnosis: the
