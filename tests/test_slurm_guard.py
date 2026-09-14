@@ -6,14 +6,23 @@ refuses any submission path that skips the campaign ledger. Its refusal messages
 A PreToolUse hook runs in the harness's environment, not in the shell the command is about to run
 in, so the guard checked a variable that a command prefix can never set. The advice was unusable.
 
-That matters because the heavy-Python rule is a KEYWORD match over the whole command string: a
-command is heavy if it mentions Python and any of train/bench/corpus/sweep/eval/probe/… anywhere.
-In a project whose subject matter is corpora and training, ordinary commands say those words —
-handing `tools/inbound.py` a message body that quoted `corpus/state.py` was refused as a heavy job,
-with an escape hatch that did not exist. A broad heuristic is the right trade only if the override
-is real.
+That matters because every rule is a KEYWORD match over the command string: a command is heavy if
+it mentions Python and any of train/bench/corpus/sweep/eval/probe/… anywhere. In a project whose
+subject matter is corpora and training, ordinary commands say those words — handing
+`tools/inbound.py` a message body that quoted `corpus/state.py` was refused as a heavy job, and a
+commit message naming the `sbatch` wrapper was refused as a ledger bypass. Neither runs anything.
 
-So the table below pins both halves at once: every deny the guard is FOR, and the two overrides.
+FIXED 2026-09-14 by matching the rules against the command with the ARGUMENTS OF PROSE-CARRYING
+FLAGS removed, so the guard stops reading other people's prose as commands. Living with it meant
+prefixing `ALLOW_LOGIN_HEAVY=1` to ordinary `git` and `inbound` commands — which is worse than the
+annoyance it solved, because it trains the reflex of switching the guard off on commands it was
+never for, and that reflex does not stop at the harmless ones.
+
+⚠ THE TWO HALVES BELOW PULL AGAINST EACH OTHER, which is the point of pinning both. Every case in
+MUST_ALLOW is a command that would have been wrongly denied; every case in MUST_DENY is a way prose
+stripping could open a real hole, and the two marked ones are the exact reason the rule is written
+by FLAG rather than by quoting. Widening the prose list will turn one of them red.
+
 A hook is invisible when it works, so nothing but a test distinguishes "correctly allowing this"
 from "not denying anything at all" — the sibling guard was first written with no execute bit and
 every case passed vacuously.
@@ -41,10 +50,16 @@ MUST_DENY = [
     # heavy Python on the shared login node: it dies with the session, taking the result with it
     "python3 scripts/corpus_build.py --tier pilot",
     "python scripts/train_emulator.py --folds 15deg",
+    # ⚠ A QUOTED STRING THAT IS THE PROGRAM. This is why prose is stripped by FLAG and not by
+    # quoting: commit-guard.sh strips every quoted string, and doing that here would allow the one
+    # command this hook most exists to deny.
     'python3 -c "import torch; torch.zeros(1)"',
-    # ...including when the keyword only appears in a quoted argument. Broad on purpose; see the
-    # module docstring. The override below is what makes that acceptable.
-    'python3 tools/inbound.py --to D --body "see corpus/state.py:159"',
+    # ⚠ `-m` TAKES A MODULE, NOT A MESSAGE, once the program is Python. Settled by whitespace: a
+    # commit message has spaces, a module path never does. Read `-m` as prose unconditionally and
+    # this launches a distributed training job on the login node.
+    "python3 -m torch.distributed.run --nproc 4 scripts/fit_model.py",
+    # prose stripping must not launder a real job: the keyword is in the PROGRAM, not the message
+    'python3 scripts/corpus_build.py --body "harmless"',
     # a submission that bypasses the ledger, so no later session can find the job
     "sbatch job.sh",
     "srun --ntasks 1 hostname",
@@ -67,6 +82,13 @@ MUST_ALLOW = [
     "git status --short",
     "python3 tools/check_budgets.py",
     "python3 -m pytest -q tests/test_folds.py",
+    # COMMANDS THAT RUN NOTHING AND ONLY TALK ABOUT ONE. Each was denied before 2026-09-14, and the
+    # only way past was to switch the guard off. The words are cargo: no job can be launched
+    # through `-m`, `--body` or `--reason`.
+    'python3 tools/inbound.py --to D --body "see corpus/state.py:159"',
+    'git commit -m "fix(launcher): the sbatch wrapper lost three jobs"',
+    'git commit -m "docs(corpus): rebuild corpus_build.py under the genuine second seed"',
+    'python3 tools/campaigns.py abandon --tag t --reason "the corpus build died"',
 ]
 
 # The overrides the guard's own messages advertise, in the only form a Bash tool call can use.
