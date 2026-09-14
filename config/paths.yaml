@@ -115,7 +115,33 @@ ground_truth:
   historical_seed1: ${ground_truth.root}/Historical/ground_truth/model_output/transient_2000_2019_npatch25_nspinup1000_nspinyear30_random_seed1
   historical_seed2: ${ground_truth.root}/Historical/ground_truth/model_output/transient_2000_2019_npatch25_nspinup1000_nspinyear30_random_seed2
   ssp370_seed1: ${ground_truth.root}/ssp370/ground_truth/model_output/transient_2020_2100_npatch25_random_seed1
-  ssp370_seed2: ${ground_truth.root}/ssp370/ground_truth/model_output/transient_2020_2100_npatch25_random_seed2
+
+  # ⚠⚠ `ssp370_seed2` IS A BIT-IDENTICAL CLONE OF SEED 1. NOTHING NEW MAY USE IT. ⚠⚠
+  # `random_seed` is INERT in any -DFROM_RESTART run: the per-cell RAND48 state is restored from the
+  # restart file the run starts from (newgrid.c:507-513 -> freadcell.c:37), and the branch that would
+  # apply `random_seed` instead is gated off by `new_seed`, which is false. That run started from the
+  # historical SEED 1 restart, so it reproduced seed 1 exactly -- and because `new_seed` is false the
+  # log never prints `Random seed: 2`, so it failed silently. The historical pair IS independent only
+  # because its 1000-year spin-ups ran WITHOUT -DFROM_RESTART. Evidence trail, with the byte and md5
+  # comparisons: that directory's own INVALID_NOT_A_SECOND_SEED.md.
+  # A zero spread here is not harmless: the acceptance tolerance is max(10 %, the two-seed spread),
+  # so an identical pair silently collapses it to a bare 10 %.
+  # The key is RETAINED, not deleted, because three sealed pre-registrations cite corpus v0/v1 whose
+  # hash was computed against it. It is provenance, not an input.
+  ssp370_seed2_INVALID_CLONE_OF_SEED1: ${ground_truth.root}/ssp370/ground_truth/model_output/transient_2020_2100_npatch25_random_seed2
+
+  # ✅ THE GENUINE SECOND REALISATION — use this one. [VERIFIED 2026-09-14]
+  # Differs from the seed1 config in exactly four places, of which one is the fix: `restart_filename`
+  # repointed to the historical SEED 2 restart_2019.lpj. (`new_seed` deliberately stays false --
+  # flipping it would discard 1020 years of evolved RNG state at the 2019/2020 boundary, a
+  # discontinuity no other member has.) Complete: `lpjml successfully terminated, 67420 grid cells
+  # processed.`, restart_2100.lpj = 133,580,962,759 B against seed1's 133,559,375,490 B.
+  # ⚠ DISCLOSE WITH EVERY NUMBER DERIVED FROM THIS PAIR: it was written by the Jul-21 binary build,
+  # not the Feb-05 one that produced seed 1, so the corrected pair straddles a build boundary.
+  # Its derived per-tree table `predecessor_data.ind_ssp370_seed2` (Aug-04, 91,882,788,995 B vs
+  # seed1's 91,997,252,079 B) was already built from THIS run, not from the clone.
+  ssp370_seed2: ${ground_truth.root}/ssp370/ground_truth/model_output/transient_2020_2100_npatch25_random_seed2_from_hist_seed2
+
   ssp126_seed1: ${ground_truth.root}/ssp126/ground_truth/model_output/transient_2020_2100_npatch25_random_seed1
   ssp126_seed2: ${ground_truth.root}/ssp126/ground_truth/model_output/transient_2020_2100_npatch25_random_seed2
 
