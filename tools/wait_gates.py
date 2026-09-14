@@ -280,6 +280,7 @@ def poll(
         for g in [g for g in unresolved if g not in absent]:
             del unresolved[g]
             diagnosed.discard(g)
+        resolved_now = False
         if absent and time.time() - started >= ABSENT_GRACE_S:
             for g in absent:
                 if g in inherited or g in unresolved:
@@ -289,7 +290,13 @@ def poll(
                     unresolved[g] = time.time()
                 else:
                     inherited[g] = got
+                    resolved_now = True
                     print(f"  resolved: {g}={got[1]} inherited from {got[0][:9]}")
+        # `pending` above was computed before those verdicts existed, so re-evaluate at once rather
+        # than printing the gates we just resolved as still pending and then sleeping on them. The
+        # contradictory pair is exactly the kind of output this whole change exists to remove.
+        if resolved_now:
+            continue
 
         for g in sorted(unresolved):
             if g in diagnosed:
