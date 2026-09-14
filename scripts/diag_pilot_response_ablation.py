@@ -18,9 +18,16 @@ THREE ARMS, EACH DESIGNED TO MAKE THE SCORE COLLAPSE IF THE SKILL IS AN ARTEFACT
    forcing and something is leaking.
 
 2. SCRAMBLED. Keep the forcing features but permute which design point's coefficients are attached
-   to which of the cell's 29 arms, with the same permutation for every cell so the marginal
-   distribution of the features is untouched and only the PAIRING is destroyed. This separates "the
-   model uses the forcing" from "the forcing columns happen to be informative".
+   to which of the cell's 29 arms, with an INDEPENDENT permutation per cell. The marginals are
+   untouched and only the pairing dies. This separates "the model uses the forcing" from "the
+   forcing columns happen to be informative".
+
+   ⚠ A SHARED PERMUTATION DOES NOT WORK, and the first version of this arm used one. The 29 design
+   points are identical at every cell, so one permutation applied everywhere is a pure relabelling:
+   the map from features(perm[j]) to response(j) is a bijection that holds in the training cells
+   and the held-out ones alike, the model learns the forcing under new names, and the arm scored
+   0.4950 against the model's 0.5453 -- which reads as "the falsification nearly succeeded" when
+   what actually happened is that nothing was falsified.
 
 3. COLLAPSE DECOMPOSITION. Not an ablation: how much of the total squared change the metric is
    built from comes from arms that went treeless, where the change is simply minus the whole
@@ -91,11 +98,24 @@ def main() -> int:
     blind = fit_predict_oof(x[:, :, keep_idx], dtrue, folds, q)
     report["arms"]["blind"] = _per_level_and_pooled(blind, dtrue, points, q)  # type: ignore[index]
 
-    print("=== arm 2: SCRAMBLED (forcing columns permuted across points) ===", flush=True)
+    print("=== arm 2: SCRAMBLED (forcing re-paired independently per cell) ===", flush=True)
+    # ⚠ THE PERMUTATION MUST BE DRAWN PER CELL. The first version of this arm used ONE permutation
+    # for every cell and scored 0.4950 against the model's 0.5453, which looked like a failed
+    # falsification and was actually a broken one: the 29 design points are identical at every
+    # cell, so a permutation shared by all cells is a pure RELABELLING -- a bijection from
+    # features(perm[j]) to response(j) that holds in the training cells and in the held-out ones
+    # alike. The model simply learns the forcing under new names and loses almost nothing.
+    # Drawing an independent permutation per cell is what actually destroys the pairing, because
+    # then no consistent map from forcing features to response survives across cells.
     rng = np.random.default_rng(20260914)
-    perm = rng.permutation(len(points))
     x_scram = x.copy()
-    x_scram[:, :, forcing_idx] = x[:, perm, :][:, :, forcing_idx]
+    for i in range(x.shape[0]):
+        p = rng.permutation(len(points))
+        # Column by column rather than with a fancy index: mixing an integer, a slice and a list in
+        # one subscript silently TRANSPOSES the result, and a transposed assignment here would be a
+        # second broken falsification arm rather than a fixed one.
+        for k in forcing_idx:
+            x_scram[i, :, k] = x[i, p, k]
     scrambled = fit_predict_oof(x_scram, dtrue, folds, q)
     report["arms"]["scrambled"] = _per_level_and_pooled(scrambled, dtrue, points, q)  # type: ignore[index]
 
