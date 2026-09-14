@@ -36,7 +36,7 @@ Each rung is a pre-registered experiment. Status is updated here when a verdict 
 | **0** | Does our reader/writer round-trip a real restart file byte-identically? | the restart deliverable entirely | **PASSED 2026-09-08** |
 | **1** | **THE KILL TEST.** Given a cell's climate shifted by +4 K, can a model beat "predict this cell as it is today"? | the whole project, in ~week 3 for ~670 core-hours | **FAILED on existing data (−0.727 vs 0.000); now MANDATORY on a designed corpus** |
 | **2** | Does the map meet `max(10 %, two-seed spread)` conjunctively per cell? | the science, not the engineering | **FAILED: 0.036 against a best null of 0.021, gate 0.071** |
-| **3** | Is a synthesised restart file valid and stable in the real model? | the restart deliverable | **valid (the C loads and runs it); NOT yet right (carbon off by 0.53)** |
+| **3** | Is a synthesised restart file valid and stable in the real model? | the restart deliverable | **valid; carbon starts 6.7 % HIGH (never halved) and sheds to −1.6 % inside the band by yr 20; still fails conjunctively, 5 % against a 25 % ceiling** |
 | **4** | **End-to-end.** Emulated restart → real transient vs real restart → real transient. | the deliverable as a whole | blocked on rung 3's state fidelity |
 | **5** | Does the response survive a **held-out forcing leg**? | the warming claim | draftable now; the low-emissions leg is untouched |
 | **6** | Product B, and stage-2 output reconstruction. | product B only | not started |
@@ -103,11 +103,13 @@ and nothing validates it), or FREE (random seed, tree IDs).
 
 Validation ladder, cheapest first: **t0** byte round-trip → **t1** config pre-flight accepts →
 **t2** the C loads it and runs 1 year without aborting → **t3** 20 years with no drift beyond the
-two-seed spread → **t4** the state distribution matches → **t5** = rung 4.
+two-seed spread, **scored on a WINDOW MEAN — a real restart itself passes in only 90.9 % of cells,
+and that is the ceiling** → **t4** the state distribution matches → **t5** = rung 4.
 
-An optional **short polish run** (write an approximate restart, let the C relax the fast state for N
-years) is a fallback. It is a post-processing step, not a hybrid architecture, but it must be disclosed
-with every number and both arms reported (N = 0 and N > 0).
+The **short polish run** fallback (write an approximate restart, let the C relax the fast state for
+N years) is **dead, and not for the reason expected: measured at N = 1 it is a no-op** (+0.016 and
+−0.005 for the two working synthesis versions). The model neither repairs the state nor rejects
+it — it carries it. The lever has to be applied at year 0, in the synthesis.
 
 ### Model class (line T)
 Target is a joint distribution over a variable-length roster in trait × size × age × growth-failure
@@ -118,31 +120,31 @@ construction). No published vegetation-model emulator reproduces trait or size d
 
 ## Now — the critical path, and what is actually datable
 
-Rungs 0–3 ran on 2026-09-08. The level map beats every honest competitor and still misses its
-margin (0.0149 against 0.050); the warming response does not exist (−0.727 against 0.000 for "no
-change"); the emitted restart file loads and runs but carries half the right carbon. The first and
-third have a scoped one-step fix. The response does not: getting a response by SUBTRACTING two
-level predictions only works where the true change is large compared with the level error, and
-underneath that the corpus holds one climate per location, so climate and place are inseparable.
-The designed perturbation ensemble is therefore not an optimisation — it is the only identified
-path to a response, and it changes the target from a level to a change.
+**Four of the five steps to the next verdict are done. The fifth has been owed for four sessions,
+and nothing else in the repository is on the critical path.** The pilot corpus is built (200 cells
+× 30 climates, 337 core-hours), and both experiments that consume it are SEALED with their nulls
+derived and their bars written down before any model existed. What is missing is the model arm.
 
-### The path to the next verdict — five line-sessions, 670 core-hours, 20 minutes of cluster
+| the two sealed experiments | bar to beat | a pass needs | ceiling | owed by |
+|---|---|---|---|---|
+| **rung 1, the kill test** (`X-20260909-pilot-warming-response`) | **0.145690** — every cell changes by the same fraction of what it already has, NOT 0.0 | 0.225690 | 0.8697 | **T** |
+| **rung 5, the held-out forcing leg** (`X-20260908-heldout-forcing-leg`) | 0.033749 | 0.0837 | 0.538490 | **T** |
 
-| # | line | step | blocked by |
-|---|---|---|---|
-| 1 | D | lint + types green (4 files, 16 errors); `merge.sh` now refuses a red gate | — |
-| 2 | D | **D1** delta-change perturbation design; one perturbed `.clm` the C reads | 1 |
-| 3 | D | **D2** the pilot corpus, 200 cells × 30 climates × 1 seed | 2 |
-| 4 | X | the rung-1 pre-registration on that corpus, four nulls, values derived first | — |
-| 5 | T | a response model that predicts the CHANGE directly | 3, 4 |
+Why the corpus had to exist first: a response obtained by SUBTRACTING two level predictions only
+works where the true change is large against the level error (−0.727), and the existing data holds
+one climate per location, so climate and place are inseparable. The designed ensemble is the only
+identified path to a response, and it changes the target from a level to a change. ⚠ **The compute
+was never the bottleneck**: the pilot is 20 minutes on 2048 cores. The sessions are.
 
-Unblocked in parallel: T's `agb` donor match (rung 3's halved carbon — one line, 8-second check),
-X's held-out-forcing-leg pre-registration. ⚠ **The compute is not the bottleneck and never was**:
-the pilot is 20 minutes on 2048 cores. The five sessions are.
+Corpus v2 is unblocked as of 2026-09-14, both its open decisions answered by the owner: the genuine
+high-emissions second run, and **species composition as a predicted, conjunctively scored quantity
+— one rebuild, not two.** Composition is not one more quantity. The synthesiser COPIES it from the
+template because nothing scores it, so an emulated warmed forest is structurally forbidden from
+shifting its species mix at all — a candidate mechanism for the response failure, not a gap.
 
-**Only step 5's verdict is datable.** A rung-1 fail on a corpus built expressly to identify the
-response stops the project, which is why it runs early. Full acceptance (rung 7) has **no
-defensible date today**: the conjunctive pass rate is 3.6 %, what closes that gap is unknown, and
-it needs the mid or full corpus. A rung-1 pass turns an unidentified problem into an ordinary
-fitting problem; only then does a completion date mean anything. Detail: `lines/<L>/STATE.md`.
+**Only the kill test's verdict is datable**, and it is the rung that can stop the project, which is
+why it was placed early. Full acceptance (rung 7) has **no defensible date**: the conjunctive pass
+rate is 0.0351 against an attainable ceiling of **0.5585, not 1.0** — 6 % of what is reachable
+rather than 3.5 % of perfect — what closes that gap is unknown, and it needs the mid or full
+corpus. A kill-test pass turns an unidentified problem into an ordinary fitting problem; only then
+does a completion date mean anything. Detail: `lines/<L>/STATE.md`.
