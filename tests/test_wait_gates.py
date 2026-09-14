@@ -107,3 +107,138 @@ def test_no_triggered_gate_licenses_a_merge_without_a_token(
     rc = wait_gates.main(["--timeout", "600"])
     assert rc == 0
     assert "NO gate" in "".join(capsys.readouterr())
+
+
+# ---------------------------------------------------------------------------
+# An ABSENT gate is not a slow gate.
+#
+# `expected_gates` computes what a merge must verify from the whole BRANCH diff; GitHub decides
+# what to RUN from the push diff. They disagree whenever a branch is pushed more than once, which
+# is every branch here, because protocol commits the handoff last and that final push is
+# documentation-only. The gate then never runs on the head sha and reports NO STATUS AT ALL, so a
+# poll for it used to hang for the full 900 s and then fail -- three merges lost in one session on
+# 2026-09-09. The two cases below are the ones that must never be confused.
+# ---------------------------------------------------------------------------
+
+
+def _stub_history(monkeypatch: pytest.MonkeyPatch, *, touched: list[str]) -> None:
+    """One ancestor, `anc-sha`, with `touched` changed between it and HEAD."""
+    monkeypatch.setattr(wait_gates, "ancestors", lambda root, sha, limit: ["anc-sha"])
+    monkeypatch.setattr(wait_gates, "files_between", lambda root, a, b: touched)
+
+
+def test_a_gate_that_did_not_rerun_inherits_its_still_valid_verdict(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Green on an ancestor + nothing since touching its paths = green here, and no waiting.
+
+    This is the merge that used to cost 15 minutes and then need `--allow-red`, whose reason had to
+    explain a gate that was not red but absent.
+    """
+    _stub_a_triggered_gate(monkeypatch, ["lint"])
+    monkeypatch.setattr(wait_gates, "token", lambda: "a-token")
+    monkeypatch.setattr(wait_gates, "remote_slug", lambda root: "owner/repo")
+    monkeypatch.setattr(wait_gates, "ABSENT_GRACE_S", 0)
+    # Only documents changed since the sha that ran `lint`, so its verdict still fits this tree.
+    _stub_history(monkeypatch, touched=["PLAN.md"])
+    monkeypatch.setattr(
+        wait_gates,
+        "check_runs",
+        lambda slug, sha, tok: {} if sha != "anc-sha" else {"lint": "success"},
+    )
+
+    rc = wait_gates.main(["--timeout", "30", "--interval", "1"])
+    text = "".join(capsys.readouterr())
+
+    assert rc == 0, "a verdict nothing since could have changed must license the merge"
+    assert "inherited from anc-sha" in text
+    assert "timed out" not in text
+
+
+def test_a_gate_whose_paths_changed_since_is_never_inherited(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The safety direction: if the gate's own paths moved, the old green says nothing.
+
+    Inheriting here would be the failure this whole mechanism exists to prevent -- reporting green
+    for code CI has never seen. It must refuse instead, and name the dispatch that gets a verdict.
+    """
+    _stub_a_triggered_gate(monkeypatch, ["lint"])
+    monkeypatch.setattr(wait_gates, "token", lambda: "a-token")
+    monkeypatch.setattr(wait_gates, "remote_slug", lambda root: "owner/repo")
+    monkeypatch.setattr(wait_gates, "ABSENT_GRACE_S", 0)
+    monkeypatch.setattr(wait_gates, "ABSENT_VERDICT_S", 0)
+    # A .py moved since the ancestor, so `lint` genuinely has to run again.
+    _stub_history(monkeypatch, touched=["src/vegemu/x.py"])
+    monkeypatch.setattr(
+        wait_gates,
+        "check_runs",
+        lambda slug, sha, tok: {} if sha != "anc-sha" else {"lint": "success"},
+    )
+
+    rc = wait_gates.main(["--timeout", "30", "--interval", "1"])
+    text = "".join(capsys.readouterr())
+
+    assert rc == 1, "an unverified gate must refuse, never inherit"
+    assert "all expected gates green" not in text
+    assert "gh workflow run lint.yml" in text, "a refusal must say how to get a real verdict"
+
+
+def test_a_gate_that_appears_late_is_not_refused_for_having_been_absent(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """CI can create a check-run minutes after the push; absence must be forgotten when it ends.
+
+    Without this the refusal is the original bug pointed the other way: a gate recorded as absent on
+    an early poll stays on the refusal list after it has appeared and gone green, so a merely slow
+    gate becomes a blocked merge.
+    """
+    # TWO gates are required to exhibit this, which is why the obvious one-gate version of this test
+    # passes with or without the fix: a single gate that goes green leaves `pending` empty, so the
+    # refusal is never reached. The bug bites when one gate's stale absence is still on the refusal
+    # list while a DIFFERENT gate is legitimately pending -- then the oldest absence times out and
+    # refuses a merge over a gate that has already reported success.
+    _stub_a_triggered_gate(monkeypatch, ["lint", "test"])
+    monkeypatch.setattr(wait_gates, "token", lambda: "a-token")
+    monkeypatch.setattr(wait_gates, "remote_slug", lambda root: "owner/repo")
+    monkeypatch.setattr(wait_gates, "ABSENT_GRACE_S", 0)
+    monkeypatch.setattr(wait_gates, "ABSENT_VERDICT_S", 2)
+    _stub_history(monkeypatch, touched=["src/vegemu/x.py"])  # so nothing can be inherited
+
+    head_polls = {"n": 0}
+
+    def late(slug: str, sha: str, tok: str) -> dict[str, str]:
+        if sha == "anc-sha":
+            return {}  # no ancestor verdict either, so absence is all we have at first
+        head_polls["n"] += 1
+        # `lint` is absent on the first poll and green thereafter; `test` runs on for a while.
+        lint = {} if head_polls["n"] < 2 else {"lint": "success"}
+        return {**lint, "test": "in_progress" if head_polls["n"] < 4 else "success"}
+
+    monkeypatch.setattr(wait_gates, "check_runs", late)
+
+    rc = wait_gates.main(["--timeout", "30", "--interval", "1"])
+    text = "".join(capsys.readouterr())
+
+    assert rc == 0, "a gate that showed up green must not be refused for having been slow"
+    assert "REFUSING" not in text
+
+
+def test_an_inherited_failure_is_still_a_failure(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Inheritance carries RED forward too -- it resolves absence, it does not launder a result."""
+    _stub_a_triggered_gate(monkeypatch, ["lint"])
+    monkeypatch.setattr(wait_gates, "token", lambda: "a-token")
+    monkeypatch.setattr(wait_gates, "remote_slug", lambda root: "owner/repo")
+    monkeypatch.setattr(wait_gates, "ABSENT_GRACE_S", 0)
+    _stub_history(monkeypatch, touched=["PLAN.md"])
+    monkeypatch.setattr(
+        wait_gates,
+        "check_runs",
+        lambda slug, sha, tok: {} if sha != "anc-sha" else {"lint": "failure"},
+    )
+
+    rc = wait_gates.main(["--timeout", "30", "--interval", "1"])
+    assert rc == 1
+    assert "FAILED" in "".join(capsys.readouterr())
