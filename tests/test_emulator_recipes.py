@@ -32,26 +32,19 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-# ⚠ AN UNDECLARED DEPENDENCY, NOT AN OPTIONAL ONE. `models/emulator.py` is built on LightGBM's
-# scikit-learn wrapper (`LGBMRegressor`), and that wrapper raises at construction time unless
-# scikit-learn is installed. `pyproject.toml` declares lightgbm but not scikit-learn, so a clean
-# `pip install -e ".[dev]"` — exactly what CI does — produces an installation in which the emulator
-# cannot fit anything. These are the first tests that ever fit a model in CI, which is why the gap
-# only surfaced on 2026-09-10; every earlier test exercised the model's arithmetic and not its
-# heads. `pyproject.toml` is integrator-only, so line T cannot fix it here — the request rides with
-# this branch's changelog fragment. That file's own comment already argues the general case: "a
-# dependency that the package imports is not optional."
+# ⚠ THE SKIP THAT WAS HERE IS GONE, AND ITS ABSENCE IS THE POINT. `models/emulator.py` is built on
+# LightGBM's scikit-learn wrapper (`LGBMRegressor`), which guards its own constructor on
+# `SKLEARN_INSTALLED` and raises when it is false. When line T wrote these tests on 2026-09-10 —
+# the first tests in this repo that ever FITTED a model, which is why the gap surfaced only then —
+# `pyproject.toml` declared lightgbm but not scikit-learn, so a clean `pip install -e ".[dev]"`,
+# exactly what CI does, produced an installation whose emulator could not fit anything. A
+# `pytest.importorskip` stood here to keep the suite honest about an environment it could not
+# repair, because `pyproject.toml` is integrator-only.
 #
-# Skipping rather than failing is deliberate but is NOT the fix: it keeps the suite honest about an
-# environment it cannot repair while making the gap visible as a named skip.
-pytest.importorskip(
-    "sklearn",
-    reason=(
-        "scikit-learn is missing: LightGBM's sklearn API needs it, and pyproject.toml does not "
-        "declare it. Add scikit-learn to [project.dependencies] (integrator-only)."
-    ),
-)
-
+# The integrator declared the dependency on 2026-09-14, so the guard had to go with it. Left in, it
+# would report "skipped" for two opposite states — "scikit-learn is legitimately absent" and "a
+# declared base dependency failed to install" — and the second is a broken environment that must
+# fail loudly. A missing scikit-learn is now a hard error at fit time, which is correct.
 from vegemu.models import (
     D95MAX_BOUNDS,
     ROOTING_DEPTH_RECIPES,

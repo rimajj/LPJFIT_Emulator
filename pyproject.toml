@@ -27,6 +27,16 @@ dependencies = [
   # are ordinary CPU wheels. A dependency that the package imports is not optional.
   "scipy>=1.14",
   "lightgbm>=4.5",
+  #
+  # scikit-learn is the SAME defect one level down, found on 2026-09-10 and fixed here on 2026-09-14.
+  # `models/emulator.py:42` imports `LGBMRegressor`, and lightgbm's sklearn wrapper guards its own
+  # constructor on `SKLEARN_INSTALLED` and raises when it is false -- so declaring lightgbm without
+  # scikit-learn yields an installation, from exactly the `pip install -e ".[dev]"` CI performs, in
+  # which the emulator imports cleanly and then cannot fit anything. It went unseen because no test
+  # had ever FITTED a model in CI; the first that did (`tests/test_emulator_recipes.py`) exposed it
+  # and stood skipped with a named reason until this line landed. lightgbm does not declare it
+  # itself, because its Booster API genuinely does not need it -- only the wrapper we use does.
+  "scikit-learn>=1.5",
 ]
 
 [project.optional-dependencies]
