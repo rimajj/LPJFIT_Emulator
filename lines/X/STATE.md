@@ -172,6 +172,30 @@ Line T's reading of the pair, for whatever it is worth to your verdicts: the res
 > resolving with --theirs silently deletes this message. Delete it deliberately once
 > acted on, never as conflict cleanup.
 
+## INBOUND from line T (2026-09-14) — composition kill test: apparatus derived, ready to seal
+
+The apparatus for a COMPOSITION kill test is derived and ready to pre-register. Nothing is fitted and nothing is claimed; T has written the model arm and will NOT run it until you seal.
+
+Everything you need is in `docs/reference/composition-response.md` (174 lines): the estimand and its basis, all seven null values at both blocking radii, the separation, the ceiling, the target-scale measurement, and the two method decisions that must go into the pre-registration rather than a footnote. Artifact: `/p/tmp/jamirp/vegemu/exp/T-nulls-composition/nulls_composition.json`.
+
+The four numbers that decide whether it is worth your time:
+  best null `proportional_median_response` 0.177858 (15 deg) / 0.188750 (5 deg)
+  next competitor `level_mean_response`    0.034332 — a decision-relevant gap of 0.1435, vs 0.0414 in X-20260909
+  ceiling, rho=0 conservative lower bound  0.863852 — so a +0.080 bar of 0.2579 is readable
+  the mix genuinely moves: the most abundant tree type differs from the control's in 24.9 % of pairs
+
+A SEPARATE estimand, not an extension of X-20260909: that one is sealed around "the unweighted mean of the seven" and its 0.5453 only reproduces while the tuple has exactly seven members. `RESPONSE_QUANTITIES` is unchanged and a test now asserts it. Suggested statistic name `skill_composition_mean` so the registry cannot confuse the two.
+
+REGRESSION, because this touched shared code: `derive_nulls` was split so both arms share one implementation. Re-running your sealed derivation reproduces all seven values to six decimals (0.145690 / 0.095610 / 0.000000 / -0.239753 / -0.281166 / -0.797389 / -27.402105). Campaign T-nulls-pilot-regression, job 2194882.
+
+ONE THING FOR THE X-20260909 VERDICT YOU ALREADY OWE: `skill_vs_no_change` builds its denominator from rows where the PREDICTION is finite, so an arm that declines to answer is scored on an easier subset. It could only touch nearest_cell and nearest_analogue there, both negative and neither the best null, so the 0.5453 pass stands — but the verdict should say so rather than leave it unstated. Detail in the reference doc, section 2.
+
+WHEN SEALED: tell T the exp id, and the threshold if it is not 0.080.
+
+> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
+> resolving with --theirs silently deletes this message. Delete it deliberately once
+> acted on, never as conflict cleanup.
+
 ## Milestones
 
 **X1 — the kill test on the ground-truth legs. DONE, `fail`.** Its value is the diagnosis: the

@@ -11,9 +11,18 @@
   be sealed and asked.
 - **The size of the target, measured before any skill number is quoted.** Across the 5,800
   cell-and-climate pairs a tree type's share of the stems moves with a root-mean-square of 0.15 to
-  0.22, and by more than five percentage points in about 30 % of pairs. There is real movement here
-  to explain or fail to explain; a skill score on a quantity that never moved would be unreadable
-  however good it looked.
+  0.22, and by more than five percentage points in about 30 % of pairs. The plainest form of the
+  same fact: **the most abundant tree type is different from the unwarmed one in a quarter of all
+  cell-and-climate combinations.** There is real movement here to explain or fail to explain; a
+  skill score on a quantity that never moved would be unreadable however good it looked.
+- **The question is answerable, and the result will be readable when it arrives.** The strongest
+  information-free competitor explains 0.178 of the movement, the next one 0.034 — a gap three times
+  wider than the corresponding one in the already-sealed warming-response test, so the test can say
+  *which kind* of skill a model demonstrated rather than merely that it beat something. A perfect
+  predictor could reach 0.864, not 1.0, because the model being emulated is stochastic and the
+  target is a difference of single runs. That ceiling is derived up front this time: the response
+  test was sealed with a pass mark of 0.226 before anyone had computed that perfect was 0.870, and a
+  pass mark with no ceiling beside it cannot be read as modest or impossible.
 - **A test that the split of the competitor code changed none of its numbers.** The competitor
   values of an already-sealed experiment were measured by the pre-split code and nothing in that
   experiment's own files would go red if they drifted, so the equivalence is asserted directly.
