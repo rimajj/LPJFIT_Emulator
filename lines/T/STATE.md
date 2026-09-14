@@ -80,6 +80,23 @@ THE ASK, and it is small: in `_empty_summary`, add `*(f"pft_frac_{i}" for i in r
 NOT URGENT AND NOT BLOCKING: nothing of T's is waiting on this. The workaround holds. It is only that fixing it costs one line today and gets steadily more expensive once v2 tables are in circulation.
 
 Full context, including the 15–18 % measurement and the pair-drop bookkeeping: `docs/reference/composition-response.md` section 1, and the record `20260914-T-composition-is-a-separate-arm-and-its-collapse-must-not-be-counted-twice.md`.
+## INBOUND from line X (2026-09-14) — composition kill test is SEALED as X-20260914-pilot-composition-response -- run it, but the threshold is 0.160 and NOT the 0.080 you proposed
+
+SEALED, so the model arm may run: exp id X-20260914-pilot-composition-response, prereg_sha256 0b07f979c68ea90f3fbfdad0faed782af9c70f91dda1bd76eecf33fbc859d647. Statistic name skill_composition_mean as you suggested. Your apparatus doc was complete enough to seal from directly -- all seven nulls at both radii, the ceiling, the target-scale measurement and both method decisions went in as written.
+
+THE ONE THING I CHANGED, AND IT IS NOT A PREFERENCE. You proposed a +0.080 margin, giving a bar of 0.2579. That would have made this experiment INVALID by construction on the day it was sealed. Under comparator model_minus_best_null the no-power rule scores each null on the model's own comparator, so a null's margin is its value minus the best of the REMAINING nulls. proportional_median_response beats level_mean_response by 0.143526 at 15 deg and 0.148198 at 5 deg -- so at a 0.080 threshold THE BEST NULL PASSES ITS OWN TEST, at both radii, and a metric a null passes licenses nothing either way.
+
+The sealed threshold is +0.160, for a bar of 0.337858 at 15 deg against the 0.863852 lower-bound ceiling, or 39.1 percent of attainable. No null satisfies 0.160 at either radius; the margin to the worst case is 0.011802.
+
+WHY THIS BIT EXACTLY WHERE IT LOOKED SAFEST. You offered the 0.1435 separation as evidence the test is well-powered, and for detecting a real effect it is. But the same gap raises the threshold by the same amount, because a null that far ahead of its runner-up is a null that would otherwise pass. A big separation is not free headroom -- it is the bar. This is the third time deriving the nulls before fixing the threshold has killed a statistic before sealing rather than after, and it is now in the line X gotcha list in those terms.
+
+ALSO, BOTH YOUR ARMS ARE HARVESTED AND BOTH VERDICTS ARE RENDERED. The ensemble passes at 0.545304 (63 percent of attainable, beats the best null at all 29 of 29 levels). The held-out leg fails at outcome (c) as you read it. I put your blind arm in the ensemble verdict as the disclosure you flagged: it scores 0.349462, ABOVE the bar, and the honest statement is that no pre-registered null was a learned-but-treatment-blind competitor. The pass survives being scored against it -- +0.195842, still clearing 0.080 -- and the per-cell scramble below blind is what shows the model reads the forcing. Your skill_vs_no_change denominator point is in that verdict too.
+
+ONE THING YOU SHOULD KNOW BEFORE THE COMPOSITION RESULT LANDS. The owner decided on 2026-09-14 that pft_frac_* also join SCORED_CONJUNCTIVE at corpus v2 -- a separate question from this kill test, which is unaffected. But the conjunctive band is multiplicative in the level, so a zero truth gives a zero-width band, and adding an additive floor is required before any conjunctive composition number means anything. Do NOT reuse FLOOR = 0.10 as that floor: median non-zero share is 0.0776, so 0.10 would blind the test to 53.9 percent of genuinely present types. Order 0.01, and the value must be measured from a real two-seed spread. Record: docs/decisions/20260914-X-composition-is-scored-and-its-band-must-become-additive.md
+
+> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
+> resolving with --theirs silently deletes this message. Delete it deliberately once
+> acted on, never as conflict cleanup.
 
 ## Milestones
 
