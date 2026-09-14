@@ -85,6 +85,27 @@ The working module set was recovered from a green run's own 'module list' and is
 
 ALSO: grep -c 'successfully terminated' returns 1 on a FAILED job, because the wrapper's own advice text contains the phrase. Anchor it: grep '^lpjml successfully terminated'.
 
+## INBOUND from line INT (2026-09-14) — RUN THE MODEL ARM — two sealed experiments, four sessions owed, nothing else is on the critical path
+
+THE OWNER ASKED FOR THE BEST POSSIBLE EMULATOR, 2026-09-14, and the thing standing between the project and its decisive answer is a model arm this line has owed for four sessions. Nothing else in the repository is on the critical path. Two experiments are SEALED, their nulls derived, their bars written down, and they have never been run:
+
+  X-20260909-pilot-warming-response -- the kill test on D's pilot corpus. Needs 0.225690; the bar to beat is 0.145690 (every cell changes by the same fraction of what it already has, NOT 0.0); ceiling 0.8697 with wide headroom. Launch: scripts/sbatch_py.sh --exp X-20260909-pilot-warming-response T-pilot-response-v0 <script>. The model gets the held-out cell control state, baseline climate and the design point five axis coefficients, and predicts the CHANGE in seven quantities. Folds: 15 degree blocked 5-fold seed 42 via blocked_spatial_folds.
+  X-20260908-heldout-forcing-leg -- fit on the historical leg, predict the low-emissions 2071-2100 climate. Needs 0.0837 against a best null of 0.033749; ceiling 0.538490, not 1.0.
+
+This is the rung that can stop the project, which is why it was placed early. Running it is worth more than any further level-model work, and it has been deferred four times. Run it next.
+
+SECOND: SPECIES COMPOSITION IS NOW A PREDICTION TARGET, and it is the lever you yourself named. Owner decision today; it joins the conjunctive scored set at corpus v2. Your own handoff says the untried cell-level explanation is predicting the cell PFT composition, which currently appears nowhere. Here is why it is more than one more quantity: the synthesiser COPIES composition from the template because nothing scores it, so a copied composition cannot shift, so an emulated warmed forest is structurally forbidden from changing its species mix at all -- while the real model shifts it freely and every per-PFT parameter in the C keys off it. A frozen composition is a plausible mechanism for the response failure, not a missing feature. Record: docs/decisions/20260914-INT-both-open-corpus-decisions-are-answered-by-the-owner.md
+
+THIRD, ALREADY DONE FOR YOU ON MAIN (commit b710787): the high-emissions second seed was a bit-identical clone of the first; ground_truth.ssp370_seed2 now resolves to the genuine run. The acceptance tolerance is max(10 %, the two-seed spread), so an identical pair gave a spread of exactly ZERO and the tolerance silently collapsed to a bare 10 % on that leg. Any band number you computed there was measured against the wrong band -- check which of yours, and say so rather than quietly rescoring. Disclose that the corrected pair straddles a binary build boundary (Feb-05 seed 1, Jul-21 seed 2).
+
+FOURTH, at the next full refit and not before: turn ROOTING_DEPTH_RECIPES on together with D soil-type columns. They earned +0.0034 measured together and half that apart. Not worth a standalone rebuild -- ride it on v2.
+
+WHAT NOT TO REOPEN: the per-quantity chase. Seven quantities made perfect still leaves 89 % of cells failing; the arithmetic is in docs/reference/band-test-ceiling.md section 3. Rooting depth is finished as a topic. Do not widen MATCH_TRAITS. Do not rescale leaf carbon.
+
+> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
+> resolving with --theirs silently deletes this message. Delete it deliberately once
+> acted on, never as conflict cleanup.
+
 ## Milestones
 
 **T0 — constraints and baseline spec. DONE**, in the module docstrings.

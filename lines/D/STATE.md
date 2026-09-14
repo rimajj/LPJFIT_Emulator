@@ -78,6 +78,29 @@ ALSO: grep -c 'successfully terminated' returns 1 on a FAILED job, because the w
 > resolving with --theirs silently deletes this message. Delete it deliberately once
 > acted on, never as conflict cleanup.
 
+## INBOUND from line INT (2026-09-14) — BOTH corpus-v2 blockers are answered by the owner — build v2, the genuine second seed is already wired on main
+
+BOTH BLOCKERS ARE ANSWERED. Owner, 2026-09-14, on being shown the two questions: use the run that is not a copy, obviously; and predict species composition. Neither needed escalating. Build corpus v2 now. Record: docs/decisions/20260914-INT-both-open-corpus-decisions-are-answered-by-the-owner.md
+
+DONE FOR YOU ON MAIN (commit b710787), so do not wait on it: ground_truth.ssp370_seed2 now resolves to ..._random_seed2_from_hist_seed2. Verified on disk 2026-09-14 -- anchored terminate line, all 67420 cells, restart_2100.lpj 133,580,962,759 B against seed 1 133,559,375,490 B. The clone is RETAINED as ground_truth.ssp370_seed2_INVALID_CLONE_OF_SEED1 because three sealed pre-registrations cite corpus hashes computed against it; it is provenance, an input to nothing.
+
+NOTE THIS IS A REPOINT, NOT THE NEW KEY YOU ASKED FOR, and the reason is the shape of the original bug. That failure was SILENT -- the seed setting is inert under -DFROM_RESTART, no log line ever said so. Leaving the obvious-looking name aimed at the poisoned directory keeps the trap armed for the next reader. So the clone got the unusable name instead. Your scripts/corpus_build.py:69 needs NO key change: it already reads ground_truth.ssp370_seed2 and now gets the real run. Delete the stale warning comment at :61-68 and replace it with the build-boundary disclosure below. check_seeds_differ should now pass, for the right reason -- confirm that it does rather than assuming it.
+
+YOUR THREE ASKS IN ONE REBUILD, and it must be ONE. A changed corpus is a changed question; two versions in flight means two questions and no comparison.
+1. the genuine second seed (above);
+2. pft_frac_* columns, because composition is now a PREDICTED and SCORED quantity -- see the X message, this is not cosmetic;
+3. the four soil-type columns line T asked for on 2026-09-10, IF they are ready. They do not hold v2 up if not.
+
+DISCLOSE PERMANENTLY, in provenance.json and beside every number from this pair: it straddles a binary build boundary. Seed 1 is the Feb-05 build, the genuine seed 2 the Jul-21 build. paths.yaml never mentioned the Jul-21 build at all; it does now.
+
+AND: a rebuild of v0/v1 under the same command now yields different bytes than those versions' recorded hashes. That is exactly why v2 is a new version and never an edit in place. v0/v1 hashes stay untouched.
+
+STILL WORTH ITS 34 CORE-HOURS, and line X asked first: a second seed for 20 pilot cells. It converts the kill test ceiling from a bound (0.8697) into a measurement, and it would attribute the 2.7 % soil-carbon offset. 10 % of what the pilot cost. Do it alongside v2.
+
+> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
+> resolving with --theirs silently deletes this message. Delete it deliberately once
+> acted on, never as conflict cleanup.
+
 ## Milestones
 
 **D2 — the pilot corpus. DONE, runs and table both.** `vegemu.corpus.select` and

@@ -79,6 +79,25 @@ The map score 0.0361 read against an implied ceiling of 1.0 looks like near-tota
 > resolving with --theirs silently deletes this message. Delete it deliberately once
 > acted on, never as conflict cleanup.
 
+## INBOUND from line INT (2026-09-14) — YES to composition in the conjunctive set — and the band you scored the high-emissions leg against was the wrong band
+
+YOUR QUESTION TO D IS ANSWERED: YES, pft_frac_* joins SCORED_CONJUNCTIVE at corpus v2. Owner, 2026-09-14. Record: docs/decisions/20260914-INT-both-open-corpus-decisions-are-answered-by-the-owner.md
+
+WHY IT IS NOT A SCOPING QUESTION. You spotted the mechanism yourself and then filed it as a scoring preference. It is the stronger finding: the synthesiser COPIES composition from the template because nothing scores it, a copied composition cannot shift, so an emulated forest under a warmed climate is structurally FORBIDDEN from changing its species mix -- while the real model shifts it freely and every per-PFT parameter in the C keys off exactly that. That is a candidate mechanism for the central failure, not an appendix. Line T reached the same place independently: failure clusters by CELL not by quantity, and the one untried cell-level lever named in lines/T/STATE.md is predicting the cell PFT composition, which currently appears nowhere.
+
+THREE THINGS THAT CONSTRAIN HOW V2 MAY BE REPORTED.
+1. WIDENING A CONJUNCTION CAN ONLY LOWER THE PASS RATE. A v2 number beside a v1 number is not like-for-like and will read as a regression. Report the v1-SCOPE number on the SAME model beside it, or the comparison is dishonest.
+2. THE CEILING ARM MUST BE RE-MEASURED, NOT CARRIED OVER. 0.5585 is the attainable ceiling for the current 22 quantities. A wider conjunction has a LOWER ceiling. Quoting 0.5585 against a v2 score repeats, in the other direction, the exact error your own gotcha list warns about.
+3. DISCLOSE THAT 3 OF THE 22 PASS FOR ANY PREDICTION (k_root is constant), so the honest count is 19 today. State the new count for v2.
+
+AND A CORRECTION THAT REACHES BACKWARD. The configured high-emissions second seed was a bit-identical clone of the first (fixed on main today, commit b710787, ground_truth.ssp370_seed2 now points at the genuine run). The acceptance tolerance is max(10 %, the two-seed spread), so an identical pair gives a spread of exactly ZERO and the tolerance silently collapsed to a bare 10 %. Every band computed on that leg was the wrong band. Your own gotcha already says to check that a leg has two real runs before deriving anything -- this is that, confirmed and now fixed upstream of you. Decide explicitly which sealed results this touches and say so in their verdicts; do not re-seal anything on my say-so.
+
+THE CRITICAL PATH IS UNCHANGED AND IS NOT YOURS: line T owes the model arm for X3 and X5. Four sessions now. I have told them it is the single next action.
+
+> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
+> resolving with --theirs silently deletes this message. Delete it deliberately once
+> acted on, never as conflict cleanup.
+
 ## Milestones
 
 **X1 — the kill test on the ground-truth legs. DONE, `fail`.** Its value is the diagnosis: the
