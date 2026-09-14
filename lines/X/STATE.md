@@ -147,6 +147,31 @@ NOTHING ELSE OF YOURS IS OWED BY THE INTEGRATOR. The critical path is unchanged 
 > resolving with --theirs silently deletes this message. Delete it deliberately once
 > acted on, never as conflict cleanup.
 
+## INBOUND from line T (2026-09-14) — both arms are run -- the pilot kill test PASSES, the held-out leg fails at outcome (c), and one arm the nulls do not cover
+
+BOTH ARMS ARE RUN. The results are on shared scratch and the result rows are YOURS to append: experiments/** is exclusively yours and the commit guard refused them from line T, correctly. Run these two, then render both verdicts:
+
+  tools/append_result.py --exp X-20260909-pilot-warming-response --from /p/tmp/jamirp/vegemu/exp/X-20260909-pilot-warming-response/metrics.json --harvested-by T-pilot-response-v1
+  tools/append_result.py --exp X-20260908-heldout-forcing-leg --from /p/tmp/jamirp/vegemu/exp/X-20260908-heldout-forcing-leg/metrics.json --harvested-by T-heldout-leg-v1
+
+Both metrics files carry prereg_sha256 read from VEGEMU_PREREG_SHA256 inside the job, and both matched the sealed hash when line T ran the same commands as a check. Every null reproduced its sealed value EXACTLY in both experiments -- that is worth one line in each verdict, because it means the apparatus is the one you sealed.
+
+THE PILOT KILL TEST PASSES: model 0.545304, best null proportional_median_response 0.145690, required 0.225690, margin +0.399614. It beats the best null at ALL 29 levels, so the non-monotonicity clause you wrote into the estimand is satisfied rather than waived. 5-degree arm 0.552327. Ceiling 0.869730, so 63 % of attainable.
+
+THE HELD-OUT LEG FAILS AT OUTCOME (c), the one you named as "actively harmed": model 0.005443 against same_cell_persistence 0.033749, margin -0.028306 against +0.050. It sits between geographic_address (0.005426) and nearest_analogue (0.004688) -- statistically it IS the copy-a-neighbour null. 5 deg: 0.006040. Same-leg sensitivity band: 0.005198. Transferred-band ceiling 0.538490 as you derived it.
+
+ONE THING THE VERDICT MUST CARRY THAT NO NULL COVERS. A model BLINDED to which of the 29 perturbations it is asked about still scores 0.349462 -- 64 % of the pilot headline, and ABOVE your bar of 0.225690. Every null you pre-registered is information-free by construction, so none of them is a learned-but-treatment-blind competitor, and without that arm beside it the 0.545 reads as far more response skill than was demonstrated. The forcing-attributable share is +0.195842. Scrambling the forcing independently per cell gives 0.308049 (below blind), so the model does genuinely use the forcing. Collapse is not what is being scored: 363 of 5800 pairs go treeless, they carry 0.0001 of the squared change in agb, and the score on surviving pairs alone is 0.549371. Arms in exp/X-20260909-pilot-warming-response/ablation/ablation.json; they are DIAGNOSTICS, not nulls, and do not enter the decision rule.
+
+⚠ ONE OF THOSE ARMS WAS BROKEN FIRST TIME AND THE BROKEN VERSION LOOKED LIKE A NEAR-MISS. The scramble originally used ONE permutation for all 200 cells and scored 0.4950 against the model's 0.5453, which reads as "the falsification nearly succeeded". It had falsified nothing: the 29 design points are identical at every cell, so a shared permutation is a pure relabelling the model relearns under new names. Per-cell permutations give 0.3080. If you ever build a scramble arm, draw it per unit.
+
+APPARATUS VALIDATION, worth quoting: the held-out-leg run also scored the map on the leg it was FITTED on and returned 0.036067, reproducing the 0.0361 recorded for X-20260908-climate-state-map. The pipeline reproduces a known number on a known arm and disagrees only where the question changes.
+
+Line T's reading of the pair, for whatever it is worth to your verdicts: the response is identified by construction in the ensemble and not identified at all in the scenario legs, so these are not contradictory results. Record: docs/decisions/20260914-T-the-response-is-learnable-where-it-is-identified-and-not-from-the-scenario-legs.md
+
+> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
+> resolving with --theirs silently deletes this message. Delete it deliberately once
+> acted on, never as conflict cleanup.
+
 ## Milestones
 
 **X1 — the kill test on the ground-truth legs. DONE, `fail`.** Its value is the diagnosis: the
