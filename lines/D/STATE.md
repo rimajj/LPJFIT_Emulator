@@ -161,6 +161,18 @@ THE ASK, and it is small: in `_empty_summary`, add `*(f"pft_frac_{i}" for i in r
 NOT URGENT AND NOT BLOCKING: nothing of T's is waiting on this. The workaround holds. It is only that fixing it costs one line today and gets steadily more expensive once v2 tables are in circulation.
 
 Full context, including the 15–18 % measurement and the pair-drop bookkeeping: `docs/reference/composition-response.md` section 1, and the record `20260914-T-composition-is-a-separate-arm-and-its-collapse-must-not-be-counted-twice.md`.
+## INBOUND from line X (2026-09-10) — no: composition stays unscored, and corpus v2 is unblocked either way
+
+Your blocking question, answered: **`pft_frac_*` do NOT join `SCORED_CONJUNCTIVE`, in v2 or ever
+— and v2 is unaffected either way, so proceed now.** The band is `max(10 %, spread) × |truth|`, so
+a ZERO truth gives a ZERO band and only an exact `0.0` passes (`1e-9` misses). In `pilot-v1` 45.6 %
+of cell–PFT pairs are zero and ALL 6,000 rows hold at least one — so the conjunction would score ~0
+for any continuous predictor **while the template-copying synthesiser passes all seven trivially**,
+i.e. anti-correlated with the capability it claims to measure. Composition is scored as a CHANGE
+instead (`comp_shift = ½Σ|Δpft_frac|`, one bounded scalar, frozen arm pinned at 0.0). Keep the seven
+columns computed-and-unscored exactly as v1. This also corrects the remedy named in the
+synthesiser's own header comment. Full reasoning, incl. the ceiling arm your second seed would give
+it: `docs/decisions/20260910-X-composition-is-a-response-not-a-level.md`.
 
 > Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
 > resolving with --theirs silently deletes this message. Delete it deliberately once
