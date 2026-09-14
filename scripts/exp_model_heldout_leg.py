@@ -47,6 +47,7 @@ import polars as pl
 from exp_derive_nulls_leg import oof_nulls
 from vegemu.dataset import assemble, load_leg, tree_bearing
 from vegemu.models.emulator import EmulatorConfig, fit_out_of_fold
+from vegemu.results import append_result_block
 from vegemu.score import (
     SCORED_CONJUNCTIVE,
     acceptance_band_transferred,
@@ -215,6 +216,19 @@ def main() -> int:
 
     primary = report["by_blocking"]["15deg"]  # type: ignore[index]
     report["decision"] = primary["transferred"]["decision"]
+    # The flat block `tools/append_result.py` reads. Primary blocking and the TRANSFERRED band --
+    # the same-leg band is the pre-declared sensitivity arm and stays inside `by_blocking`, because
+    # a circular band is exactly what this experiment exists to avoid quoting as the number.
+    report.update(
+        append_result_block(
+            statistic="band_frac_conjunctive",
+            arms={
+                "model": float(primary["transferred"]["model"]),
+                **primary["transferred"]["nulls"],
+            },
+            n=int(report["n_cells"]),  # type: ignore[arg-type]
+        )
+    )
     (out / "metrics.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(f"\nwrote {out / 'metrics.json'}")
     return 0

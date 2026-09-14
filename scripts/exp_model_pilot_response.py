@@ -57,6 +57,7 @@ from exp_derive_nulls_pilot import (
     derive_nulls,
 )
 from vegemu.paths import paths
+from vegemu.results import append_result_block
 from vegemu.score import RESPONSE_QUANTITIES, blocked_spatial_folds, matrix
 
 # The five baseline climate coordinates, raw and standardised. These are the axes the design
@@ -331,6 +332,19 @@ def main() -> int:
 
     primary = report["by_blocking"][f"{args.degrees:g}deg"]  # type: ignore[index]
     report["decision"] = primary["decision"]
+    # The flat block `tools/append_result.py` reads. Built from the PRIMARY blocking only: the
+    # 5-degree arm is a pre-declared sensitivity check and is reported beside it, never as the
+    # number of record.
+    report.update(
+        append_result_block(
+            statistic="skill_response_mean",
+            arms={
+                "model": float(primary["model"]["pooled"]),
+                **{n: float(v["pooled"]) for n, v in primary["nulls"].items()},
+            },
+            n=int(report["n_pairs"]),  # type: ignore[arg-type]
+        )
+    )
     (out / "metrics.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(f"\nwrote {out / 'metrics.json'}")
 
