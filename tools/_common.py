@@ -180,7 +180,21 @@ def staged_files() -> list[str]:
 
 
 def tracked_files() -> list[str]:
-    return [ln.strip() for ln in _git("ls-files").splitlines() if ln.strip()]
+    """Every file a checker should judge by default: tracked, PLUS untracked-and-not-ignored.
+
+    ⚠ THE `--others` IS THE WHOLE POINT AND MUST NOT BE DROPPED. This is the no-argument path -- the
+    one a person runs by hand to check their work before committing, and the one CI's `budgets` job
+    runs. With a bare `git ls-files` it listed tracked files only, so a freshly written document was
+    INVISIBLE to it: `check_budgets.py` passed on a 122-line decision record against a 120-line cap
+    and only began failing once the file was committed, which is the moment it is too late to be
+    cheap. It cost a merge cycle on 2026-09-09
+    (docs/decisions/20260909-X-the-commit-guard-sees-an-empty-index.md, bug 2).
+
+    `--exclude-standard` keeps .gitignore honoured, so scratch output does not become findings.
+    `staged_files()` never had the hole, because `--diff-filter=ACMR` already includes adds.
+    """
+    out = _git("ls-files", "--cached", "--others", "--exclude-standard")
+    return sorted({ln.strip() for ln in out.splitlines() if ln.strip()})
 
 
 # The three states a comparison base can be in. They must stay distinguishable, because two of them

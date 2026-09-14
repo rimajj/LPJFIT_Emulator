@@ -24,7 +24,48 @@ CMD="$(cat | python3 -c 'import json,sys;print(json.load(sys.stdin).get("tool_in
 REPO="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 cd "$REPO" 2>/dev/null || exit 0
 
+# ⚠ FAIL CLOSED WHEN THE COMMAND STAGES ITS OWN FILES. A PreToolUse hook fires ONCE, before the
+# whole command, so for the extremely natural `git add <paths> && git commit -m …` the index is
+# still empty (or stale) when we look here. The guard used to read that empty index, conclude there
+# was nothing to check and exit 0 -- silently, needing no opt-in, leaving none of the `Guard-skip:`
+# trace CI counts. Every commit of the session that found it had used that form, so not one of them
+# was ever checked (docs/decisions/20260909-X-the-commit-guard-sees-an-empty-index.md).
+#
+# Note this is NOT only an empty-index bug: even with a non-empty index, an inline `git add` adds
+# files the guard never saw, so its verdict is about the wrong set either way. Hence the test is on
+# the COMMAND, not on the index. Denying is right rather than merely safe -- staging in a separate
+# step costs one extra tool call and makes the guard's view of the commit exactly correct.
+if [[ "$CMD" =~ (^|[[:space:];&|])git[[:space:]]+(add|stage)([[:space:]]|$) ]]; then
+  python3 - <<'PY'
+import json
+print(json.dumps({"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny",
+  "permissionDecisionReason":"""Stage and commit in two separate commands.
+
+This one command both stages files and commits them. A PreToolUse hook runs ONCE, before the whole
+command, so the checkers would inspect the index as it is NOW -- before `git add` has run -- and
+would pass judgement on the wrong set of files (usually an empty one, which reads as "nothing to
+check" and lets everything through). That silent bypass is exactly what this guard exists to stop.
+
+Do this instead:
+  git add <paths>
+  git commit -m "..."
+
+The second command is then checked against the real staged set."""}}))
+PY
+  exit 0
+fi
+
 STAGED="$(git diff --cached --name-only --diff-filter=ACMR 2>/dev/null || true)"
+# `git commit -a` stages every tracked modification at commit time, so the index alone again
+# understates what is about to land. That set IS knowable up front, so fold it in rather than deny.
+# Quoted strings are stripped first: otherwise a commit MESSAGE containing " -a " would widen the
+# checked set and report findings about files the commit never touches -- the same shape of bug as
+# the one above (a guard matching text that is not what it guards), which this repo has now hit
+# three times. `--amend` cannot match: its `a` is not preceded by whitespace-then-single-dash.
+CMD_NOSTR="$(printf '%s' "$CMD" | sed 's/"[^"]*"//g; s/'"'"'[^'"'"']*'"'"'//g')"
+if [[ "$CMD_NOSTR" =~ (^|[[:space:]])(-[a-zA-Z]*a[a-zA-Z]*|--all)([[:space:]]|$) ]]; then
+  STAGED="$(printf '%s\n%s' "$STAGED" "$(git diff --name-only --diff-filter=ACMR 2>/dev/null || true)" | sort -u | sed '/^$/d')"
+fi
 [[ -z "$STAGED" ]] && exit 0
 
 FINDINGS=""
