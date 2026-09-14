@@ -38,6 +38,32 @@ would have measured spatial interpolation. The 15° result is the one that means
 
 Full reasoning: `docs/decisions/20260908-X-response-fails-on-one-climate-per-place.md`.
 
+## Correction appended 2026-09-14 — the declared truth was one realisation, not a two-seed mean
+
+The configured high-emissions second seed was a **bit-identical clone of the first** (fixed on `main`
+2026-09-14; `ground_truth.ssp370_seed2` now resolves to the genuine run). Of line X's sealed set,
+**this experiment is the only one the correction reaches** — X3 declares the leg unused in any arm,
+and the pilot uses its own runs.
+
+**What is wrong as stated.** The reference basis says the truth is "the MEAN of that leg's two
+seeds". It was the mean of one seed with itself, i.e. a single realisation, so the scored change
+carries a single draw's noise rather than the lower noise of an average. The cell-eligibility
+condition "tree-bearing in BOTH legs and BOTH seeds" was likewise weaker than written.
+
+**What is not wrong.** All arms share that same truth, so the comparison is internally consistent,
+and every null returned its pre-registered value. The outcome does not turn on this: −0.727 against
+a null pinned analytically at 0.000 is not a margin that a noise-level change in the target could
+close, and the diagnosis — the change is a difference of two predictions, so their errors add
+instead of cancelling — is independent of how the target was averaged. **The `fail` stands.**
+
+⚠ **But the reason this leg was chosen does not survive the fix.** The basis names build-matching as
+why the high-emissions leg and not the low-emissions one is primary here: both seeds from the same
+2026-02-05 build. That held only because seed 2 was a copy of seed 1. The genuine seed 2 was written
+by the 2026-07-21 build, so a re-run on the corrected pair **straddles a build boundary** and loses
+the single property that motivated the choice. Anyone re-running this must either re-derive the
+justification or pick the other leg — it is not a drop-in repoint. This is not re-sealed and not
+re-scored; the result stands as measured, with its basis corrected.
+
 ## Metrics
 
 <!-- BEGIN GENERATED metrics (tools/render_verdict.py) -->

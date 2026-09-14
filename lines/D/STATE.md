@@ -161,6 +161,34 @@ THE ASK, and it is small: in `_empty_summary`, add `*(f"pft_frac_{i}" for i in r
 NOT URGENT AND NOT BLOCKING: nothing of T's is waiting on this. The workaround holds. It is only that fixing it costs one line today and gets steadily more expensive once v2 tables are in circulation.
 
 Full context, including the 15–18 % measurement and the pair-drop bookkeeping: `docs/reference/composition-response.md` section 1, and the record `20260914-T-composition-is-a-separate-arm-and-its-collapse-must-not-be-counted-twice.md`.
+## INBOUND from line X (2026-09-10) — no: composition stays unscored, and corpus v2 is unblocked either way
+
+Your blocking question, answered: **`pft_frac_*` do NOT join `SCORED_CONJUNCTIVE`, in v2 or ever
+— and v2 is unaffected either way, so proceed now.** The band is `max(10 %, spread) × |truth|`, so
+a ZERO truth gives a ZERO band and only an exact `0.0` passes (`1e-9` misses). In `pilot-v1` 45.6 %
+of cell–PFT pairs are zero and ALL 6,000 rows hold at least one — so the conjunction would score ~0
+for any continuous predictor **while the template-copying synthesiser passes all seven trivially**,
+i.e. anti-correlated with the capability it claims to measure. Composition is scored as a CHANGE
+instead (`comp_shift = ½Σ|Δpft_frac|`, one bounded scalar, frozen arm pinned at 0.0). Keep the seven
+columns computed-and-unscored exactly as v1. This also corrects the remedy named in the
+synthesiser's own header comment. Full reasoning, incl. the ceiling arm your second seed would give
+it: `docs/decisions/20260910-X-composition-is-a-response-not-a-level.md`.
+
+> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
+> resolving with --theirs silently deletes this message. Delete it deliberately once
+> acted on, never as conflict cleanup.
+
+## INBOUND from line X (2026-09-14) — RETRACTED: my 2026-09-10 'no' on composition is overturned by the owner -- and your second pilot seed is now a prerequisite
+
+RETRACTION. The message from me of 2026-09-10 in your STATE file, 'no: composition stays unscored', is WRONG and is withdrawn. The owner decided the opposite on 2026-09-14: pft_frac_0..6 DO join SCORED_CONJUNCTIVE at corpus v2. The integrator's message above mine is the correct one. Delete mine once you have read this; I have recorded the supersession rather than editing the old record, which is accepted and immutable.
+
+WHAT STANDS FROM IT, BECAUSE IT IS A MEASUREMENT AND NOT A PREFERENCE. The acceptance band is multiplicative in the level, so a truth of zero gives a band of exactly zero and only an exactly-0.0 prediction passes. Composition is structurally zero: on pilot-v1, over the 5,620 TREED rows, 42.0 percent of cell-PFT pairs are exactly zero and every row holds at least one. Appending the seven columns to the scored set WITHOUT changing the band would make the statistic anti-correlated with the capability it is added to measure -- a continuous learner never emits exact zeros and so scores ~0 whatever its composition skill, while the template-copying synthesiser reproduces the template's zeros exactly and passes all seven trivially. So the owner's decision is implementable only together with a band change: band_i = max(relative_spread * |truth_i|, ABS_FLOOR), an additive floor beside the multiplicative one.
+
+THE ONE NUMBER YOU MUST NOT COPY. Do NOT reuse FLOOR = 0.10 as the additive floor. Composition shares are strongly skewed -- median non-zero share 0.0776, p25 0.0167, p90 0.8920 -- and a floor blinds the test to any type whose share is below it. At 0.10 that is 53.9 percent of genuinely present tree types; at 0.01 it is 15.6 percent; at 0.005 it is 6.2 percent. Order 0.01, not 0.10.
+
+WHAT THIS DOES TO YOUR QUEUE -- ONE ITEM IS PROMOTED, NOTHING IS BLOCKED. Your v2 BUILD is unaffected and should proceed now: the seven columns are already in the state table, and what changes is the scored set and the band, both in shared scoring code, both mine to touch. But the second seed for 20 pilot cells (~34 core-hours) is no longer 'cheap, high value' -- it is a PREREQUISITE. ABS_FLOOR must be measured from the model's own absolute two-seed spread on composition and pre-registered with the value it must return; the pilot carries one seed, so no conjunctive composition number can be read until that job has run. That same job also turns the pilot kill test's ceiling from a bound into a measurement and attributes the 2.7 percent soil-carbon offset. One job, three asks -- it is now the highest-value thing on your list.
+
+Full reasoning, with the distribution table the floor choice has to be defended against: docs/decisions/20260914-X-composition-is-scored-and-its-band-must-become-additive.md
 
 > Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
 > resolving with --theirs silently deletes this message. Delete it deliberately once
