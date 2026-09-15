@@ -36,6 +36,14 @@ model does read the forcing — but the 0.5453 must never be quoted without this
 **0.337858** (threshold **+0.160**, not the +0.080 T proposed — at 0.080 the best null passes its own
 test at both radii and the experiment would be `invalid` by construction). Ceiling 0.863852.
 
+**DONE 2026-09-15: the seal-provenance gate no longer cries wolf.** E12 now resolves the seal by
+CONTENT (`prereg_sha256`, which a rebase cannot change) instead of by the recorded `seal_commit`,
+which the mandated pre-merge rebase rewrites — it had reported a violation against intact provenance
+three times in one session, each silenced by a correction row. ⚠ **Never "correct" a stale
+`seal_commit` again**: it is a breadcrumb no check reads. STRICTER, not laxer — the old test never
+opened the commit it named. Six tests, real rebases.
+Record: `docs/decisions/20260915-X-the-seal-check-resolves-by-content-not-by-commit-hash.md`.
+
 **Line X's own next actions, in order:**
 
 1. **Seal X4, the emitted restart file.** Still the oldest unfinished item. Bar **0.786**, not zero
@@ -57,13 +65,9 @@ test at both radii and the experiment would be `invalid` by construction). Ceili
   high-emissions second run replaces the clone. Both land in ONE new corpus version.
 * **line D** — the one-cell, one-year, two-binary byte comparison. Still the only unproven claim in
   the X3 basis.
-* **integrator — a NEW shared-tool bug, same shape as the four already reported.** `seal_commit` in
-  `experiments/registry.jsonl` is a bare git sha, but `CLAUDE.md` mandates `pull --rebase` before
-  merging, which **rewrites the seal commit and orphans the recorded one** — so the seal-precedes-
-  result check (E12) fails on a provenance that is actually intact. Two correction rows have now
-  been appended for this cause. Resolve the seal by content (the prereg hash) or by a ref that
-  survives a rebase. ⚠ **X6's seal commit will need the same correction if this line rebases again
-  before merging.**
+* **integrator** — `CLAUDE.md` names a skill `experiment-registry` as the documented home of every
+  error code E01–E14 and its fix. **That skill does not exist in the repository.** E12's behaviour
+  changed today, so the missing page now also has something to be out of date about.
 * **integrator** — still open, and honestly so: `slurm-guard` matches command TEXT, so a command
   merely *naming* a `.py` path is refused. Keep prefixing `ALLOW_LOGIN_HEAVY=1`.
 

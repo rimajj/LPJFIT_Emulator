@@ -15,7 +15,9 @@
     E09  verdict.md's `outcome:` disagrees with the checker's own evaluation of the decision rule
     E10  verdict.md exists with no result rows, or its generated metrics block is stale
     E11  registry.jsonl or a result.jsonl was changed non-append-only versus the merge base
-    E12  the seal commit is not an ancestor of the commit that introduced the first result row
+    E12  the SEALED PRE-REGISTRATION BYTES do not appear in history before the first result row --
+         resolved by CONTENT (prereg_sha256), never by the recorded `seal_commit`, which a rebase
+         rewrites
     E13  a pre-registration has been sealed >30 days with no results and no `abandoned:` reason
     E14  estimand.reference_basis is empty, or data.leakage_checks is empty
 
@@ -26,6 +28,7 @@ metric the null also passes as having no power at all.
 
 from __future__ import annotations
 
+import hashlib
 import subprocess
 import sys
 import time
@@ -58,6 +61,43 @@ def _git(*args: str) -> str:
     return subprocess.run(
         ["git", "-C", str(repo_root()), *args], capture_output=True, text=True, check=False
     ).stdout
+
+
+def _git_bytes(*args: str) -> bytes | None:
+    """Raw stdout, or None if git failed. Bytes, because we hash blobs and text= would decode."""
+    r = subprocess.run(["git", "-C", str(repo_root()), *args], capture_output=True, check=False)
+    return r.stdout if r.returncode == 0 else None
+
+
+def seal_commit_by_content(prereg_rel: str, prereg_sha256: str) -> str | None:
+    """The EARLIEST commit whose `prereg_rel` blob hashes to `prereg_sha256`, or None.
+
+    ⚠ WHY THIS EXISTS, AND WHY `seal_commit` IS NOT USED FOR IT. The registry records a
+    `seal_commit` hash, and E12 used to test that hash for ancestry. But `CLAUDE.md` REQUIRES
+    `git pull --rebase origin main` before merging, and a rebase rewrites every commit on the line
+    that is not yet on main -- including the seal commit. The recorded hash then names an object on
+    no branch, ancestry of it is false for everything, and E12 reported a violation against
+    provenance that was completely intact. It happened three times in one session; each was
+    "resolved" by appending a correction row to an append-only ledger, which is bookkeeping to
+    silence a checker rather than a finding.
+
+    The content hash is the identifier that survives a rebase, and the registry already records it.
+    So the question E12 asks is answered directly: *did the exact sealed bytes exist in committed
+    history before the first result?* -- not *is some recorded hash an ancestor?*
+
+    THIS IS STRICTLY STRONGER THAN THE HASH TEST, not a relaxation of it. The old check proved only
+    that some commit id preceded the result; it never opened that commit, so a `seal_commit` naming
+    any early commit -- one that did not contain the pre-registration at all -- passed. This one
+    cannot pass unless the sealed bytes are really there.
+
+    History is simplified to commits that touched the path, which is safe here: the content has to
+    CHANGE to become the sealed bytes, so the commit that first carries them always appears.
+    """
+    for commit in _git("log", "--reverse", "--format=%H", "--", prereg_rel).split():
+        blob = _git_bytes("show", f"{commit}:{prereg_rel}")
+        if blob is not None and hashlib.sha256(blob).hexdigest() == prereg_sha256:
+            return commit
+    return None
 
 
 def registry_index() -> dict[str, dict]:
@@ -417,7 +457,7 @@ def check_append_only(rep: Report, ref: str) -> None:
                 ),
             )
 
-    # E12 — the seal commit must be an ancestor of the first result-bearing commit.
+    # E12 — the SEALED BYTES must be in history before the first result-bearing commit.
     reg = registry_index()
     for d in experiment_dirs(repo_root()):
         exp_id = d.name
@@ -425,14 +465,43 @@ def check_append_only(rep: Report, ref: str) -> None:
         res = d / "result.jsonl"
         if not row or not res.exists():
             continue
-        seal_commit = str(row.get("seal_commit", "")).strip()
-        if not seal_commit:
+        digest = str(row.get("prereg_sha256", "")).strip()
+        if not digest:
             continue
         rel = str(res.relative_to(repo_root()))
+        prereg_rel = str((d / "preregistration.yaml").relative_to(repo_root()))
         first = _git("log", "--reverse", "--format=%H", "--", rel).splitlines()
         if not first:
+            # The results are not committed yet (a --staged run at commit time). Nothing to
+            # compare against; the post-commit run and CI both see them.
             continue
         first_result_commit = first[0].strip()
+
+        seal = seal_commit_by_content(prereg_rel, digest)
+        if seal is None:
+            # Distinguish "cannot run" from "violation" -- a checker that crashes or is starved of
+            # input must say so, never report a finding it did not measure.
+            if _git("rev-parse", "--is-shallow-repository").strip() == "true":
+                rep.add(
+                    rel,
+                    "E12",
+                    "cannot verify the seal: this is a SHALLOW clone, so the commit carrying the "
+                    "sealed pre-registration may simply not have been fetched",
+                    hint="check out with full history (fetch-depth: 0); this is not a finding",
+                )
+            else:
+                rep.add(
+                    rel,
+                    "E12",
+                    f"no commit in history carries the sealed pre-registration bytes "
+                    f"(prereg_sha256 {digest[:12]}) for {exp_id}",
+                    hint=(
+                        "the sealed content was never committed, or was altered after sealing -- "
+                        "'pre-registered' means the exact bytes existed before the run"
+                    ),
+                )
+            continue
+
         anc = subprocess.run(
             [
                 "git",
@@ -440,7 +509,7 @@ def check_append_only(rep: Report, ref: str) -> None:
                 str(repo_root()),
                 "merge-base",
                 "--is-ancestor",
-                seal_commit,
+                seal,
                 first_result_commit,
             ],
             capture_output=True,
@@ -450,8 +519,8 @@ def check_append_only(rep: Report, ref: str) -> None:
             rep.add(
                 rel,
                 "E12",
-                f"seal commit {seal_commit[:12]} is not an ancestor of the first result "
-                f"commit {first_result_commit[:12]}",
+                f"the sealed pre-registration first appears in {seal[:12]}, which is not an "
+                f"ancestor of the first result commit {first_result_commit[:12]}",
                 hint=(
                     "the seal has to exist in history BEFORE the run it governs, or "
                     "'pre-registered' means nothing"
