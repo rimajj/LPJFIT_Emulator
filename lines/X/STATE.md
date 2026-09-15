@@ -66,8 +66,8 @@ derivation `scripts/exp_derive_nulls_restart_pilot.py`, jobs 2201910 / 2201928.
 * **integrator — `PLAN.md`'s rung ladder is stale and I cannot edit it.** Rung 1 **PASSED**
   2026-09-14 (0.545304 vs bar 0.225690, with the blind-arm caveat above) and rung 5 **FAILED** at
   outcome (c); both still read as undone, and the "Now" section still lists them as owed by T.
-* **integrator** — `CLAUDE.md` names a skill `experiment-registry` as the home of every error code
-  E01–E14. **That skill does not exist in the repository.**
+* ~~integrator — the missing `experiment-registry` skill~~ **DONE by the integrator, and it already
+  documents today's E12 change. Nothing owed.**
 * **integrator** — still open, and honestly so: `slurm-guard` matches command TEXT, so a command
   merely *naming* a `.py` path is refused. Keep prefixing `ALLOW_LOGIN_HEAVY=1`.
 
