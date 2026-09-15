@@ -16,6 +16,7 @@ So the same limits now fail a commit and fail CI, and raising one is an owner ac
     B05  the skill set is over its aggregate line or file cap
     B06  config/budgets.toml was modified without the owner-approval trailer
     B07  a skill has been unused past the failure threshold and is not listed in RETENTION.md
+    B08  a `Skill:`/`Method:` pointer names a skill that does not exist -- a DANGLING POINTER
 """
 
 from __future__ import annotations
@@ -338,6 +339,53 @@ def check_skill_hygiene(hygiene: dict, rep: Report) -> None:
             )
 
 
+# A pointer to a skill, as the runbook and the hooks actually write it: `Skill: commit-and-merge`,
+# ``Skill: `experiment-registry` ``, `Method: `method-discipline``. The kebab requirement (at least
+# one hyphen) is what keeps ordinary prose after a "Method:" heading from matching.
+SKILL_REF = re.compile(r"\b(?:Skill|Method)s?:\s*`?([a-z][a-z0-9]*(?:-[a-z0-9]+)+)`?")
+
+# Where a dangling pointer actually costs a session: the always-loaded runbook, the hooks (which
+# print skill names while DENYING a command), and the skills' own cross-references.
+SKILL_REF_SOURCES = ("CLAUDE.md", ".claude/hooks/*.sh", ".claude/skills/*/SKILL.md")
+
+
+def check_skill_refs(rep: Report) -> None:
+    """B08: a named skill must exist.
+
+    WHY THIS EXISTS. `CLAUDE.md` named five skills and one of them existed. Two of the names were
+    printed at runtime by hooks -- `session-line-context.sh` at every session start, and
+    `slurm-guard.sh` in the body of a DENY, so an agent was blocked and sent to a page that was not
+    there. Line T recorded the hole on 2026-09-09 ("referenced everywhere and enforced nowhere") and
+    line X hit it again on 2026-09-15; nothing failed in between, because nothing was watching. That
+    is the exact shape invariant 9 rules out: a chore with no triggering event and no failing gate.
+    """
+    root = repo_root()
+    have = {p.parent.name for p in root.glob(".claude/skills/*/SKILL.md")}
+    for pattern in SKILL_REF_SOURCES:
+        for path in sorted(root.glob(pattern)):
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            rel = str(path.relative_to(root))
+            for lineno, ln in enumerate(text.splitlines(), start=1):
+                for m in SKILL_REF.finditer(ln):
+                    name = m.group(1)
+                    if name in have:
+                        continue
+                    rep.add(
+                        rel,
+                        "B08",
+                        f"names skill {name!r}, which does not exist",
+                        line=lineno,
+                        hint=(
+                            f"write .claude/skills/{name}/SKILL.md, or remove the pointer. A "
+                            "pointer to a page that is not there is worse than no pointer: it "
+                            "sends a blocked session hunting for it"
+                        ),
+                    )
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = base_parser(__doc__ or "")
     args = ap.parse_args(argv)
@@ -361,6 +409,9 @@ def main(argv: list[str] | None = None) -> int:
     check_aggregates(list(cfg.get("aggregate_budget", [])), rep)
     check_owner_trailer(files, rep)
     check_skill_hygiene(dict(cfg.get("skill_hygiene", {})), rep)
+    # Repo-wide, not per-file: the pointer and the skill it names are almost never in the same diff,
+    # so a --staged run that only looked at changed files would miss every real case.
+    check_skill_refs(rep)
 
     return rep.emit()
 

@@ -22,6 +22,12 @@ fi
 LINE=""
 [[ "$BRANCH" == line/* ]] && LINE="${BRANCH#line/}"
 
+# The worktree paths come from config/paths.yaml, never from a literal here. This message is the
+# one that tells a human where to `cd`, so a hardcoded path that has gone stale sends the next
+# session to the wrong checkout -- and a SessionStart hook must still never fail, hence the `||`
+# fallback to the key name rather than an empty string.
+worktree() { python3 "$REPO/tools/_paths.py" "project.worktrees.$1" 2>/dev/null || echo "<project.worktrees.$1 unresolved>"; }
+
 echo "=== vegemu — a purely data-driven LPJmL-FIT state emulator ==="
 if [[ -z "$LINE" ]]; then
   cat <<TXT
@@ -32,9 +38,9 @@ fragments, MEMORY.md, config/, and cross-cutting decision records. Feature work 
 here -- config/ownership.toml enforces that, and the commit guard will refuse it.
 
 To work a line, launch a session in ITS worktree:
-  cd /p/projects/open/Jamir/vg-D   # line D — data: binary formats, corpus generation, provenance
-  cd /p/projects/open/Jamir/vg-T   # line T — training: models, GPU, inference
-  cd /p/projects/open/Jamir/vg-X   # line X — experiments: pre-registrations, nulls, verdicts
+  cd $(worktree D)   # line D — data: binary formats, corpus generation, provenance
+  cd $(worktree T)   # line T — training: models, GPU, inference
+  cd $(worktree X)   # line X — experiments: pre-registrations, nulls, verdicts
 TXT
   exit 0
 fi
@@ -48,7 +54,7 @@ echo "LINE: $LINE   branch: $BRANCH   ahead/behind origin/main: $AHEAD/$BEHIND  
 echo
 echo "Protocol: CLAUDE.md (short by design). Ownership: config/ownership.toml. Before merging, run"
 echo "tools/expected_gates.py -- it computes which CI gates this diff triggers, so you never poll"
-echo "for a check that will not appear. Skill: commit-and-merge."
+echo "for a check that will not appear."
 echo
 
 if [[ ! -f "$STATE" ]]; then

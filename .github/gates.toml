@@ -26,9 +26,9 @@ always = [".github/gates.toml", "tools/check_gates.py"]
 [[gate]]
 name = "budgets"
 job = "budgets"
-paths = ["**/*.md", "config/budgets.toml", ".claude/skills/**", "tools/check_budgets.py"]
+paths = ["**/*.md", "config/budgets.toml", ".claude/skills/**", ".claude/hooks/**", "tools/check_budgets.py"]
 branches = ["main", "line/**"]
-blocks = "a doc over budget; a malformed MEMORY.md row; a non-allowlisted root .md; the skill caps; a budget raised without owner approval; a skill unused past the threshold"
+blocks = "a doc over budget; a malformed MEMORY.md row; a non-allowlisted root .md; the skill caps; a budget raised without owner approval; a skill unused past the threshold; a pointer naming a skill that does not exist"
 budget_seconds = 20
 
 [[gate]]

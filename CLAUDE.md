@@ -97,7 +97,7 @@ tools/append_result.py --exp <exp_id> --from <metrics.json>
 tools/render_verdict.py <exp_id>
 ```
 
-Skill: `experiment-registry` (every error code E01–E14 and its fix). Method: `method-discipline`.
+Skill: `experiment-registry` (the lifecycle, and every error code E01–E14 with its fix).
 
 ---
 
@@ -116,7 +116,7 @@ tools/merge.sh <L>                       # flock'd: ff-only pull, --no-ff merge 
 ⚠ **A skipped workflow reports no status at all, not "skipped"** — so polling for a gate that will not
 run hangs forever. `expected_gates.py` computes the list from the diff; if it prints none, merge now.
 Never `git switch main` in a line worktree (`main` is checked out in the integration worktree; git
-refuses). Drive it with `git -C`, which `tools/merge.sh` does. Skill: `commit-and-merge`.
+refuses). Drive it with `git -C`, which `tools/merge.sh` does.
 
 ---
 
@@ -129,12 +129,12 @@ an overdue one blocks the merge.
 
 ⚠ **Judge a silent job by `sacct` CPU time, never by its log** — Python block-buffers stdout to a
 file, so a healthy job's log is empty until it exits. Cluster facts: `docs/reference/cluster.md`.
-Skill: `slurm-campaign`.
 
 ---
 
 ## Before you start a task
 
 Check whether a skill covers it and invoke it; re-deriving a procedure a skill already describes means
-that skill's description is too weak — sharpen it. If a recurring task has no skill, create one
-(`skill-creator`), and pay for it by merging or deleting another if the cap is reached.
+that skill's description is too weak — sharpen it. If a recurring task has no skill, write one at
+`.claude/skills/<name>/SKILL.md`, and pay for it by merging or deleting another if the cap is reached.
+**Naming a skill that does not exist is a red build** (`B08`) — write the page or drop the pointer.
