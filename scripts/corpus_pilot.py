@@ -22,6 +22,22 @@
     NCPUS=16 TIME=00:30:00 scripts/sbatch_py.sh D-pilot-decode scripts/corpus_pilot.py \\
         --stage decode --version v1 --workers 16
 
+A SECOND SEED ON A SUBSET -- the replicate. Same stages, `--seed 2 --subset 20`:
+
+    scripts/sbatch_py.sh D-pilot-s2-plan scripts/corpus_pilot.py \\
+        --stage plan --version v1 --seed 2 --subset 20
+
+WHY IT EXISTS, AND IT IS NOT "more data". The acceptance tolerance is `max(10 %, THE MODEL'S OWN
+TWO-RUN SPREAD)`, and that spread has never been measured on a PERTURBED spin-up -- only on
+present-day climate, from which it is currently transferred. Its median there is exactly 0.100, i.e.
+the bare floor, which is why the emitted-restart nulls collapse and that experiment cannot be
+sealed. A replicate is a second draw of the SAME cell under the SAME climate, so the difference
+between the two IS the model's noise. It is a denominator, never extra rows: appending it to the
+corpus would double the pilot with re-runs and call it more evidence.
+
+⚠ IT REUSES SEED 1'S FORCING BYTES RATHER THAN REBUILDING THEM. That is what makes the pair a
+controlled contrast. It also means seed 1's build stage must have run for those cells first.
+
 WHAT THIS IS. The corpus rung 1 is scored on. Every existing ground-truth leg holds exactly ONE
 climate per location, so climate and geography are collinear and a warming response is not
 separately identified (`MEMORY.md:ident-limit`) -- the predecessor's kill test failed on precisely
@@ -123,37 +139,60 @@ def _load(name: str) -> ModuleType:
     return mod
 
 
-def meta_dir(version: str) -> Path:
-    return scratch("corpus", f"pilot-{version}")
+def _vdir(version: str, seed: int) -> str:
+    """The per-version directory name.
+
+    ⚠ SEED 1 IS DELIBERATELY UNSUFFIXED. The 6,000 runs of `pilot-v1` are on disk under that exact
+    name and three pre-registrations cite a hash computed over them, so adding an `-s1` here would
+    silently orphan the corpus this project's only positive result was scored on. A second seed gets
+    its own tree; seed 1's paths are byte-for-byte what they were.
+    """
+    return f"pilot-{version}" if seed == SEED else f"pilot-{version}-s{seed}"
 
 
-def manifest_dir(version: str) -> Path:
+def meta_dir(version: str, seed: int = SEED) -> Path:
+    return scratch("corpus", _vdir(version, seed))
+
+
+def manifest_dir(version: str, seed: int = SEED) -> Path:
     """Manifests live with the runs: `sbatch_cmodel.sh` writes its task-farm runner beside them."""
-    return scratch("runs", f"pilot-{version}", "manifests")
+    return scratch("runs", _vdir(version, seed), "manifests")
 
 
-def _under(kind: str, version: str, cell: int, point: str) -> Path:
+def _under(kind: str, version: str, cell: int, point: str, seed: int = SEED) -> Path:
     """A per-run directory. `Path`, not `scratch()`: the plan stage must not create 12,000 dirs."""
     root = Path(str(paths()["scratch"]["root"]))
-    return root / kind / f"pilot-{version}" / f"c{cell}" / point
+    return root / kind / _vdir(version, seed) / f"c{cell}" / point
 
 
 def forcing_dir(version: str, cell: int, point: str) -> Path:
+    """SEED-INDEPENDENT ON PURPOSE, and this is the whole point of a second seed.
+
+    The forcing IS the climate. A random seed changes the draws LPJmL-FIT makes, never the input it
+    is driven by, so a second seed must read the SAME forcing bytes -- not an identical-looking
+    rebuild of them. Sharing the directory makes that true by construction instead of by assertion,
+    and it is why a second seed costs no forcing-generation time at all.
+    """
     return _under("forcing", version, cell, point)
 
 
-def run_dir(version: str, cell: int, point: str) -> Path:
-    return _under("runs", version, cell, point)
+def run_dir(version: str, cell: int, point: str, seed: int = SEED) -> Path:
+    return _under("runs", version, cell, point, seed)
 
 
-def run_tag(cell: int, point: str) -> str:
-    return f"c{cell}-{point}-s{SEED}"
+def run_tag(cell: int, point: str, seed: int = SEED) -> str:
+    return f"c{cell}-{point}-s{seed}"
 
 
-def config_path(version: str, cell: int, point: str) -> Path:
+def constant_co2_path(version: str) -> Path:
+    """Where a constant-CO2 corpus keeps its own CO2 forcing. One file for the whole version."""
+    return scratch("forcing", f"pilot-{version}") / "co2_constant.txt"
+
+
+def config_path(version: str, cell: int, point: str, seed: int = SEED) -> Path:
     """Where `corpus_spinup_config.py` puts this run's config. Named once, used by every stage."""
-    tag = run_tag(cell, point)
-    return run_dir(version, cell, point) / f"lpjml_spinup_{tag}.js"
+    tag = run_tag(cell, point, seed)
+    return run_dir(version, cell, point, seed) / f"lpjml_spinup_{tag}.js"
 
 
 # ------------------------------------------------------------------------------------------------
@@ -161,8 +200,17 @@ def config_path(version: str, cell: int, point: str) -> Path:
 # ------------------------------------------------------------------------------------------------
 
 
-def stage_plan(version: str, ncell: int, npoint: int, shard_size: int) -> int:
-    out = meta_dir(version)
+def stage_plan(
+    version: str,
+    ncell: int,
+    npoint: int,
+    shard_size: int,
+    *,
+    seed: int = SEED,
+    subset: int = 0,
+    const_co2: bool = False,
+) -> int:
+    out = meta_dir(version, seed)
     sel = pilot_cells(ncell)
     design = pilot_design(npoint)
     if design[0].name != "control" or not design[0].is_neutral:
@@ -174,6 +222,26 @@ def stage_plan(version: str, ncell: int, npoint: int, shard_size: int) -> int:
         )
 
     cells = sel.cells()
+    # ⚠ A SUBSET IS AN EVENLY SPACED SAMPLE OF THE FULL SELECTION, NEVER A RE-SELECTION AND NEVER
+    # A PREFIX.
+    #
+    # Not a re-selection: `pilot_cells(20)` would run the stratifier again over 20 slots and return
+    # a DIFFERENT set, and a second seed at cells the first seed never visited measures nothing.
+    # The contrast being bought is same cell, same climate, same config, only the RNG draw differs,
+    # so every cell here must be one seed 1 actually ran.
+    #
+    # And NOT A PREFIX, which is what this did first and was wrong. The selection is ordered by cell
+    # index, and the grid runs south to north, so the first 20 of 200 are ALL between 52 S and 27 S
+    # -- one temperate band, no tropics and no boreal, out of a full range of 52 S to 76 N. What a
+    # replicate measures is the model's own two-run spread, and the acceptance criterion says that
+    # spread is largest in LOW-DENSITY cells; sampling one latitude band would measure it where it
+    # happens to be, then transfer it everywhere. A stride keeps the full range for the same cost.
+    all_cells = cells
+    if subset:
+        if subset > len(cells):
+            raise AssertionError(f"--subset {subset} exceeds the {len(cells)} cells selected")
+        step = len(cells) // subset
+        cells = cells[::step][:subset]
     sel.table.write_parquet(out / "cells.parquet")
     sel.table.write_csv(out / "cells.csv")
     pl.DataFrame(
@@ -195,11 +263,11 @@ def stage_plan(version: str, ncell: int, npoint: int, shard_size: int) -> int:
 
     rows = [
         {
-            "name": run_tag(cell, p.name),
+            "name": run_tag(cell, p.name, seed),
             "cell": cell,
             "point": p.name,
-            "config": str(config_path(version, cell, p.name)),
-            "run_dir": str(run_dir(version, cell, p.name)),
+            "config": str(config_path(version, cell, p.name, seed)),
+            "run_dir": str(run_dir(version, cell, p.name, seed)),
             "forcing": str(forcing_dir(version, cell, p.name)),
         }
         for cell in cells
@@ -207,7 +275,7 @@ def stage_plan(version: str, ncell: int, npoint: int, shard_size: int) -> int:
     ]
     pl.DataFrame(rows).write_csv(out / "runs.csv")
 
-    mdir = manifest_dir(version)
+    mdir = manifest_dir(version, seed)
     for old in sorted(mdir.glob("manifest_s*.tsv")):
         old.unlink()
     shards: list[Path] = []
@@ -228,8 +296,25 @@ def stage_plan(version: str, ncell: int, npoint: int, shard_size: int) -> int:
         "nrun": len(rows),
         "ncell": len(cells),
         "npoint": len(design),
-        "seed": SEED,
+        "seed": seed,
         "nspinup": NSPINUP,
+        # A second seed is a REPLICATE, not a corpus. It exists to measure the model's own two-run
+        # spread on PERTURBED climates -- which nobody has ever measured, while the acceptance
+        # tolerance `max(10 %, that spread)` depends on it -- so it must never be concatenated onto
+        # the seed-1 table and scored as extra rows.
+        "replicate_of": None
+        if seed == SEED
+        else {
+            "seed": SEED,
+            "cells": cells,
+            "ncell_full_selection": len(all_cells),
+            "shares_forcing": True,
+            "note": (
+                "same cells, same 30 climates, same config, SAME forcing bytes; only "
+                f'"random_seed" differs ({SEED} -> {seed}). Its purpose is the two-seed '
+                "spread of a PERTURBED spin-up, which the pilot's single seed cannot give."
+            ),
+        },
         "spinup_note": (
             "1000 years, the full protocol. The target state is PROTOCOL-DEFINED and still "
             "drifting at ~+6.8 %/century in the median cell; it is not an equilibrium "
@@ -244,7 +329,21 @@ def stage_plan(version: str, ncell: int, npoint: int, shard_size: int) -> int:
         ),
         "selection": sel.as_dict(),
         "base_window": [1970, 1999],
-        "co2": "untouched and never written (MEMORY.md:co2-closed)",
+        # ⚠ "untouched" IS NOT "constant", and this key used to say only the first. The ground
+        # truth's CO2 input is transient (1700-2022) and the spin-up runs model years 1000-1999, so
+        # an untouched corpus carries a +32.8 % CO2 rise over its last 300 years.
+        "co2": (
+            f"CONSTANT {_load('corpus_spinup_config').CO2_PREINDUSTRIAL_PPM} ppm, own forcing file "
+            f"({constant_co2_path(version)})"
+            if const_co2
+            else "INHERITED FROM THE GROUND TRUTH AND THEREFORE TRANSIENT: "
+            "global_co2_ann_1700_2022.txt over model years 1000-1999, so the last 300 spin-up "
+            "years carry the historical CO2 rise 276.59 -> 367.26 ppm. Never PERTURBED and never "
+            "written by us, and identical in every run, so it confounds no contrast between design "
+            "points -- but the state is NOT an equilibrium under constant CO2 "
+            "(20260915-D-the-spinup-did-converge-the-late-rise-is-transient-co2.md)."
+        ),
+        "co2_constant": const_co2,
         "shards": [str(p) for p in shards],
         "shard_size": shard_size,
         "sources": _source_provenance(),
@@ -336,29 +435,38 @@ def _binary_provenance() -> dict[str, Any]:
 # ------------------------------------------------------------------------------------------------
 
 
-def _build_cell(args: tuple[str, int, int]) -> dict[str, Any]:
+def _build_cell(args: tuple[str, int, int, int, bool]) -> dict[str, Any]:
     """One cell: read its baseline once, then write all `npoint` forcing sets and configs.
 
     Runs in a worker process, so it imports what it needs itself and returns only small summaries.
+
+    ⚠ A REPLICATE SEED WRITES CONFIGS ONLY. Its forcing directory IS seed 1's, so rewriting it would
+    at best redo work and at worst race a concurrent reader of the corpus the pilot is scored on.
+    The files are required to be there already and are checked, never regenerated.
     """
-    version, cell, npoint = args
+    version, cell, npoint, seed, const_co2 = args
     perturb = _load("corpus_perturb_clm")
     cfgmod = _load("corpus_spinup_config")
     design = pilot_design(npoint)
+    replicate = seed != SEED
+    co2_file = constant_co2_path(version) if const_co2 else None
 
     # The one read that must not be repeated per point: the 30-year baseline block plus the
-    # calibration contrast out of the scenario leg.
-    cb = perturb.load_base(range(cell, cell + 1))
+    # calibration contrast out of the scenario leg. A replicate reads no baseline at all.
+    cb = None if replicate else perturb.load_base(range(cell, cell + 1))
     wrote: list[dict[str, Any]] = []
     for pert in design:
         fdir = forcing_dir(version, cell, pert.name)
-        record = perturb.write_point(cb, pert, fdir)
-        rdir = run_dir(version, cell, pert.name)
+        if replicate:
+            record = _existing_forcing(fdir, perturb)
+        else:
+            record = perturb.write_point(cb, pert, fdir)
+        rdir = run_dir(version, cell, pert.name, seed)
         (rdir / "output").mkdir(parents=True, exist_ok=True)
         (rdir / "restart").mkdir(parents=True, exist_ok=True)
-        tag = run_tag(cell, pert.name)
-        input_js = cfgmod.build_input_js(fdir, rdir, tag)
-        config = cfgmod.build_config(cell, input_js, rdir, tag=tag, seed=SEED, nspinup=NSPINUP)
+        tag = run_tag(cell, pert.name, seed)
+        input_js = cfgmod.build_input_js(fdir, rdir, tag, co2_file=co2_file)
+        config = cfgmod.build_config(cell, input_js, rdir, tag=tag, seed=seed, nspinup=NSPINUP)
         wrote.append(
             {
                 "point": pert.name,
@@ -367,7 +475,7 @@ def _build_cell(args: tuple[str, int, int]) -> dict[str, Any]:
                 "neutral_byte_identity": all(
                     "neutral_byte_identity" in record["files"][v] for v in VARS
                 )
-                if pert.is_neutral
+                if pert.is_neutral and not replicate
                 else None,
                 "tas_ann_c": record["diagnostics"]["tas_ann_c"],
                 "pr_ann_mm": record["diagnostics"]["pr_ann_mm"],
@@ -376,7 +484,40 @@ def _build_cell(args: tuple[str, int, int]) -> dict[str, Any]:
     return {"cell": cell, "npoint": len(wrote), "points": wrote}
 
 
-def _build_cell_guarded(args: tuple[str, int, int]) -> dict[str, Any]:
+def _existing_forcing(fdir: Path, perturb: ModuleType) -> dict[str, Any]:
+    """The seed-1 forcing this replicate will be driven by, checked rather than rewritten.
+
+    Returns the same shape `write_point` does, so the caller's bookkeeping is untouched. The
+    diagnostics it cannot recompute without re-reading the `.clm` files are left as None: this
+    summary is provenance for a replicate, and the real diagnostics are in seed 1's own build JSON.
+    """
+    files: dict[str, Any] = {}
+    for var in VARS:
+        f = fdir / perturb.OUT_NAME[var]
+        if not f.is_file() or f.stat().st_size == 0:
+            raise AssertionError(
+                f"replicate seed: forcing {f} is missing. A replicate REUSES seed 1's forcing and "
+                "never regenerates it, so seed 1's build stage must have run for this cell first."
+            )
+        files[var] = {"bytes": f.stat().st_size}
+    return {"files": files, "diagnostics": {"tas_ann_c": None, "pr_ann_mm": None}}
+
+
+def _write_co2_if_constant(version: str, const_co2: bool) -> None:
+    """Write this version's constant-CO2 forcing once, before the workers fan out.
+
+    In the build stage rather than the plan stage because the plan deliberately creates no
+    directories, and in the PARENT rather than in `_build_cell` because 20 workers writing the same
+    file is a race with no upside.
+    """
+    if not const_co2:
+        return
+    cfgmod = _load("corpus_spinup_config")
+    written = cfgmod.write_constant_co2(constant_co2_path(version))
+    print(f"constant CO2 forcing: {written}  ({cfgmod.CO2_PREINDUSTRIAL_PPM} ppm, every year)")
+
+
+def _build_cell_guarded(args: tuple[str, int, int, int, bool]) -> dict[str, Any]:
     try:
         return _build_cell(args)
     # One bad cell must not lose the other 199, so the traceback is returned rather than raised --
@@ -385,19 +526,31 @@ def _build_cell_guarded(args: tuple[str, int, int]) -> dict[str, Any]:
         return {"cell": args[1], "error": traceback.format_exc(limit=6)}
 
 
-def stage_build(version: str, workers: int, shard: int, nshard: int, npoint: int) -> int:
-    out = meta_dir(version)
+def stage_build(
+    version: str,
+    workers: int,
+    shard: int,
+    nshard: int,
+    npoint: int,
+    *,
+    seed: int = SEED,
+    const_co2: bool = False,
+) -> int:
+    out = meta_dir(version, seed)
+    _write_co2_if_constant(version, const_co2)
     runs = pl.read_csv(out / "runs.csv")
     cells = sorted(set(int(c) for c in runs["cell"].to_list()))
     mine = cells[shard::nshard] if nshard > 1 else cells
     print(
-        f"building {len(mine)} of {len(cells)} cells x {npoint} climates "
+        f"building {len(mine)} of {len(cells)} cells x {npoint} climates, seed {seed} "
         f"(shard {shard}/{nshard}, {workers} workers)"
     )
+    if seed != SEED:
+        print(f"  replicate of seed {SEED}: configs only, forcing is REUSED and checked in place")
 
     done: list[dict[str, Any]] = []
     failed: list[dict[str, Any]] = []
-    jobs = [(version, cell, npoint) for cell in mine]
+    jobs = [(version, cell, npoint, seed, const_co2) for cell in mine]
     if workers > 1:
         with ProcessPoolExecutor(max_workers=workers) as pool:
             futures = {pool.submit(_build_cell_guarded, j): j[1] for j in jobs}
@@ -422,6 +575,7 @@ def stage_build(version: str, workers: int, shard: int, nshard: int, npoint: int
         "cells_built": len(done),
         "cells_failed": len(failed),
         "forcing_bytes": total_bytes,
+        "seed": seed,
         "neutral_points_checked": len(neutral),
         "neutral_byte_identity_all_pass": all(bool(p["neutral_byte_identity"]) for p in neutral),
         "failures": failed,
@@ -429,11 +583,21 @@ def stage_build(version: str, workers: int, shard: int, nshard: int, npoint: int
     (out / f"build_s{shard:02d}of{nshard:02d}.json").write_text(
         json.dumps(summary, indent=2, sort_keys=True) + "\n", "utf-8"
     )
-    print(f"forcing written: {total_bytes / 1e9:.2f} GB over {len(done)} cells")
-    print(
-        f"neutral byte identity: {len(neutral)} control points checked, "
-        f"all pass = {summary['neutral_byte_identity_all_pass']}"
-    )
+    verb = "reused" if seed != SEED else "written"
+    print(f"forcing {verb}: {total_bytes / 1e9:.2f} GB over {len(done)} cells")
+    # ⚠ SAY WHEN THE CHECK DID NOT RUN. A replicate writes no forcing, so `neutral` is empty and
+    # `all([])` is True -- "all pass = True" over zero points is a check that CANNOT fail, which
+    # reads exactly like a check that passed. The seed-1 build is where this check has its meaning.
+    if not neutral:
+        print(
+            f"neutral byte identity: NOT CHECKED HERE -- 0 control points. Seed {seed} reuses seed "
+            f"{SEED}'s forcing unmodified, so identity is seed {SEED}'s build to have established."
+        )
+    else:
+        print(
+            f"neutral byte identity: {len(neutral)} control points checked, "
+            f"all pass = {summary['neutral_byte_identity_all_pass']}"
+        )
     if not summary["neutral_byte_identity_all_pass"]:
         print(
             "  ⚠ a control point did NOT reproduce the source bytes. The writer is not a no-op "
@@ -453,8 +617,8 @@ def stage_build(version: str, workers: int, shard: int, nshard: int, npoint: int
 # ------------------------------------------------------------------------------------------------
 
 
-def stage_verify(version: str) -> int:
-    out = meta_dir(version)
+def stage_verify(version: str, seed: int = SEED) -> int:
+    out = meta_dir(version, seed)
     runs = pl.read_csv(out / "runs.csv")
     filenames = list(_load("corpus_perturb_clm").OUT_NAME.values())
     missing_cfg: list[str] = []
@@ -496,13 +660,13 @@ def stage_verify(version: str) -> int:
 # ------------------------------------------------------------------------------------------------
 
 
-def stage_harvest(version: str) -> int:
+def stage_harvest(version: str, seed: int = SEED) -> int:
     """Count the runs that printed the MODEL'S OWN completion line, and the restarts they wrote.
 
     Never the exit codes: the stock job files always exit 0, so a run that died mid-spin-up leaves a
     plausible truncated output behind a green row (`MEMORY.md:c-log-truth`).
     """
-    out = meta_dir(version)
+    out = meta_dir(version, seed)
     runs = pl.read_csv(out / "runs.csv")
     ok, no_line, no_log, no_restart = 0, [], [], []
     sizes: list[int] = []
@@ -526,7 +690,7 @@ def stage_harvest(version: str) -> int:
             treeless.append(name)
 
     total = runs.height
-    print(f"pilot corpus {version}: {total} runs")
+    print(f"pilot corpus {version} seed {seed}: {total} runs")
     print(f"  printed the model's own completion line  {ok}/{total}")
     print(f"  no log at all (never started, or dead)   {len(no_log)}")
     print(f"  log without the completion line          {len(no_line)}")
@@ -578,9 +742,9 @@ def stage_harvest(version: str) -> int:
 STATE_YEAR = 1999
 
 
-def _decode_run(args: tuple[str, int, str, str, str]) -> dict[str, Any]:
+def _decode_run(args: tuple[str, int, str, str, str, int]) -> dict[str, Any]:
     """One run: its restart record and its own perturbed forcing, as one corpus row."""
-    name, cell, point, rdir, fdir = args
+    name, cell, point, rdir, fdir, seed = args
     perturb = _load("corpus_perturb_clm")
     restart = Path(rdir) / "restart" / f"restart_{name}.lpj"
 
@@ -592,7 +756,7 @@ def _decode_run(args: tuple[str, int, str, str, str]) -> dict[str, Any]:
         "name": name,
         "cell": cell,
         "point": point,
-        "seed": SEED,
+        "seed": seed,
         "restart_year": restart_year,
         "restart_bytes": restart.stat().st_size,
     }
@@ -620,7 +784,7 @@ def _decode_run(args: tuple[str, int, str, str, str]) -> dict[str, Any]:
     return row
 
 
-def _decode_run_guarded(args: tuple[str, int, str, str, str]) -> dict[str, Any]:
+def _decode_run_guarded(args: tuple[str, int, str, str, str, int]) -> dict[str, Any]:
     # One unreadable restart must not lose the other 5,999, and `stage_decode` exits non-zero on
     # any of them, so a partial corpus table is never silently green.
     try:
@@ -630,7 +794,7 @@ def _decode_run_guarded(args: tuple[str, int, str, str, str]) -> dict[str, Any]:
 
 
 def _decode_all(
-    jobs: list[tuple[str, int, str, str, str]], nproc: int
+    jobs: list[tuple[str, int, str, str, str, int]], nproc: int
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Every run decoded, split into the rows that worked and the ones that raised."""
     done: list[dict[str, Any]] = []
@@ -738,8 +902,8 @@ def _report_decode(frame: pl.DataFrame, summary: dict[str, Any], dest: Path) -> 
     print(f"  corpus_sha256 {summary['corpus_sha256']}")
 
 
-def stage_decode(version: str, nproc: int, limit: int | None) -> int:
-    out = meta_dir(version)
+def stage_decode(version: str, nproc: int, limit: int | None, seed: int = SEED) -> int:
+    out = meta_dir(version, seed)
     runs = pl.read_csv(out / "runs.csv")
     design = pl.read_csv(out / "design.csv")
     cells = pl.read_csv(out / "cells.csv")
@@ -747,7 +911,7 @@ def stage_decode(version: str, nproc: int, limit: int | None) -> int:
         runs = runs.head(limit)
 
     jobs = [
-        (str(n), int(c), str(p), str(r), str(f))
+        (str(n), int(c), str(p), str(r), str(f), seed)
         for n, c, p, r, f in zip(
             runs["name"].to_list(),
             runs["cell"].to_list(),
@@ -757,7 +921,10 @@ def stage_decode(version: str, nproc: int, limit: int | None) -> int:
             strict=True,
         )
     ]
-    print(f"decoding {len(jobs)} runs of pilot corpus {version} on {nproc} processes", flush=True)
+    print(
+        f"decoding {len(jobs)} runs of pilot corpus {version} seed {seed} on {nproc} processes",
+        flush=True,
+    )
 
     t0 = time.time()
     done, failed = _decode_all(jobs, nproc)
@@ -780,7 +947,12 @@ def stage_decode(version: str, nproc: int, limit: int | None) -> int:
     # A smoke run writes its own filenames. `is_smoke` in the JSON is not enough on its own: the
     # table is the artefact a pre-registration cites by hash, and a 30-row file sitting at the name
     # the corpus lives under is one `--limit` away from being cited as the corpus.
-    stem = "corpus_smoke" if limit else "corpus"
+    #
+    # A REPLICATE IS NAMED APART FOR THE SAME REASON, and it is the stronger case: its rows are the
+    # same cells and the same climates as the corpus, so a table called `corpus.parquet` holding
+    # them is one path typo away from doubling the pilot with re-runs and calling it more evidence.
+    # It is a second measurement of the same thing, which is a SPREAD, never extra rows.
+    stem = "corpus_smoke" if limit else ("corpus" if seed == SEED else f"replicate_s{seed}")
     dest = out / f"{stem}.parquet"
     frame.write_parquet(dest)
     treeless, control, ctrl_treeless = _decode_parts(frame)
@@ -792,6 +964,8 @@ def stage_decode(version: str, nproc: int, limit: int | None) -> int:
         "corpus_version": version,
         "plan_sha256": json.loads((out / "provenance.json").read_text())["plan_sha256"],
         "git_commit": _git_commit(),
+        "seed": seed,
+        "is_replicate": seed != SEED,
         "is_smoke": limit is not None,
         "limit": limit,
         "rows": frame.height,
@@ -814,12 +988,18 @@ def stage_decode(version: str, nproc: int, limit: int | None) -> int:
         "corpus_sha256": sha256_of(dest),
         "co2": "untouched, not a feature (MEMORY.md:co2-closed)",
     }
-    report = out / ("decode_smoke.json" if limit else "decode.json")
+    report = out / ("decode_smoke.json" if limit else f"decode_s{seed}.json")
     report.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", "utf-8")
     _report_decode(frame, summary, dest)
     if failed:
         print("verdict: INCOMPLETE -- fix the failures before any score cites this table")
         return 1
+    if seed != SEED:
+        print(
+            f"verdict: DECODED -- a REPLICATE of seed {SEED} at the same cells and climates. Pair "
+            "it with the corpus to get the model's own two-run spread; never append it as rows."
+        )
+        return 0
     print("verdict: DECODED -- this table is what rung 1 is scored on")
     return 0
 
@@ -859,17 +1039,63 @@ def main() -> int:
         default=None,
         help="decode stage: first N runs only -- a smoke test, never a corpus",
     )
+    ap.add_argument(
+        "--seed",
+        type=int,
+        default=SEED,
+        help=(
+            f"LPJmL-FIT's random_seed. {SEED} is the corpus itself and keeps its existing paths; "
+            "anything else is a REPLICATE -- its own directory tree, seed 1's forcing reused "
+            "unmodified, and a table named replicate_s<n>.parquet that must never be appended to "
+            "the corpus. A replicate is what measures the model's own two-run spread."
+        ),
+    )
+    ap.add_argument(
+        "--const-co2",
+        action="store_true",
+        help=(
+            "drive the spin-up with a CONSTANT CO2 file instead of the ground truth's transient "
+            "one. Without this the last 300 of the 1000 spin-up years carry the historical CO2 "
+            "rise, so the end state is not an equilibrium. A new corpus VERSION, never an edit."
+        ),
+    )
+    ap.add_argument(
+        "--subset",
+        type=int,
+        default=0,
+        help=(
+            "plan stage: run an EVENLY SPACED N cells of the selection (0 = all). A stride over "
+            "the same list, never a re-selection and never a prefix -- the list is ordered south "
+            "to north, so a prefix is one latitude band."
+        ),
+    )
     args = ap.parse_args()
 
     if args.stage == "plan":
-        return stage_plan(args.version, args.ncell, args.npoint, args.shard_size)
+        return stage_plan(
+            args.version,
+            args.ncell,
+            args.npoint,
+            args.shard_size,
+            seed=args.seed,
+            subset=args.subset,
+            const_co2=args.const_co2,
+        )
     if args.stage == "build":
-        return stage_build(args.version, args.workers, args.shard, args.nshard, args.npoint)
+        return stage_build(
+            args.version,
+            args.workers,
+            args.shard,
+            args.nshard,
+            args.npoint,
+            seed=args.seed,
+            const_co2=args.const_co2,
+        )
     if args.stage == "verify":
-        return stage_verify(args.version)
+        return stage_verify(args.version, args.seed)
     if args.stage == "decode":
-        return stage_decode(args.version, args.workers, args.limit)
-    return stage_harvest(args.version)
+        return stage_decode(args.version, args.workers, args.limit, args.seed)
+    return stage_harvest(args.version, args.seed)
 
 
 if __name__ == "__main__":

@@ -64,7 +64,35 @@ def patch(text: str, pattern: str, replacement: str, expect: int = 1) -> str:
     return out
 
 
-def build_input_js(forcing: Path, run_dir: Path, tag: str) -> Path:
+# `param.co2_p` in par/lpjparam_fit.js -- the value LPJmL already uses for every year BEFORE the CO2
+# file's first year (src/climate/getco2.c:47, `*pco2 = (year<0) ? param.co2_p : data[year]`).
+# Using exactly this number means the clamped branch and the file branch agree to the last digit, so
+# a constant-CO2 run is continuous with what the first 700 spin-up years were already doing.
+CO2_PREINDUSTRIAL_PPM = 276.59
+CO2_CONST_FIRSTYEAR = 1700
+CO2_CONST_LASTYEAR = 2100
+
+
+def write_constant_co2(dest: Path, ppm: float = CO2_PREINDUSTRIAL_PPM) -> Path:
+    """A CO2 forcing file holding ONE value for every year, so the spin-up is genuinely constant.
+
+    ⚠ WHY A FILE AND NOT A CONFIG FLAG. LPJmL's `fix_climate` does pin CO2 (iterate.c:96), but the
+    SAME flag also replaces the climate sequence after `fix_climate_year` (iterate.c:143-154), so it
+    cannot hold CO2 still without also changing what climate the run sees. A constant file changes
+    CO2 and nothing else: same years, same climate handling, same restart year, same assertions.
+
+    ⚠ AND WHY NOT SIMPLY MOVE `firstyear` BEFORE 1700, which also pins CO2 via the clamp. Because
+    the spin-up phase is `year < climate->firstyear` (iterate.c:102) and our perturbed `.clm` files
+    declare 1970, so shifting the window would turn the final 30 SEQUENTIAL climate years into 30
+    more shuffled spin-up years. That is a second change wearing the first one's clothes.
+    """
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    rows = "".join(f"{y}  {ppm:.2f}\n" for y in range(CO2_CONST_FIRSTYEAR, CO2_CONST_LASTYEAR + 1))
+    dest.write_text(rows, encoding="utf-8")
+    return dest
+
+
+def build_input_js(forcing: Path, run_dir: Path, tag: str, *, co2_file: Path | None = None) -> Path:
     """Rewrite the ground truth's input list so the five climate inputs are the perturbed files."""
     saved = path("ground_truth.historical_seed1") / SAVED_INPUT
     if not saved.exists():
@@ -79,8 +107,21 @@ def build_input_js(forcing: Path, run_dir: Path, tag: str) -> Path:
             rf'^(\s*"{key}"\s*:\s*\{{\s*"fmt"\s*:\s*"clm",\s*"name"\s*:\s*)"[^"]+"',
             rf'\g<1>"{target}"',
         )
-    # Everything else -- soil, coord, soildepth, co2 -- stays exactly as the ground truth had it.
-    # CO2 in particular is untouched and never perturbed (MEMORY.md:co2-closed).
+    # ⚠ CO2 IS NOT AUTOMATICALLY CONSTANT, AND THIS COMMENT USED TO SAY IT WAS. The ground truth's
+    # CO2 input is `global_co2_ann_1700_2022.txt`, a TRANSIENT file, and the spin-up runs model
+    # years 1000-1999 -- so its last 300 carry the real historical CO2 rise, +32.8 %, and global
+    # vegetation carbon follows it at +5.53 %/century (r = +0.987). "Untouched and never written",
+    # which is what this file does, is TRUE and is NOT the same claim as "constant"; conflating the
+    # two is what hid a CO2 ramp inside every corpus spin-up for a week. Record:
+    # `docs/decisions/20260915-D-the-spinup-did-converge-the-late-rise-is-transient-co2.md`.
+    if co2_file is not None:
+        if not co2_file.exists():
+            raise FileNotFoundError(f"no constant-CO2 file at {co2_file}")
+        text = patch(
+            text,
+            r'^(\s*"co2"\s*:\s*\{\s*"fmt"\s*:\s*"txt",\s*"name"\s*:\s*)"[^"]+"',
+            rf'\g<1>"{co2_file}"',
+        )
     out = run_dir / f"input_{tag}.js"
     out.write_text(text, encoding="utf-8")
     return out

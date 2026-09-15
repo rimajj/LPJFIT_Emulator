@@ -13,44 +13,49 @@ pre-registrations and verdicts (X).
 
 ## NEXT — start here
 
-**Nothing of D's is in flight** — the 2026-09-10 campaigns are harvested and `tools/campaigns.py
---check` is green. The three-session carbon blocker is **closed**, in the opposite direction from
-its name: the emulated restart starts **high**, not halved, and converges into the two-seed band.
-Say the sign right — T measured the FILE 6.7 % high, the model takes it to **12.0 % high** at the
-end of year one (112,763 vs 100,691 gC), then sheds it to −1.6 % by 2019, inside the two-seed band
-(0.102). "Halved carbon" describes only rosters the model REJECTED. Narrative is in the journal;
-record: `20260910-D-the-halved-carbon-is-gone-verified-from-the-committed-synthesiser.md`.
-⚠ **`MEMORY.md` is integrator-only (O04), so a line CANNOT promote a fact into it** — four rows are
-requested in `CHANGELOG.md` on main (collated 2026-09-10), including a correction to
-`restart-loads`, whose "0.53 off" is a roster the model later rejected. Keep the sign here until
-they land.
+**CORPUS `v2-constco2` IS IN FLIGHT — 6,000 spin-ups, jobs 2204789–2204813, launched 2026-09-15.**
+Plan and build are done (200/200 cells, all 200 control points byte-identical). **Harvest and decode
+it, then hand line X a v1-vs-v2 comparison.** The two commands, in order:
 
-**Next, in order:**
+```
+scripts/sbatch_py.sh D-pilot-v2-harvest scripts/corpus_pilot.py --stage harvest --version v2-constco2
+NCPUS=16 scripts/sbatch_py.sh D-pilot-v2-decode scripts/corpus_pilot.py --stage decode --version v2-constco2 --workers 16
+```
 
-1. **Corpus v2 is blocked on TWO decisions, neither of them D's. BOTH ASKED 2026-09-10 — the ask
-   is on main in `CHANGELOG.md` under Changed (the fragment was collated away) — awaiting answers.**
-   D's half is now verified and recorded; do not re-measure it.
-   - **Integrator:** the configured `ground_truth.ssp370_seed2` is a **byte-clone of seed 1**
-     (both `restart_2100.lpj` exactly 133,559,375,490 B; the directory carries its own
-     `INVALID_NOT_A_SECOND_SEED.md`). The genuine run is on disk at `…_from_hist_seed2`
-     (133,580,962,759 B) and **completed** — anchored terminate line, all 67,420 cells. It needs a
-     **NEW** `ssp370_seed2_from_hist_seed2` key: repointing the existing key in place would
-     silently change what three sealed pre-registrations cite. It ran on the **Jul-21** build, not
-     Feb-05, so the corrected pair straddles a build boundary that must be disclosed — and
-     `paths.yaml`'s own comment does not mention that build at all.
-   - **Line X:** does v2 also put `pft_frac_*` in `SCORED_CONJUNCTIVE`? Those columns are computed
-     but not scored, so the synthesiser must COPY species composition from a template — which is
-     exactly what stops an emulated warmed restart shifting composition at all.
-   - ⚠ **ONE rebuild or the other, never two** — each is a new corpus version and a changed corpus
-     is a changed question. v0/v1 hashes are untouched either way.
-   - ⚠ **Nothing is silently wrong meanwhile:** `check_seeds_differ` fails the build on an
-     identical RNG triple, and its six tests pass. Record:
-     `20260910-D-the-ssp370-second-seed-exists-and-the-configured-path-is-its-clone.md`.
-   - **Always `wc -l lines/<to>/STATE.md` before writing** — X was at 117/120, which is why both
-     asks went via the changelog; an inbound block would have blocked X's own commits.
-2. **The 17 empty controls are NOT a reason to re-select cells** — 14 are the model being right,
-   and dropping them narrows the envelope the design spans. Detail, plus the both-bases warning
-   line X needs before sealing rung 1: `20260909-D-corpus-v1-decoded.md`.
+**WHY v2 EXISTS, and it is the biggest thing found this week.** The spin-up was **never run at
+constant CO₂**. Its CO₂ input is a transient file and the run covers model years 1000–1999, so the
+last 300 years carry the historical rise, +32.8 %; vegetation carbon follows at +5.53 %/century,
+r = +0.987. The 2026-09-08 "spin-up has not converged, +6.5 %/century" was that forced response read
+as drift — under constant CO₂ the curve is flat to **+0.15 %/century**. The owner found it by asking
+why a single cell showed no late rise; it does not, because the dense cells that hold the carbon are
+flat or declining and the rise sits in sparse cells. Records:
+`20260915-D-the-spinup-did-converge-the-late-rise-is-transient-co2.md` and
+`docs/reference/corpus-design.md`.
+
+⚠ **"Untouched" was never "constant", and that one word cost a week.** `corpus_spinup_config.py`
+said CO₂ was "untouched and never perturbed" — true, and not the same claim. **No score is
+confounded**: every run of a version shares the identical CO₂ path, so rungs 1, 5 and 8 all stand.
+What it breaks is the word *equilibrium*, which is Product A's whole target.
+
+⚠ **Do NOT shorten any spin-up on the strength of "it converged".** A shorter run ends at a
+different CO₂ and is a different state. The budget question is now "which CO₂ level is the target",
+and that is an owner question, not a measurement.
+
+**Then, in order:**
+
+1. **Compare v2 against v1 and give X the number**: how far does the end state move when the CO₂
+   ramp is removed? That decides whether rungs 1 and 8 need re-scoring on v2 or merely re-basing.
+2. **The replicate machinery is built and proven** — `--seed N --subset M`, `pilot-v1-s2`, 600 runs,
+   600/600 complete, and its measurement retired X4 and pinned `ABS_FLOOR` at 0.0384. A v2
+   replicate is the same commands. ⚠ `--subset` is a STRIDE, not a prefix: the cell list runs south
+   to north, so the first 20 of 200 are one temperate band. `tests/test_pilot_replicate.py`.
+3. **The 17 empty controls are NOT a reason to re-select cells** — 14 are the model being right,
+   and dropping them narrows the envelope the design spans. `20260909-D-corpus-v1-decoded.md`.
+4. **Still owed, unchanged:** one cell, one year, two binaries, byte-compared — the only unproven
+   rung-5 claim.
+
+**Closed this session, do not re-open:** the ssp370 second seed (wired on main 2026-09-14), the
+carbon-sign blocker (the restart starts HIGH, not halved), and both corpus-v2 decisions.
 
 ## INBOUND from line T (2026-09-10) — add soil TYPE to the corpus features — soil depth alone is not enough
 
