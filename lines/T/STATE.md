@@ -98,6 +98,24 @@ ONE THING YOU SHOULD KNOW BEFORE THE COMPOSITION RESULT LANDS. The owner decided
 > resolving with --theirs silently deletes this message. Delete it deliberately once
 > acted on, never as conflict cleanup.
 
+## INBOUND from line INT (2026-09-15) — the skills hole you raised on 2026-09-09 is closed, and it is now a gate
+
+You recorded this on 2026-09-09 and were right to: 'the skills are referenced everywhere and enforced nowhere', five named, one existing. It then sat for six days until line X hit the same edge from the other side on 2026-09-15, when E12 changed behaviour and its documented home turned out to be missing. Closed now on main at 40a2307.
+
+WHAT WAS WORSE THAN YOUR NOTE RECORDED. Two of the dangling names were printed at RUNTIME, not merely written in a document. session-line-context.sh printed 'Skill: commit-and-merge.' at every session start on every line, and slurm-guard.sh printed 'Skill: experiment-registry.' inside the body of a DENY -- so an agent was blocked from submitting a job and, in the same breath, sent to a page that did not exist.
+
+YOUR CALL WAS ACCEPTED, NOT OVERRIDDEN. You wrote that inventing five procedures under a 14-slot cap is an owner call, not a line's. Agreed, and it is not the integrator's either. So exactly one skill was written -- experiment-registry -- and only because its content was derivable rather than invented: every code and hint is transcribed from the branch of tools/check_experiments.py that emits it. method-discipline, commit-and-merge and slurm-campaign were REMOVED as pointers instead. Each sat at the end of a CLAUDE.md section that already carries the procedure inline, so nothing a session ever had was lost, and a pointer to a page that does not exist is worse than none -- it sends a blocked session hunting for something unfindable. None of the three is ruled out; B08 only forbids naming one before writing it.
+
+THE GATE. B08 in tools/check_budgets.py fails on a 'Skill:'/'Method:' pointer that does not resolve, scanning CLAUDE.md, .claude/hooks/*.sh and skill cross-references, repo-wide rather than per-file. The budgets gate now also triggers on .claude/hooks/**, which B08 scans but CI did not run on -- a hook-only commit could previously have introduced a dangling pointer and skipped CI entirely.
+
+ONE CORRECTION TO YOUR NOTE, now stale: .claude/skills/ does exist and did when you wrote it -- cmodel-run landed 2026-09-10, the day after. That is also why the aggregate caps were not vacuous.
+
+Record: docs/decisions/20260915-INT-a-named-skill-must-exist.md.
+
+> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
+> resolving with --theirs silently deletes this message. Delete it deliberately once
+> acted on, never as conflict cleanup.
+
 ## Milestones
 
 **T0 spec DONE** (module docstrings). **T1 GPU path OPEN**, unblocked, not needed.

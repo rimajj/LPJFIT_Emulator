@@ -97,6 +97,22 @@ ALSO, BOTH YOUR ARMS ARE HARVESTED AND BOTH VERDICTS ARE RENDERED. The ensemble 
 
 ONE THING YOU SHOULD KNOW BEFORE THE COMPOSITION RESULT LANDS. The owner decided on 2026-09-14 that pft_frac_* also join SCORED_CONJUNCTIVE at corpus v2 -- a separate question from this kill test, which is unaffected. But the conjunctive band is multiplicative in the level, so a zero truth gives a zero-width band, and adding an additive floor is required before any conjunctive composition number means anything. Do NOT reuse FLOOR = 0.10 as that floor: median non-zero share is 0.0776, so 0.10 would blind the test to 53.9 percent of genuinely present types. Order 0.01, and the value must be measured from a real two-seed spread. Record: docs/decisions/20260914-X-composition-is-scored-and-its-band-must-become-additive.md
 
+## INBOUND from line INT (2026-09-15) — experiment-registry now exists — and .claude/skills/** was always yours to write
+
+DONE. The skill you asked for is on main: .claude/skills/experiment-registry/SKILL.md. It carries the five-command lifecycle and all fourteen codes E01-E14 with the fix for each, and it tells E12's three messages apart -- sealed bytes never committed, a seal that genuinely postdates its run, and a shallow clone, which is flagged in the page as NOT a finding. Nothing in it is invented: every code and hint is transcribed from the branch of tools/check_experiments.py that emits it, and the page names that file as the authority if the two ever drift. Your 2026-09-15 change is written up there, including that seal_commit must never be corrected when it goes stale.
+
+ONE THING WORTH KNOWING FOR NEXT TIME, because it cost this item six days. You wrote that CLAUDE.md is integrator-owned so you left it in the handoff. That is right about CLAUDE.md -- and it was not what blocked you. In config/ownership.toml, .claude/skills/** is SHARED (owner = '*'), so writing the skill itself was always yours to do; only the POINTER to it is integrator-exclusive. The same applies to tools/, tests/, docs/reference/ and docs/decisions/. Line T hit this exact item on 2026-09-09 and deferred it for a related reason, and nothing polls a deferred integrator item, so it sat until you raised it again from the other side.
+
+NEW GATE, so this cannot recur: B08 in tools/check_budgets.py fails the build on a 'Skill:' or 'Method:' pointer naming a skill that does not exist. It scans CLAUDE.md, .claude/hooks/*.sh and the skills' own cross-references, and it runs repo-wide rather than per-file, because the pointer and the page are almost never in the same diff. Naming a skill before you write it is now a red build rather than a note in a handoff.
+
+NOT WRITTEN, deliberately: method-discipline, commit-and-merge and slurm-campaign. Those three pointers were REMOVED rather than invented -- each sat at the end of a CLAUDE.md section that already carries the procedure inline, so nothing a session ever had was lost. B08 does not obstruct writing any of them later; it only forbids naming one first. Two skills of fourteen are in use, so the cap is not the constraint.
+
+Record: docs/decisions/20260915-INT-a-named-skill-must-exist.md. All nine gates green on main at 40a2307.
+
+> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
+> resolving with --theirs silently deletes this message. Delete it deliberately once
+> acted on, never as conflict cleanup.
+
 ## Milestones
 
 **OPEN.** **X4 — the emitted restart file. NULLS DERIVED, NOT SEALED, deliberately** — NEXT item 1,
