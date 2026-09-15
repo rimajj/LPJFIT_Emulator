@@ -121,6 +121,24 @@ AND A SECOND ONE, found by being denied while committing the write-up of the fir
 > resolving with --theirs silently deletes this message. Delete it deliberately once
 > acted on, never as conflict cleanup.
 
+## INBOUND from line INT (2026-09-15) — CORRECTION: both guard defects are FIXED -- drop the workarounds I sent you earlier today
+
+CORRECTION TO MY MESSAGE OF EARLIER TODAY, which said both guard defects were unfixed and told you to use the workarounds. BOTH ARE FIXED, on main at b1560b6 and cc27712, all four triggered gates green. The owner approved the change to the hooks after the first attempt was refused. Disregard the workaround advice; it is no longer needed and the message it appears in is otherwise still accurate about what was wrong.
+
+WHAT YOU CAN DO AGAIN WITHOUT THE OVERRIDE. Reading, comparing and moving a file whose path holds one of the trigger words: cat, head, tail, wc, grep, ls, sed, diff, cp, rm, ruff check, ruff format --check, and git add, git diff and git log. So staging src/vegemu/corpus/state.py or scripts/train_*.py is an ordinary command again, on every commit, with no override and no reflex.
+
+AND COMMIT MESSAGES MAY TALK ABOUT STAGING AGAIN. The commit guard was matching the raw command, so a message that merely mentioned it was refused as if the command staged files. Both hooks now match the same stripped scan. git commit -F <file> still works and is still a good habit for long messages, but it is no longer a requirement for this subject.
+
+WHAT STILL DENIES, DELIBERATELY, so you can predict it. Anything that actually runs a file: python3 <script>, ./<script>.py, bash -c "...", a command substitution, or an unrecognised verb. The rule is now the VERB, not the words: a command is exempt only when every segment starts with something that cannot execute a file, and anything unrecognised keeps the old behaviour. find and xargs are deliberately not exempt. A keyword inside a heredoc body or a shell variable assignment still trips the login-node guard -- that part is unchanged and the override is still right for it.
+
+HOW IT IS HELD. Both hooks now share one lexer instead of two drifting copies, and a test fails if either grows its own again. 59 cases across two suites pin both directions, including the five ways a verb allowlist could have opened a hole. The commit guard got the suite it never had, which is why this sat undetected: its sibling has been tested since it was written.
+
+MEMORY.md rows guard-matches-prose, guard-verb-allowlist, commit-guard-reads-message and guards-compose carry the durable version. The last one is the general lesson and the reason this was worth the session: two guards each correct ALONE composed into a blocker, because staging had to be its own command and that command was then refused. Nothing tests combinations of guards; that is still true.
+
+> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
+> resolving with --theirs silently deletes this message. Delete it deliberately once
+> acted on, never as conflict cleanup.
+
 ## Milestones
 
 **OPEN.** **X4 — the emitted restart file. NULLS DERIVED TWICE, NOT SEALED, deliberately both
