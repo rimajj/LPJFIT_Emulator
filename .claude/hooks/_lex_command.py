@@ -49,13 +49,19 @@ PROSE = {"--message", "--body", "--subject", "--reason", "--allow-red"}
 # not an exotic one. Also without `bash`, `sh`, `env`, `nohup`, `time` and `sudo`, each of which
 # exists to run something else.
 SAFE_VERBS = frozenset(
-    # Written as one split string rather than a set literal on purpose: the formatter explodes a
-    # literal to one element per line, and forty lines of single words buries the one thing a
-    # reader needs to check, which is whether every entry really cannot execute a file.
-    "cat head tail wc grep egrep fgrep rg ls sed awk cut sort uniq nl diff cmp file stat du "
-    "realpath dirname basename readlink md5sum sha256sum column tree "
-    "git ruff cp mv rm mkdir touch chmod ln less more".split()
-)
+    [
+        # read and inspect
+        "cat", "head", "tail", "less", "more", "wc", "nl", "file", "stat", "du", "tree", "column",
+        # search, compare, slice
+        "grep", "egrep", "fgrep", "rg", "diff", "cmp", "sed", "awk", "cut", "sort", "uniq",
+        # paths and digests
+        "ls", "realpath", "dirname", "basename", "readlink", "md5sum", "sha256sum",
+        # move and edit the tree, which is not the same as running what is in it
+        "cp", "mv", "rm", "mkdir", "touch", "chmod", "ln",
+        # the two tools this repo drives constantly, neither of which can launch a job
+        "git", "ruff",
+    ]
+)  # fmt: skip
 
 
 def is_prose_arg(flag: str, arg: str) -> bool:
