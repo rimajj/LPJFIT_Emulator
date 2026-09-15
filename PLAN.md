@@ -1,7 +1,7 @@
 # PLAN.md — the roadmap (budget: 150 lines, enforced)
 
 The single roadmap. Design rationale goes in a decision record, not here. Agents append rung status
-only; the ladder itself changes on an owner steer.
+only; the ladder changes on an owner steer.
 
 ## The two products
 
@@ -12,20 +12,22 @@ only; the ladder itself changes on an owner steer.
 | Truth | **new spin-ups we run**, incl. under 2090s climate | existing warming-run truth on disk |
 
 Build A first. B reuses A's entire state-writing stack and adds a starting state as input.
+⚠ **A's output row is the GOAL, not what corpus v1 holds** — v1's spin-ups carry a CO₂ ramp, so
+their end state is not stationary. That is what `v2-constco2` is for; see rung 0's ⚠ below.
 
 **Output stage 1** = what the emulator predicts natively (restart file + per-cell state summary).
-**Output stage 2, on demand** = the model's own output files, in particular the complete per-tree CSV.
-Stage 2 is obtained by running the real C model **one year** from the emitted restart file — it *is*
-the original model writing them, so it is byte-genuine, including the four annual flux-accumulator
-columns that are not functions of state. ~7 core-hours for all 54,020 cells.
+**Output stage 2, on demand** = the model's own output files, in particular the per-tree CSV, got by
+running the real C model **one year** from the emitted restart — it *is* the original model writing
+them, so it is byte-genuine, including the four annual flux-accumulator columns that are not
+functions of state. ~7 core-hours for all 54,020 cells.
 
 ## Why this can work when the predecessor could not
 
 The existing data has exactly **one climate per location**, so climate and geography are collinear and
-the warming response is not identified (see `MEMORY.md:ident-limit`). Our target is an *equilibrium*,
-and the spin-up is per-cell and embarrassingly parallel, so we **generate a designed climate-
-perturbation ensemble: the same cell spun up under many climates**. That decollinearises climate from
-place by construction, and it is the experiment the predecessor could never run.
+the warming response is not identified (`MEMORY.md:ident-limit`). The spin-up is per-cell and
+embarrassingly parallel, so we **generate a designed climate-perturbation ensemble: the same cell
+spun up under many climates**. That decollinearises climate from place by construction, and it is
+the experiment the predecessor could never run.
 
 ## The gate ladder
 
@@ -41,29 +43,30 @@ Each rung is a pre-registered experiment. Status is updated here when a verdict 
 | **5** | Does the response survive a **held-out forcing leg**? | the warming claim | **FAILED 2026-09-14 at pre-named outcome (c), 0.0054 vs persistence 0.0337** — the scenario legs cannot train a response. Not a contradiction of rung 1; see below |
 | **6** | Product B, and stage-2 output reconstruction. | product B only | not started |
 | **7** | All 54,020 tree-bearing cells, both scenarios, at acceptance-grade patch count. | acceptance | not started |
+| **8** | **Can the species mix shift, and can that be learned?** | the synthesiser copying composition | **PASSED 2026-09-15: 0.425610 vs a sealed bar of 0.337858, best null 0.177858; 49 % of the attainable 0.863852.** Copying composition is a measured defect, not a free simplification |
 
 ### Rung 0 — format round-trip (line D). PASSED.
-100 real cells spanning 360,183 B → 3,546,287 B round-trip byte-identically, plus both whole `.clm`
-input files. Spec: `docs/reference/binfmt.md`.
+100 real cells, 360,183 B → 3,546,287 B, byte-identical, plus both `.clm` inputs. `binfmt.md`.
 
-⚠ **The convergence question came back NO, and in the opposite direction to the hope.** The
-1000-year spin-up has not converged: global vegetation carbon is 719 Pg C at year 200, 735 at 500
-and 890 at 1000, still rising at +6.5 %/century with both seeds agreeing to 0.07 %. So **no budget
-below drops** — a 300-year run would differ by 22 % — and "equilibrium" is the wrong word for the
-target: it is the state the model's standard protocol reaches, which is exactly what a model user
-gets and what skipping it saves. Record: `docs/decisions/20260908-D-spinup-is-not-converged.md`.
+⚠ **CORRECTED 2026-09-15: the spin-up DOES converge — the late rise is CO₂, and this was our error.**
+It runs model years 1000–1999 against a **transient** CO₂ file, so its last 300 years carry the real
+historical rise, +32.8 %. While CO₂ is pinned the curve is flat to **+0.15 %/century**; over the ramp
+it climbs +5.53 %/century at **r = +0.987** with CO₂. The old "not converged" fitted its trend over a
+window lying entirely inside that ramp. Found by the owner asking why a single cell showed no rise.
+**Every corpus run shares the identical CO₂ path, so no score is confounded and rungs 1 and 5
+stand** — but the target is a forest still adjusting to a CO₂ step, not an equilibrium, and is being
+rebuilt as corpus `v2-constco2`. **No budget drops**: a shorter run ends at a different CO₂, so it is
+a different state. `docs/reference/corpus-design.md`; record `20260915-D-the-spinup-did-converge-*`.
 
 ### Rung 1 — the kill test. PASSED 2026-09-14 (`X-20260909-pilot-warming-response`, line X)
 
 **The project's first positive result: the warming response IS learnable where it is identified.**
 Basis: pilot corpus v1, 200 cells × 30 climates × 1 seed, one binary, within-cell paired contrasts
-under spatially blocked folds — the same cell under 30 climates separates climate from place by
-construction, which is exactly what the existing data cannot do. The model predicts how a forest
-*changes* at **0.545304** against **0.145690** for the best information-free competitor (every cell
-changes by the same fraction of what it has — NOT zero), on a pre-registered bar of **0.225690**,
-and beats that competitor at **all 29 of 29 perturbation levels**, so the non-monotonicity clause is
-satisfied and not waived. **Quote it as 63 % of attainable** — the ceiling is 0.869730 and is itself
-a lower bound — never against 1.0.
+under spatially blocked folds — the same cell under 30 climates separates climate from place, which
+the existing data cannot do. The model predicts how a forest *changes* at **0.545304** against
+**0.145690** for the best information-free competitor (every cell changes by the same fraction of
+what it has — NOT zero), on a bar of **0.225690**, beating it at **all 29 of 29 levels**. **Quote it
+as 63 % of attainable** — the ceiling is 0.869730 and is itself a lower bound — never against 1.0.
 
 ⚠ **What must travel with that headline.** A model **blinded** to which perturbation it is asked
 about scores **0.349462, above the bar** — every pre-registered null was information-free, so none
@@ -79,69 +82,66 @@ skill**, and "predicts the warming response" without that number overstates it.
 | mid | 1,000 × 100 × 2 | 200,000 | 22,200 | ~11 h | 380 GB |
 | full | 3,000 × 200 × 2 | 1,200,000 | 133,000 | ~65 h | 2.3 TB |
 
-Perturbation design rules (the physical-coherence ones are not optional):
-1. Calibrate perturbation directions on the **real climate-model deltas** (delta-change method), so
-   every perturbed climate lies on the manifold a climate model actually produces.
-2. **Hold relative humidity fixed** when scaling temperature (Clausius–Clapeyron), and disclose it —
-   adding 6 K while leaving specific humidity alone produces impossible relative humidity.
-3. Axes: temperature scale, precipitation scale, precipitation seasonality, radiation, interannual
-   variability. Latin hypercube plus a small full-factorial core.
-4. **Deliberately span beyond today's envelope**, where space-for-time is known to be sign-wrong.
-5. **Constant CO₂ always** (`MEMORY.md:co2-closed`).
-6. Cells stratified by the ~161 independent 15° tiles, so spatial folds mean something.
-7. Run with `LPJ_IND_ALL_HEIGHTS` so the per-tree output is uncensored; the restart target is
-   uncensored regardless.
+Seven design rules, each with the reason it is not optional: `docs/reference/corpus-design.md`.
+⚠ **Rule 5 is the one that bit**: constant CO₂ is not the default and v0/v1 do not have it.
 
 ### Restart synthesis (line D/T) — the approach
 
 Do **not** predict 1.9 MB of consistent state from scratch. We always hold a real, valid restart for
 the same cell under a nearby climate, so: **template-conditioned synthesis.** Every field is LEARNED
-(the roster, the per-tree bad-years counter, soil carbon, litter), DERIVED (per-tree carbon pools from
-the pipe model; the entire 20-year climate buffer computed straight from the climate input, not learned
-at all; the sapling gene pool from the roster), COPIED (inert crop/nitrogen fields), RELAXED (the fast
-soil water/ice/enthalpy/temperature block, taken from the template — it must be *mutually* consistent
-and nothing validates it), or FREE (random seed, tree IDs).
+(roster, per-tree bad-years counter, soil carbon, litter), DERIVED (carbon pools from the pipe model;
+the 20-year climate buffer straight from the climate input; the sapling gene pool), COPIED (inert
+crop/nitrogen), RELAXED (the fast soil water/ice/enthalpy/temperature block, from the template — it
+must be *mutually* consistent and nothing validates it), or FREE (random seed, tree IDs).
+⚠ **Species composition is COPIED today and that is now a measured defect** — see rung 8.
 
 Validation ladder, cheapest first: **t0** byte round-trip → **t1** config pre-flight accepts →
 **t2** the C loads it and runs 1 year without aborting → **t3** 20 years with no drift beyond the
 two-seed spread, **scored on a WINDOW MEAN — a real restart itself passes in only 90.9 % of cells,
 and that is the ceiling** → **t4** the state distribution matches → **t5** = rung 4.
 
-The **short polish run** fallback (write an approximate restart, let the C relax the fast state for
-N years) is **dead, and not for the reason expected: measured at N = 1 it is a no-op** (+0.016 and
-−0.005 for the two working synthesis versions). The model neither repairs the state nor rejects
-it — it carries it. The lever has to be applied at year 0, in the synthesis.
+The **short polish run** fallback (let the C relax the fast state for N years) is **dead, and not
+for the reason expected: at N = 1 it is a no-op** (+0.016 and −0.005). The model neither repairs the
+state nor rejects it — it carries it. The lever has to be applied at year 0, in the synthesis.
 
 ### Model class (line T)
 Target is a joint distribution over a variable-length roster in trait × size × age × growth-failure
-space. Start with a **size-structured distribution head** (integral-projection style) as the
-interpretable baseline that can pass rung 1 cheaply; target architecture is a **permutation-equivariant
-set network with a stochastic per-tree head** (binomial-survival / Poisson-birth, conservative by
-construction). No published vegetation-model emulator reproduces trait or size distributions at all.
+space. Start with a **size-structured distribution head** (integral-projection style) as the cheap
+baseline; target architecture is a **permutation-equivariant set network with a stochastic per-tree
+head** (binomial-survival / Poisson-birth, conservative by construction). No published
+vegetation-model emulator reproduces trait or size distributions at all.
 
 ## Now — the critical path
 
 **Rung 1 passed on 2026-09-14, and that is the hinge.** Whether a warming response could be learned
-at all was the question that could stop this project; on data where climate and place are separable,
-it can. Rung 5's failure the same day is not a contradiction — it says the *existing scenario legs*
-cannot train a response, which is why the designed ensemble exists. What remains is an ordinary
-fitting problem plus the deliverable stack; rungs 3–4 are blocked on state fidelity, not on
-identification. ⚠ **Compute was never the bottleneck** — the pilot is 20 minutes on 2048 cores —
-**the sessions are.**
+at all was the question that could stop this project; where climate and place are separable, it can.
+Rung 5's failure the same day is not a contradiction — the *existing scenario legs* cannot train a
+response, which is why the designed ensemble exists. Rungs 3–4 are blocked on state fidelity, not on
+identification. ⚠ **Compute was never the bottleneck — the sessions are.**
 
-**One 34-core-hour job is the most valuable thing open here**: a **second seed for 20 pilot cells**,
-line D's, blocked on nothing. It alone settles five questions — rung 1's ceiling from a bound into a
-number, the 2.7 % soil-carbon offset, the species-mix ceiling, the additive band floor corpus v2's
-composition scoring needs, and whether the emitted-restart experiment is pre-registrable at all.
-That last is the oldest open item here, unsealed since 2026-09-09 because its nulls collapse twice
-over: at a 10 % band a *randomly chosen* cell ties for first place. It costs 10 % of the pilot.
+**The second seed RAN on 2026-09-15 and discharged all five asks at once** (`pilot-v1-s2`, 20 cells
+× 30 climates, 600 spin-ups). Its headline is that **the model's own run-to-run spread does NOT
+widen under climate perturbation**: median 0.0301 against 0.0310 at present-day climate, with an
+identical 20.4 % of cell-quantities above the 10 % floor. Consequences, all pre-stated:
+
+* **The emitted-restart experiment (X4) is retired as the WRONG INSTRUMENT, not as a failure.** The
+  floor dominates 79.6 % of cell-quantities, so the conjunctive level statistic has no power and its
+  nulls will keep collapsing. A replacement needs a new estimand, **not** a widened floor — that
+  would be a threshold chosen after seeing the values. This closes the oldest open item here.
+* **The transferred band was legitimate all along**, so nothing scored to date needs recomputing.
+* **`ABS_FLOOR` = 0.0384**, measured, against a 0.10 that would blind the test to 53.9 % of types.
+* **The 2.7 % soil-carbon offset is a real bias**: the model's own median spread there is 1.43 %.
+
+**And the species-mix kill test passed** (rung 8), turning the synthesiser's copying of species
+composition from a disclosed simplification into a measured defect — now line T's principal build.
 
 | open, in value order | owner | blocked on |
 |---|---|---|
-| second seed, 20 pilot cells (~34 core-hours) — **five asks, one job** | **D** | nothing |
-| model arm of the species-mix kill test (`X-20260914-pilot-composition-response`, sealed, bar 0.337858) | **T** | nothing |
-| corpus v2 as **ONE** rebuild — two versions in flight are two questions and no comparison | **D** | nothing |
-| the additive band floor in the shared scorer, shipped with **no default** | **X** | the second seed |
+| **corpus `v2-constco2` — the constant-CO₂ rebuild; 6,000 spin-ups LAUNCHED 2026-09-15, jobs 2204789–2204813** | **D** | harvest + decode |
+| re-score rungs 1 and 8 on `v2-constco2` and compare against `v1` — does the CO₂ ramp change either pass? | **X** | the rebuild |
+| **stop `models/synth.py` copying species composition**; it needs its own t0–t4 pass, not just a score | **T** | nothing |
+| a NEW estimand for the emitted restart, replacing X4 | **X** | nothing |
+| the additive band floor in the shared scorer, now with a measured 0.0384 | **X** | nothing |
 | one cell, one year, two binaries, byte-compared — the only unproven rung-5 claim | **D** | nothing |
 
 **Full acceptance (rung 7) has no defensible date**: the conjunctive pass rate is 0.0351 against an
