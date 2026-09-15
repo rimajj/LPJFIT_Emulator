@@ -289,7 +289,7 @@ def build_null_predictions(
         "shuffled_target": shuffled,
     }
     basis = {
-        "n_folds": int(len(np.unique(folds))),
+        "n_folds": len(np.unique(folds)),
         "n_tiles": int(n_tiles),
         "blocking_degrees": degrees,
         "cells_per_fold": [int((folds == f).sum()) for f in np.unique(folds)],
@@ -304,6 +304,7 @@ def score_arm(
     pred: npt.NDArray[np.float64],
     truth: npt.NDArray[np.float64],
     band: npt.NDArray[np.float64],
+    *,
     treed: npt.NDArray[np.bool_],
     points: list[str],
     quantities: tuple[str, ...],
@@ -377,6 +378,60 @@ def no_power_threshold(scores: dict[str, dict[str, object]], key: str) -> dict[s
     }
 
 
+def floor_sweep(
+    predictions: dict[str, npt.NDArray[np.float64]],
+    targets: dict[str, object],
+    *,
+    cell_ids: list[int],
+    points: list[str],
+    treed: npt.NDArray[np.bool_],
+    quantities: tuple[str, ...],
+    floors: list[float],
+    gt_version: str,
+) -> dict[str, object]:
+    """Every arm's conjunctive score at each candidate band floor.
+
+    ⚠ DIAGNOSTIC ONLY, AND IT MUST NEVER BE READ AS A RESULT -- which is why the key it lands under
+    in the output says so. The acceptance floor is 10 % and this does not move it. What it asks is
+    the question the 10 % column cannot answer on its own: is the conjunctive statistic pinned
+    because the emitted state is wrong, or because a tolerance measured at each cell's PRESENT-DAY
+    climate is too tight for a state driven far outside it? If the arms separate as the floor
+    widens, the blocker is a missing measurement -- the model's own two-seed spread on a PERTURBED
+    state, which line D owes -- and X4 becomes sealable when that lands. If they stay pinned at
+    every floor, no band rescues a 22-way conjunction on a level and the statistic is the wrong
+    instrument.
+    """
+    truth: npt.NDArray[np.float64] = targets["truth"]  # type: ignore[assignment]
+    sweep: dict[str, object] = {}
+    for floor in floors:
+        sp = transferred_spreads(cell_ids, gt_version, quantities, floor)
+        spread: npt.NDArray[np.float64] = sp["ssp126"]  # type: ignore[assignment]
+        band = spread[:, None, :] * np.abs(truth)
+        scores = {
+            name: score_arm(pred, truth, band, treed=treed, points=points, quantities=quantities)
+            for name, pred in predictions.items()
+        }
+        entry = {
+            "separation_conjunctive": separation(scores, "conjunctive"),
+            "no_power_conjunctive": no_power_threshold(scores, "conjunctive"),
+            "conjunctive": {n: s["conjunctive"] for n, s in scores.items()},
+            "mean_per_quantity": {n: s["mean_per_quantity"] for n, s in scores.items()},
+            "ceiling_estimate": ceiling_estimate(cell_ids, gt_version, quantities, spread),
+        }
+        sweep[f"{floor:g}"] = entry
+
+        sep: dict[str, object] = entry["separation_conjunctive"]  # type: ignore[assignment]
+        ceil: dict[str, object] = entry["ceiling_estimate"]  # type: ignore[assignment]
+        print(
+            f"\nfloor {floor:4.2f}: best null {sep['best_null']} = "
+            f"{sep['best_null_value']:.6f}, min gap {sep['min_adjacent_gap']}, "  # type: ignore[str-format]
+            f"ceiling est {ceil['conjunctive']:.4f}"  # type: ignore[str-format]
+        )
+        for name, value in sep["ranked"].items():  # type: ignore[union-attr]
+            print(f"    {name:30s} {value:8.6f}")
+    return sweep
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--version", default="pilot-v1")
@@ -437,7 +492,7 @@ def main() -> int:
         spread: npt.NDArray[np.float64] = spreads[band_name]  # type: ignore[assignment]
         band = spread[:, None, :] * np.abs(truth)
         scores = {
-            name: score_arm(pred, truth, band, treed, points, quantities)
+            name: score_arm(pred, truth, band, treed=treed, points=points, quantities=quantities)
             for name, pred in predictions.items()
         }
         results[band_name] = {
@@ -461,42 +516,16 @@ def main() -> int:
         ceil = results[band_name]["ceiling_estimate"]  # type: ignore[index]
         print(f"  ceiling ESTIMATE (present-day, transferred): {ceil['conjunctive']}")  # type: ignore[index]
 
-    # ---------------------------------------------------------------------------- the floor sweep
-    # ⚠ DIAGNOSTIC ONLY, AND IT MUST NEVER BE READ AS A RESULT. The acceptance floor is 10 % and
-    # this sweep does not move it. What it asks is a question the 10 % column cannot answer on its
-    # own: is the conjunctive statistic pinned because the emitted state is wrong, or because a
-    # tolerance measured at each cell's PRESENT-DAY climate is too tight for a state driven far
-    # outside it? If the arms separate as the floor widens, then the blocker is a missing
-    # measurement -- the model's own two-seed spread on a PERTURBED state, which line D owes -- and
-    # X4 becomes sealable when that lands. If they stay pinned at every floor, no band rescues a
-    # 22-way conjunction on a level and the statistic itself is the wrong instrument.
-    sweep: dict[str, object] = {}
-    for floor in floors:
-        sp = transferred_spreads(cell_ids, args.gt_version, quantities, floor)
-        spread_f: npt.NDArray[np.float64] = sp["ssp126"]  # type: ignore[assignment]
-        band_f = spread_f[:, None, :] * np.abs(truth)
-        scores_f = {
-            name: score_arm(pred, truth, band_f, treed, points, quantities)
-            for name, pred in predictions.items()
-        }
-        sweep[f"{floor:g}"] = {
-            "separation_conjunctive": separation(scores_f, "conjunctive"),
-            "no_power_conjunctive": no_power_threshold(scores_f, "conjunctive"),
-            "conjunctive": {n: s["conjunctive"] for n, s in scores_f.items()},
-            "mean_per_quantity": {n: s["mean_per_quantity"] for n, s in scores_f.items()},
-            "ceiling_estimate": ceiling_estimate(cell_ids, args.gt_version, quantities, spread_f),
-        }
-        sep_f = sweep[f"{floor:g}"]["separation_conjunctive"]  # type: ignore[index]
-        ceil_f = sweep[f"{floor:g}"]["ceiling_estimate"]  # type: ignore[index]
-        print(
-            f"\nfloor {floor:4.2f}: best null {sep_f['best_null']} = "  # type: ignore[index]
-            f"{sep_f['best_null_value']:.6f}, min gap {sep_f['min_adjacent_gap']}, "  # type: ignore[index]
-            f"ceiling est {ceil_f['conjunctive']:.4f}"  # type: ignore[index]
-        )
-        for name, value in sep_f["ranked"].items():  # type: ignore[index]
-            print(f"    {name:30s} {value:8.6f}")
-    report["floor_sweep_DIAGNOSTIC_NOT_AN_ACCEPTANCE_NUMBER"] = sweep
-
+    report["floor_sweep_DIAGNOSTIC_NOT_AN_ACCEPTANCE_NUMBER"] = floor_sweep(
+        predictions,
+        targets,
+        cell_ids=cell_ids,
+        points=points,
+        treed=treed,
+        quantities=quantities,
+        floors=floors,
+        gt_version=args.gt_version,
+    )
     report["results"] = results
     dest = out / "nulls_restart_pilot.json"
     dest.write_text(json.dumps(report, indent=2, sort_keys=True, default=str), encoding="utf-8")
