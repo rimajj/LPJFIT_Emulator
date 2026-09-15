@@ -38,55 +38,44 @@ CMD="$(cat | python3 -c 'import json,sys;print(json.load(sys.stdin).get("tool_in
 # the reflex of disabling the guard on commands the guard was never for, and that reflex does not
 # stop at the ones that are harmless.
 #
-# WHY BY FLAG AND NOT BY QUOTING. commit-guard.sh strips every quoted string. That is right there
-# and wrong here: `python3 -c "import torch; torch.zeros(1)"` is a quoted string that IS the
-# program, and is exactly what this hook exists to deny. So the list is closed and explicit, and
-# every entry takes free text by construction -- no job can be launched through `--body`. It is
-# every prose-carrying flag in the repo, checked 2026-09-14: -m (git), --message, --body and
-# --subject (tools/inbound.py), --reason (tools/campaigns.py), --allow-red (tools/merge.sh).
+# ...AND THE SAME SHAPE AGAIN, MEASURED 2026-09-15: stripping prose fixed the FLAGS and left the
+# FILE PATHS. A keyword in the path of a file you are merely READING still read as a job, so all of
+# these were refused, and not one of them runs anything:
+#   cat scripts/train_emulator.py          wc -l scripts/corpus_build.py
+#   grep -n pft_frac src/vegemu/corpus/state.py        git diff scripts/corpus_build.py
+#   git add scripts/corpus_build.py        ruff check src/vegemu/corpus/state.py
+# Fifteen in all. The last two are what made this urgent rather than annoying: staging and
+# committing in ONE command is denied by commit-guard.sh, so staging is necessarily its own
+# command -- and `git add` on any file under corpus/ or named train_* was refused by THIS hook.
+# Two guards, each correct alone, left lines D and T unable to stage their own principal sources
+# without switching the login-node guard off, on every commit. Precisely the reflex the 2026-09-14
+# fix was written to stop building.
+#
+# THE FIX IS AN ALLOWLIST OF VERBS, NOT A DENYLIST OF WORDS, so it fails closed. A command is exempt
+# from the heavy-Python rule at the bottom only when EVERY segment of it starts with a verb that
+# cannot execute a file. An unrecognised verb keeps the old behaviour, so `bash -c "python3 ..."`
+# and `./scripts/corpus_build.py` stay denied, and so does anything carrying a substitution. The
+# list, and the reasoning for what is deliberately OFF it, live in _lex_command.py.
+#
+# WHY BY FLAG AND NOT BY QUOTING, and WHY THE LEXER IS NOW A SHARED FILE. Stripping every quoted
+# string is wrong here: `python3 -c "import torch; torch.zeros(1)"` is a quoted string that IS the
+# program. commit-guard.sh did strip every quoted string, used that copy for one rule and not for
+# the rule above it, and grew the 2026-09-15 defect in the gap. Two copies of one idea is how that
+# happened, so both hooks now call .claude/hooks/_lex_command.py.
 #
 # DELIBERATELY A SECOND python3 RATHER THAN FOLDED INTO THE JSON READ ABOVE, at ~30 ms per Bash
 # call. That read fails OPEN -- a crash there empties CMD and the hook allows everything, silently.
 # Keeping the lexing separate means its own failure modes (below) fall back to the RAW command, i.e.
 # to the old broad matching, and can never widen into a total bypass.
 #
-# FAILS CLOSED, twice over: a command that will not lex keeps the raw string, and so does an empty
-# or crashed result.
-CMD_SCAN="$(printf '%s' "$CMD" | python3 -c '
-import shlex, sys
-raw = sys.stdin.read()
-PROSE = {"--message", "--body", "--subject", "--reason", "--allow-red"}
-
-
-def is_prose_arg(flag, arg):
-    if flag in PROSE:
-        return True
-    # -m is a git message here, but a MODULE in `python3 -m torch.distributed.run`. A commit
-    # message has whitespace; a module name never does. That is the whole difference.
-    return flag == "-m" and any(c.isspace() for c in arg)
-
-
-try:
-    toks = shlex.split(raw)
-except ValueError:
-    print(raw)
-    raise SystemExit
-out, i = [], 0
-while i < len(toks):
-    t = toks[i]
-    head, sep, _ = t.partition("=")
-    if sep and head in PROSE:
-        out.append(head)
-        i += 1
-        continue
-    if i + 1 < len(toks) and is_prose_arg(t, toks[i + 1]):
-        out.append(t)
-        i += 2
-        continue
-    out.append(t)
-    i += 1
-print(" ".join(out))
-' 2>/dev/null || printf '%s' "$CMD")"
+# FAILS CLOSED, four ways: a command that will not lex keeps the raw string and is UNSAFE; a missing
+# or crashed lexer is UNSAFE; an empty result is UNSAFE; and a first line that is neither word
+# verbatim is UNSAFE.
+LEXER="$(dirname "${BASH_SOURCE[0]}")/_lex_command.py"
+GUARD_OUT="$(printf '%s' "$CMD" | python3 "$LEXER" 2>/dev/null)"
+VERBS="${GUARD_OUT%%$'\n'*}"
+CMD_SCAN="${GUARD_OUT#*$'\n'}"
+if [[ "$VERBS" != "SAFE" && "$VERBS" != "UNSAFE" ]]; then VERBS="UNSAFE"; CMD_SCAN="$CMD"; fi
 [[ -z "$CMD_SCAN" ]] && CMD_SCAN="$CMD"
 
 # ...AND the same variable written as a PREFIX ON THE COMMAND, which is the form this hook's own
@@ -159,12 +148,13 @@ result is then unrecoverable. Submit it: scripts/sbatch_py.sh <tag> <script.py>"
   fi
 fi
 
-if [[ "$CMD_SCAN" =~ python[0-9.]*[[:space:]] ]] || [[ "$CMD_SCAN" =~ \.py([[:space:]]|$) ]]; then
+if [[ "$VERBS" != "SAFE" ]] && { [[ "$CMD_SCAN" =~ python[0-9.]*[[:space:]] ]] || [[ "$CMD_SCAN" =~ \.py([[:space:]]|$) ]]; }; then
   # `torch` is in this list because the header above has always claimed it was, and it was not:
   # importing torch on the login node allocates a multi-gigabyte process and a thread pool per
   # session. The keyword set is broad and still matches anywhere in the command -- but the command
-  # it now matches is CMD_SCAN, which no longer carries anyone's prose. Breadth costs only false
-  # denials of things that MENTION a keyword, and those are exactly what the stripping removes.
+  # it now matches is CMD_SCAN, which no longer carries anyone's prose, and the whole block is now
+  # skipped when every verb in the command merely reads a file. Breadth then costs only false
+  # denials of things that MENTION a keyword under a verb that could have run one.
   if [[ "$CMD_SCAN" =~ (train|bench|corpus|sweep|eval|probe|export|spinup|rollout|fit_|score_|torch) ]]; then
     deny "This looks like heavy Python on the login node. It shares one node with every other
 session, and it dies when this session ends.

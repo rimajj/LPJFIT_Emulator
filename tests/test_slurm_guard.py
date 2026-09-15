@@ -67,6 +67,17 @@ MUST_DENY = [
     "scripts/sbatch_py.sh train scripts/train_emulator.py",
     # the C model needs its module environment and a scheduler
     "bin/lpjml lpjml.js",
+    # ⚠ THE FIVE WAYS THE 2026-09-15 VERB ALLOWLIST COULD HAVE OPENED A HOLE. Each must stay red:
+    # a safe verb cannot launder an unsafe one later in the same command...
+    "cat notes.md && python3 scripts/corpus_build.py --tier pilot",
+    # ...including when no whitespace surrounds the operator, so shlex keeps it in one token
+    "cat a.py&&python3 scripts/corpus_build.py",
+    # executing a script is not reading it, however the path is spelled
+    "./scripts/corpus_build.py --tier pilot",
+    # an unrecognised verb keeps the OLD behaviour rather than being assumed harmless
+    "bash -c 'python3 scripts/corpus_build.py'",
+    # a substitution can hide any program at all behind a safe-looking verb
+    "cat $(python3 scripts/corpus_build.py --print-path)",
 ]
 
 MUST_ALLOW = [
@@ -89,6 +100,29 @@ MUST_ALLOW = [
     'git commit -m "fix(launcher): the sbatch wrapper lost three jobs"',
     'git commit -m "docs(corpus): rebuild corpus_build.py under the genuine second seed"',
     'python3 tools/campaigns.py abandon --tag t --reason "the corpus build died"',
+    # READING A FILE IS NOT RUNNING IT. Stripping prose on 2026-09-14 fixed the FLAGS and left the
+    # FILE PATHS, so all fifteen of these were denied until 2026-09-15 -- a keyword in the PATH of
+    # a file being read still counted as a job. Measured, not supposed.
+    "cat scripts/train_emulator.py",
+    "wc -l scripts/corpus_build.py",
+    "head -50 src/vegemu/corpus/state.py",
+    "tail -20 scripts/corpus_pilot.py",
+    "grep -n pft_frac src/vegemu/corpus/state.py",
+    "ls -la src/vegemu/corpus/state.py",
+    "sed -n '1,20p' scripts/corpus_build.py",
+    "diff scripts/corpus_build.py scripts/corpus_pilot.py",
+    "cp scripts/corpus_build.py /tmp/backup.py",
+    "ruff check src/vegemu/corpus/state.py",
+    "ruff format --check scripts/corpus_build.py",
+    "git diff scripts/corpus_build.py",
+    "git log --oneline -5 -- scripts/train_emulator.py",
+    # ⚠ THE ONE THAT MADE IT URGENT. commit-guard.sh denies staging and committing in one command,
+    # so staging MUST be its own command -- and this hook refused that command for any file under
+    # corpus/ or named train_*. Lines D and T could not stage their own principal sources without
+    # switching the guard off, on every commit: the exact reflex the 2026-09-14 fix existed to stop.
+    "git add scripts/corpus_build.py",
+    # a pipeline is exempt only if EVERY segment's verb is one that cannot run a file
+    "head -50 src/vegemu/corpus/state.py | wc -l",
 ]
 
 # The overrides the guard's own messages advertise, in the only form a Bash tool call can use.

@@ -22,6 +22,15 @@ CMD="$(cat | python3 -c 'import json,sys;print(json.load(sys.stdin).get("tool_in
 [[ -n "${ALLOW_COMMIT_GUARD_SKIP-}" ]] && exit 0
 
 REPO="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+
+# The command with the ARGUMENTS OF PROSE-CARRYING FLAGS removed -- `-m`, `--message`, `--body`,
+# `--subject`, `--reason`, `--allow-red`. Every rule below matches against THIS and never against
+# $CMD, so no rule can be tripped by what a commit message happens to say. FAILS CLOSED: a command
+# that will not lex, a missing or crashed lexer, and an empty result all fall back to the raw
+# command, i.e. to the old broad matching, which can never widen into a bypass.
+CMD_SCAN="$(printf '%s' "$CMD" | python3 "$(dirname "${BASH_SOURCE[0]}")/_lex_command.py" 2>/dev/null | tail -n +2)"
+[[ -z "$CMD_SCAN" ]] && CMD_SCAN="$CMD"
+
 cd "$REPO" 2>/dev/null || exit 0
 
 # ⚠ FAIL CLOSED WHEN THE COMMAND STAGES ITS OWN FILES. A PreToolUse hook fires ONCE, before the
@@ -35,7 +44,21 @@ cd "$REPO" 2>/dev/null || exit 0
 # files the guard never saw, so its verdict is about the wrong set either way. Hence the test is on
 # the COMMAND, not on the index. Denying is right rather than merely safe -- staging in a separate
 # step costs one extra tool call and makes the guard's view of the commit exactly correct.
-if [[ "$CMD" =~ (^|[[:space:];&|])git[[:space:]]+(add|stage)([[:space:]]|$) ]]; then
+#
+# ⚠ ON THE SCAN, NOT ON $CMD, AND THAT DISTINCTION WAS A BUG FOR SIX DAYS. Until 2026-09-15 this
+# line tested the RAW command, so a commit whose MESSAGE merely mentioned staging was refused as if
+# it staged -- measured in both quote styles. The stripped copy already existed thirty lines below
+# and was used only by the ` -a ` rule under it: the comment there states the principle correctly
+# and the fix had been applied to the line beneath it rather than the line above. Found by being
+# denied while committing the write-up of the sibling guard's defect, which is the fifth measured
+# instance in this repo of ONE shape -- A GUARD MATCHING TEXT THAT IS NOT WHAT IT GUARDS.
+#
+# WHY NOT THE OLD `sed` THAT STRIPPED EVERY QUOTED STRING. Because a quoted string can BE the
+# command: `bash -c "git add x && git commit -m y"` would then stop matching here, while the filter
+# at the top still matched on the raw text -- dropping it straight through to the stale-index
+# bypass this whole guard exists to prevent. Stripping only the ARGUMENT OF A PROSE FLAG keeps that
+# case red and lets an ordinary commit message through. Shared lexer, one copy, see _lex_command.py.
+if [[ "$CMD_SCAN" =~ (^|[[:space:];&|])git[[:space:]]+(add|stage)([[:space:]]|$) ]]; then
   python3 - <<'PY'
 import json
 print(json.dumps({"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny",
@@ -58,12 +81,17 @@ fi
 STAGED="$(git diff --cached --name-only --diff-filter=ACMR 2>/dev/null || true)"
 # `git commit -a` stages every tracked modification at commit time, so the index alone again
 # understates what is about to land. That set IS knowable up front, so fold it in rather than deny.
-# Quoted strings are stripped first: otherwise a commit MESSAGE containing " -a " would widen the
-# checked set and report findings about files the commit never touches -- the same shape of bug as
-# the one above (a guard matching text that is not what it guards), which this repo has now hit
-# three times. `--amend` cannot match: its `a` is not preceded by whitespace-then-single-dash.
-CMD_NOSTR="$(printf '%s' "$CMD" | sed 's/"[^"]*"//g; s/'"'"'[^'"'"']*'"'"'//g')"
-if [[ "$CMD_NOSTR" =~ (^|[[:space:]])(-[a-zA-Z]*a[a-zA-Z]*|--all)([[:space:]]|$) ]]; then
+# Prose is stripped first: otherwise a commit MESSAGE containing " -a " would widen the checked set
+# and report findings about files the commit never touches -- the same shape of bug as the one
+# above, which this repo has now hit five times. `--amend` cannot match: its `a` is not preceded by
+# whitespace-then-single-dash.
+#
+# THIS USED TO HAVE ITS OWN `sed` that stripped every quoted string, and that private copy is what
+# let the rule above drift: one rule stripped, the rule over it did not, and nothing tied them
+# together. Both now read CMD_SCAN. Strictly this is the more conservative of the two -- a ` -a `
+# inside a non-prose quoted string still widens the checked set, which over-checks rather than
+# under-checks, and over-checking is the safe direction here.
+if [[ "$CMD_SCAN" =~ (^|[[:space:]])(-[a-zA-Z]*a[a-zA-Z]*|--all)([[:space:]]|$) ]]; then
   STAGED="$(printf '%s\n%s' "$STAGED" "$(git diff --name-only --diff-filter=ACMR 2>/dev/null || true)" | sort -u | sed '/^$/d')"
 fi
 [[ -z "$STAGED" ]] && exit 0
