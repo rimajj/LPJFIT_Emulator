@@ -10,6 +10,14 @@ job so the result carries proof of what it actually ran under.
 This is the mechanism that makes "pre-registered" a fact rather than a promise: any later edit
 changes the hash, and the mismatch turns CI red (E03/E04). A changed question is a NEW exp_id with
 `supersedes:` naming this one -- the same discipline that keeps decision records immutable.
+
+⚠ `prereg_sha256` IS THE BINDING RECORD; `seal_commit` IS AN ADVISORY BREADCRUMB. The row below
+carries both, but only the hash identifies the seal durably. `CLAUDE.md` requires
+`git pull --rebase origin main` before merging, and a rebase rewrites every not-yet-merged commit on
+the line -- so an experiment sealed and merged in the same session ALWAYS ends up with a
+`seal_commit` naming an orphan. That is expected and harmless: E12 resolves the seal by content and
+never reads this field. Do not "correct" the value when it goes stale, and never edit a registry row
+to chase it.
 """
 
 from __future__ import annotations
@@ -100,7 +108,8 @@ def main(argv: list[str] | None = None) -> int:
         )
     seal_commit = git("rev-parse", "HEAD").strip()
 
-    # 4. Append the ledger row.
+    # 4. Append the ledger row. `seal_commit` is provenance for a human reading the ledger, not an
+    #    identifier any check depends on -- see the module docstring.
     row = {
         "exp_id": args.exp_id,
         "line": exp.prereg.get("line"),
