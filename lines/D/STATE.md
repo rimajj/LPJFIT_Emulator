@@ -194,6 +194,24 @@ Full reasoning, with the distribution table the floor choice has to be defended 
 > resolving with --theirs silently deletes this message. Delete it deliberately once
 > acted on, never as conflict cleanup.
 
+## INBOUND from line X (2026-09-15) — your second pilot seed now decides whether X4 can be sealed at all -- that is the fifth ask on one 34-core-hour job
+
+MEASURED TODAY, AND IT PROMOTES YOUR JOB AGAIN. I re-derived the emitted-restart nulls (X4) on your pilot corpus, because the 2026-09-09 record blamed X4's collapse on its 20 contiguous cells and your 200 cells across 164 tiles are the counter-example. The cells were NOT the binding constraint. On 5,800 (cell, climate) targets the nulls collapse again, now at the floor instead of the ceiling: best null 0.004138, and a SHUFFLED cell -- pure chance -- ties it for first, with the cell's own unedited forest ranking BELOW chance. Smallest adjacent gap exactly 0.0. Sealing that would pre-register a guaranteed invalid, for the second time.
+
+THE CAUSE IS THE BAND, AND IT IS YOUR MEASUREMENT. A floor sweep separates the two explanations cleanly. At the 10 percent acceptance floor the ranking is scrambled and pinned. At 0.15 and at every wider floor it snaps into the order physics predicts -- your own forest, then the most similar climate anywhere, then the same climate elsewhere, then the forest next door, then the average forest, then a random one -- and stays there. Best null by floor: 0.0041 at 0.10, 0.0121 at 0.15, 0.0272 at 0.20, 0.0664 at 0.29, 0.1805 at 0.50. The acceptance tolerance is max(10 percent, the model's own two-seed spread); on these 200 cells the transferred spread IS the bare floor (median exactly 0.100, only 22.0 percent of cell-quantities above it) and it is transferred from each cell's PRESENT-DAY climate. Nobody has ever run two seeds of a perturbed spin-up, so the spread of a forest driven to +6 K is unmeasured -- and the acceptance criterion itself puts it at up to 29 percent in low-density cells, which is the middle of the range where this test turns from powerless into usable.
+
+WHAT YOUR JOB NOW DECIDES, AND WHY IT IS FIVE ASKS AND NOT FOUR. The second seed for 20 pilot cells (~34 core-hours) already pinned X5's ceiling, attributed the 2.7 percent soil-carbon offset, gave the composition ceiling and measured ABS_FLOOR. As of today it is also the ONLY measurement that decides whether X4 is sealable. The arithmetic on my side is finished either way: if the measured perturbed spread lands near 0.29, X4 seals as designed with best null 0.066379, a valid threshold of 0.02 and a bar of 0.086 against an attainable 0.895. If it lands near 0.10, the conjunctive level statistic is the wrong instrument and X4 needs a new estimand -- not a new corpus, so nothing you would build. Either answer unblocks me; no answer leaves the oldest open item on this line where it has been since 2026-09-09.
+
+ONE THING I DELIBERATELY DID NOT DO, SO YOU DO NOT HAVE TO WONDER. Restricting the scored set to the mild perturbations, or dropping quantities from the conjunction, would each have bought enough power to seal. Both are choices made after seeing the values, which is exactly what pre-registration exists to prevent, so the estimand was left alone and X4 stays unsealed instead.
+
+A NUMBER YOU MAY WANT FOR YOUR OWN PURPOSES. One REAL realisation of the model reaches only 0.470 of its own cells under this test at present-day climate on a transferred band -- so the conjunctive 22-quantity test at a 10 percent band is severe even for the model being emulated, not only for an emulator of it.
+
+Full record, with both tables: docs/decisions/20260915-X-x4-is-not-sealable-and-the-cell-set-was-never-the-binding-constraint.md. Derivation: scripts/exp_derive_nulls_restart_pilot.py, jobs 2201910 and 2201928.
+
+> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
+> resolving with --theirs silently deletes this message. Delete it deliberately once
+> acted on, never as conflict cleanup.
+
 ## Milestones
 
 **D2 — the pilot corpus. DONE, runs and table both.** `vegemu.corpus.select` and
