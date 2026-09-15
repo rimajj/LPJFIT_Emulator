@@ -574,8 +574,22 @@ def fig_response_map(frame: pl.DataFrame, quantity: str, out: Path) -> None:
 
 
 # ---------------------------------------------------------------------------------------------
-# Figure 8 -- the spin-up that never converged.
+# Figure 8 -- the spin-up converges, and the late rise is CO2.
+#
+# ⚠ THIS FIGURE PREVIOUSLY SAID THE OPPOSITE, and the error was in the reading, not the data. The
+# spin-up runs MODEL YEARS 1000-1999 and its CO2 input is a TRANSIENT file beginning in 1700, so
+# LPJmL holds CO2 at 276.59 ppm for the first 700 spin-up years and then follows the real historical
+# record for the last 300. Over the constant-CO2 stretch the curve is flat to +0.15 %/century; over
+# the ramp it climbs +5.53 %/century, and CO2 correlates with it at +0.987. The old title read that
+# forced response as unconverged drift.
+# Record: `docs/decisions/20260915-D-the-spinup-did-converge-the-late-rise-is-transient-co2.md`.
 # ---------------------------------------------------------------------------------------------
+
+# Spin-up year at which model year 1700 is reached, i.e. where the CO2 file stops being clamped to
+# its first value. firstyear 2000 - nspinup 1000 = model year 1000, so 1700 - 1000 = 700.
+CO2_RAMP_START = 700
+
+
 def fig_spinup(traj: pl.DataFrame, summary: dict[str, object], out: Path) -> None:
     year = traj["year"].to_numpy()
     g1 = traj["global_vegc_pgc_seed1"].to_numpy()
@@ -599,13 +613,22 @@ def fig_spinup(traj: pl.DataFrame, summary: dict[str, object], out: Path) -> Non
             color=S2,
             ha="right" if y == 1000 else "left",
         )
-    trend = float(summary["global_trend_pct_per_century_last200"])  # type: ignore[arg-type]
-    ax.set_xlabel("year of the 1000-year spin-up")
+    lo, hi = ax.get_ylim()
+    ax.axvspan(CO2_RAMP_START, 1000, color=S2, alpha=0.09, lw=0, zorder=0)
+    ax.annotate(
+        "CO₂ rises here\nmodel yr 1700-1999\n277 → 367 ppm",
+        xy=(CO2_RAMP_START + 12, lo + 0.06 * (hi - lo)),
+        fontsize=8,
+        color=S2,
+        ha="left",
+    )
+    ax.set_ylim(lo, hi)
+    ax.set_xlabel("year of the 1000-year spin-up  (model years 1000-1999)")
     ax.set_ylabel("global vegetation carbon (Pg C)")
     ax.legend(loc="lower right", fontsize=8.5, labelcolor=INK_2)
     despine(ax)
     fig.suptitle(
-        "The 1000-year spin-up has not converged",
+        "The spin-up converges — the late rise is CO₂, not drift",
         x=0.012,
         ha="left",
         fontsize=12,
@@ -613,9 +636,9 @@ def fig_spinup(traj: pl.DataFrame, summary: dict[str, object], out: Path) -> Non
         color=INK,
     )
     ax.set_title(
-        f"Still rising at {trend:+.1f} % per century at the end of the run; the two seeds "
-        f"agree on it to {float(summary['global_two_seed_diff_pct']):.2f} %.\n"
-        "So the stored state is what the standard spin-up protocol reaches, not an equilibrium.",
+        "Flat to +0.15 % per century while CO₂ is held at 276.59 ppm (spin-up years 200-700).\n"
+        "The last 300 years carry the real historical CO₂ rise of +32.8 %, and vegetation carbon\n"
+        "follows it at +5.53 % per century — the two move together at r = +0.99.",
         loc="left",
         fontsize=9,
         color=INK_2,

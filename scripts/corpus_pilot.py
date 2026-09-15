@@ -184,6 +184,11 @@ def run_tag(cell: int, point: str, seed: int = SEED) -> str:
     return f"c{cell}-{point}-s{seed}"
 
 
+def constant_co2_path(version: str) -> Path:
+    """Where a constant-CO2 corpus keeps its own CO2 forcing. One file for the whole version."""
+    return scratch("forcing", f"pilot-{version}") / "co2_constant.txt"
+
+
 def config_path(version: str, cell: int, point: str, seed: int = SEED) -> Path:
     """Where `corpus_spinup_config.py` puts this run's config. Named once, used by every stage."""
     tag = run_tag(cell, point, seed)
@@ -196,7 +201,14 @@ def config_path(version: str, cell: int, point: str, seed: int = SEED) -> Path:
 
 
 def stage_plan(
-    version: str, ncell: int, npoint: int, shard_size: int, *, seed: int = SEED, subset: int = 0
+    version: str,
+    ncell: int,
+    npoint: int,
+    shard_size: int,
+    *,
+    seed: int = SEED,
+    subset: int = 0,
+    const_co2: bool = False,
 ) -> int:
     out = meta_dir(version, seed)
     sel = pilot_cells(ncell)
@@ -317,7 +329,21 @@ def stage_plan(
         ),
         "selection": sel.as_dict(),
         "base_window": [1970, 1999],
-        "co2": "untouched and never written (MEMORY.md:co2-closed)",
+        # ⚠ "untouched" IS NOT "constant", and this key used to say only the first. The ground
+        # truth's CO2 input is transient (1700-2022) and the spin-up runs model years 1000-1999, so
+        # an untouched corpus carries a +32.8 % CO2 rise over its last 300 years.
+        "co2": (
+            f"CONSTANT {_load('corpus_spinup_config').CO2_PREINDUSTRIAL_PPM} ppm, own forcing file "
+            f"({constant_co2_path(version)})"
+            if const_co2
+            else "INHERITED FROM THE GROUND TRUTH AND THEREFORE TRANSIENT: "
+            "global_co2_ann_1700_2022.txt over model years 1000-1999, so the last 300 spin-up "
+            "years carry the historical CO2 rise 276.59 -> 367.26 ppm. Never PERTURBED and never "
+            "written by us, and identical in every run, so it confounds no contrast between design "
+            "points -- but the state is NOT an equilibrium under constant CO2 "
+            "(20260915-D-the-spinup-did-converge-the-late-rise-is-transient-co2.md)."
+        ),
+        "co2_constant": const_co2,
         "shards": [str(p) for p in shards],
         "shard_size": shard_size,
         "sources": _source_provenance(),
@@ -409,7 +435,7 @@ def _binary_provenance() -> dict[str, Any]:
 # ------------------------------------------------------------------------------------------------
 
 
-def _build_cell(args: tuple[str, int, int, int]) -> dict[str, Any]:
+def _build_cell(args: tuple[str, int, int, int, bool]) -> dict[str, Any]:
     """One cell: read its baseline once, then write all `npoint` forcing sets and configs.
 
     Runs in a worker process, so it imports what it needs itself and returns only small summaries.
@@ -418,11 +444,12 @@ def _build_cell(args: tuple[str, int, int, int]) -> dict[str, Any]:
     at best redo work and at worst race a concurrent reader of the corpus the pilot is scored on.
     The files are required to be there already and are checked, never regenerated.
     """
-    version, cell, npoint, seed = args
+    version, cell, npoint, seed, const_co2 = args
     perturb = _load("corpus_perturb_clm")
     cfgmod = _load("corpus_spinup_config")
     design = pilot_design(npoint)
     replicate = seed != SEED
+    co2_file = constant_co2_path(version) if const_co2 else None
 
     # The one read that must not be repeated per point: the 30-year baseline block plus the
     # calibration contrast out of the scenario leg. A replicate reads no baseline at all.
@@ -438,7 +465,7 @@ def _build_cell(args: tuple[str, int, int, int]) -> dict[str, Any]:
         (rdir / "output").mkdir(parents=True, exist_ok=True)
         (rdir / "restart").mkdir(parents=True, exist_ok=True)
         tag = run_tag(cell, pert.name, seed)
-        input_js = cfgmod.build_input_js(fdir, rdir, tag)
+        input_js = cfgmod.build_input_js(fdir, rdir, tag, co2_file=co2_file)
         config = cfgmod.build_config(cell, input_js, rdir, tag=tag, seed=seed, nspinup=NSPINUP)
         wrote.append(
             {
@@ -476,7 +503,21 @@ def _existing_forcing(fdir: Path, perturb: ModuleType) -> dict[str, Any]:
     return {"files": files, "diagnostics": {"tas_ann_c": None, "pr_ann_mm": None}}
 
 
-def _build_cell_guarded(args: tuple[str, int, int, int]) -> dict[str, Any]:
+def _write_co2_if_constant(version: str, const_co2: bool) -> None:
+    """Write this version's constant-CO2 forcing once, before the workers fan out.
+
+    In the build stage rather than the plan stage because the plan deliberately creates no
+    directories, and in the PARENT rather than in `_build_cell` because 20 workers writing the same
+    file is a race with no upside.
+    """
+    if not const_co2:
+        return
+    cfgmod = _load("corpus_spinup_config")
+    written = cfgmod.write_constant_co2(constant_co2_path(version))
+    print(f"constant CO2 forcing: {written}  ({cfgmod.CO2_PREINDUSTRIAL_PPM} ppm, every year)")
+
+
+def _build_cell_guarded(args: tuple[str, int, int, int, bool]) -> dict[str, Any]:
     try:
         return _build_cell(args)
     # One bad cell must not lose the other 199, so the traceback is returned rather than raised --
@@ -486,9 +527,17 @@ def _build_cell_guarded(args: tuple[str, int, int, int]) -> dict[str, Any]:
 
 
 def stage_build(
-    version: str, workers: int, shard: int, nshard: int, npoint: int, *, seed: int = SEED
+    version: str,
+    workers: int,
+    shard: int,
+    nshard: int,
+    npoint: int,
+    *,
+    seed: int = SEED,
+    const_co2: bool = False,
 ) -> int:
     out = meta_dir(version, seed)
+    _write_co2_if_constant(version, const_co2)
     runs = pl.read_csv(out / "runs.csv")
     cells = sorted(set(int(c) for c in runs["cell"].to_list()))
     mine = cells[shard::nshard] if nshard > 1 else cells
@@ -501,7 +550,7 @@ def stage_build(
 
     done: list[dict[str, Any]] = []
     failed: list[dict[str, Any]] = []
-    jobs = [(version, cell, npoint, seed) for cell in mine]
+    jobs = [(version, cell, npoint, seed, const_co2) for cell in mine]
     if workers > 1:
         with ProcessPoolExecutor(max_workers=workers) as pool:
             futures = {pool.submit(_build_cell_guarded, j): j[1] for j in jobs}
@@ -1002,6 +1051,15 @@ def main() -> int:
         ),
     )
     ap.add_argument(
+        "--const-co2",
+        action="store_true",
+        help=(
+            "drive the spin-up with a CONSTANT CO2 file instead of the ground truth's transient "
+            "one. Without this the last 300 of the 1000 spin-up years carry the historical CO2 "
+            "rise, so the end state is not an equilibrium. A new corpus VERSION, never an edit."
+        ),
+    )
+    ap.add_argument(
         "--subset",
         type=int,
         default=0,
@@ -1021,10 +1079,17 @@ def main() -> int:
             args.shard_size,
             seed=args.seed,
             subset=args.subset,
+            const_co2=args.const_co2,
         )
     if args.stage == "build":
         return stage_build(
-            args.version, args.workers, args.shard, args.nshard, args.npoint, seed=args.seed
+            args.version,
+            args.workers,
+            args.shard,
+            args.nshard,
+            args.npoint,
+            seed=args.seed,
+            const_co2=args.const_co2,
         )
     if args.stage == "verify":
         return stage_verify(args.version, args.seed)
