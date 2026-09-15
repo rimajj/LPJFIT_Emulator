@@ -466,9 +466,7 @@ def main() -> int:
 
     floors = [float(f) for f in str(args.floors).split(",")]
     spreads = transferred_spreads(cell_ids, args.gt_version, quantities, floors[0])
-    predictions, fold_basis = build_null_predictions(
-        targets, cells, k=args.k, degrees=args.degrees
-    )
+    predictions, fold_basis = build_null_predictions(targets, cells, k=args.k, degrees=args.degrees)
 
     report: dict[str, object] = {
         "version": args.version,
