@@ -14,41 +14,36 @@ the corpus (D), pre-registrations and verdicts (X).
 
 ## NEXT — start here
 
-**THE COMPOSITION ARM IS BUILT AND ITS APPARATUS IS DERIVED. It is blocked on line X sealing, and
-on nothing else.** Everything is in `docs/reference/composition-response.md`; X has been sent a
-short pointer to it. **Do not run the model arm before the seal** — that ordering is the whole point
-of invariant 2, and `sbatch_py.sh --exp` enforces it.
+**THE COMPOSITION ARM HAS RUN AND IT PASSES. T6 is closed, and it hands T4 a concrete defect.**
+Job 2204421, exp `X-20260914-pilot-composition-response`, 2026-09-15. Model **0.425610** against the
+sealed bar of **0.337858** and best null `proportional_median_response` **0.177858** — which is
+exactly the value the pre-registration required it to return, as did all six others, so the result
+is a pass and not an `invalid`. It passes at 5 deg too (0.420620 against 0.348750). Quote it as
+**49 % of the attainable 0.863852**, never against 1.0, and say the ceiling is still a lower bound.
+Verdict: `experiments/X-20260914-pilot-composition-response/verdict.md`.
 
-**The question.** `models/synth.py` copies each tree's TYPE from the cell's own template roster, so
-an emulated warmed forest cannot change which species it holds. Whether that limit costs anything
-depends on whether the composition response is learnable — measurable now, without corpus v2.
+**SO THE NEXT BUILD IS: `models/synth.py` MUST STOP COPYING SPECIES COMPOSITION.** That limit is no
+longer a disclosed simplification, it is a measured capability gap — the signal it discards is most
+of what a 0.43 is made of. The model arm that scored it (`scripts/exp_model_pilot_composition.py`)
+predicts the CHANGE in each type's stem share from the control forest plus the climate contrast;
+wiring its prediction into the roster builder is the work. ⚠ **It needs its own t0–t4 validation, not
+just a score**: a roster whose type shares are right and whose stems are inadmissible is the failure
+this line has already had twice, and both times every mean the synthesiser printed looked fine.
 
-**What was derived** (campaign `T-nulls-composition`, job 2194883): best null
-`proportional_median_response` **0.177858** (0.188750 at 5 deg), next competitor `level_mean`
-0.034332 — a decision-relevant gap of **0.1435**, more than triple the response test's 0.0414.
-Ceiling, rho=0 conservative lower bound, **0.863852**, so a +0.080 bar of 0.2579 is readable.
-**The target is not degenerate: the most abundant tree type differs from the control's in 24.9 % of
-the 5,258 scoring pairs**, and a type's share moves with RMS 0.15–0.21.
+⚠ **THE THREE THINGS THAT MUST TRAVEL WITH THAT 0.425610.** (1) Shares count **stems, not biomass**
+(`bincount(ids) / ids.size`), so a type that is numerically rare but holds the canopy scores small.
+(2) The seven shares **sum to 1**, so only six are free and no single term is independent evidence.
+(3) It is scored **only where a forest existed at both ends** — 5,258 of 5,800 pairs — which tilts
+what remains toward the milder perturbations. All three are in the verdict; keep them together.
 
 **A SEPARATE estimand, not an extension of `RESPONSE_QUANTITIES`.** That tuple IS a sealed
 pre-registration's estimand and its 0.5453 only reproduces while it has exactly seven members.
 Appending to it would silently redefine a sealed experiment. A test now asserts it is untouched.
+**Never sum or average the 0.4256 with the 0.5453** — different estimands, different nulls.
 
-⚠ **Two method decisions that must survive into the verdict, both measured not assumed.** (1) A
-treeless cell's `pft_frac_*` is 0.0 from the state summariser; as a CHANGE that is a collapse
-wearing a composition's clothes, inflating the scored movement by 15–18 %. Blanked now, so 542 of
-5,800 pairs drop and **composition is scored where a forest existed at both ends**. (2) Every arm is
-now on one denominator with missing predictions imputed as no-change; the neighbour nulls needed
-2,296 and 1,253 fills, so that asymmetry was live here, not theoretical. Both detailed in the ref.
-
-**WHEN X SEALS:** `scripts/sbatch_py.sh --exp <id> T-comp-model-v1 scripts/exp_model_pilot_composition.py
---out <dir> --cache /p/tmp/jamirp/vegemu/exp/X-pilot-nulls-v1/state_pilot-v1.parquet --exp-id <id>`
-(add `--threshold` if the sealed bar is not 0.080). It reuses the sealed response arm's features,
-folds, leakage assertions, out-of-fold fit and decision arithmetic unchanged.
-
-**If X has not sealed, the other track is: move the forcing-attributable +0.1958** on the response
-arm — the BLIND arm at 0.3495, not the nulls, is what to beat. The headline 0.5453 is 64 % blind
-skill and must never be quoted as "predicts the warming response" without that.
+**The other open track: move the forcing-attributable +0.1958** on the response arm — the BLIND arm
+at 0.3495, not the nulls, is what to beat. The headline 0.5453 is 64 % blind skill and must never be
+quoted as "predicts the warming response" without that.
 
 **Still true:** do NOT widen `MATCH_TRAITS` (11 of 22 degrade); do NOT rescale leaf carbon
 (`allometry_tree.c:39-41`); do not reopen the per-quantity chase (`band-test-ceiling.md` §3).
