@@ -13,63 +13,52 @@ does not build models (T) or generate data (D).
 
 ## NEXT — start here
 
-**The project's position in one sentence: the warming response IS learnable where it is identified,
-and is not learnable at all from the scenario legs.** Both sealed arms are harvested and both
-verdicts are rendered; the critical path is not mine.
+**Three things closed on 2026-09-15, and the oldest open item on this line is one of them.**
 
-* **X5 `X-20260909-pilot-warming-response` — PASS.** 0.545304 against a best null of 0.145690, bar
-  0.225690. Beats the best null at all 29 of 29 levels. **Quote it as 63 % of attainable** — the
-  ceiling is 0.869730 and is itself a lower bound — never as a fraction of 1.0.
-  ⚠ **What must travel with that headline:** a model **blinded** to which perturbation it is asked
-  about scores **0.349462, above the bar** — every pre-registered null is information-free, so the
-  set held no learned-but-treatment-blind competitor. The pass survives it (+0.195842, still over
-  0.080) and the per-cell scramble sits below blind, so the model does read the forcing.
-* **X3 `X-20260908-heldout-forcing-leg` — FAIL at pre-named outcome (c).** 0.005443 against
-  persistence 0.033749; it sits *between* two copy-a-neighbour nulls, so it IS one statistically.
-* **X6 `X-20260914-pilot-composition-response` — SEALED, awaiting line T's model arm.** Bar
-  **0.337858**, ceiling 0.863852 (threshold +0.160 not +0.080: at 0.080 the best null passes its own
-  test at both radii and the experiment would be `invalid` by construction).
-
-**DONE 2026-09-15: X4 re-derived on the dispersed pilot cell set. STILL not sealable — but the
-blocker is now named, measured and datable.** The 2026-09-09 record blamed the 20 contiguous cells;
-they were not the binding constraint. On 200 cells across 164 tiles and 5,800 targets the nulls
-collapse again, now at the *floor*, with **chance tied for first** (0.004138) and the cell's own
-forest *below* chance. A floor sweep isolates the cause: from 0.15 upward the ranking snaps into the
-order physics predicts and holds, and **only at the 10 % acceptance floor is it scrambled.** The
-tolerance is `max(10 %, the two-seed spread)`, its median here is exactly 0.100, and **the spread of
-a perturbed forest has never been measured.**
-⚠ **Do not "fix" this by trimming levels or quantities** — both buy power, both are chosen after
-seeing the values. Record: `docs/decisions/20260915-X-x4-is-not-sealable-and-the-cell-set-was-never-the-binding-constraint.md`;
-derivation `scripts/exp_derive_nulls_restart_pilot.py`, jobs 2201910 / 2201928.
+* **X6 `X-20260914-pilot-composition-response` — PASS.** 0.425610 against the sealed bar of
+  0.337858 and best null 0.177858; passes at 5 deg too. **All seven nulls returned their
+  pre-registered values**, so it is a pass and not an `invalid`. Quote it as **49 % of the
+  attainable 0.863852**, and say that ceiling is still a lower bound. Verdict is rendered and
+  committed. Consequence for line T: the synthesiser copying species composition is now a MEASURED
+  defect, and that is its principal build.
+* **X4 — RETIRED AS THE WRONG INSTRUMENT, not as a fail.** D's replicate measured the perturbed
+  two-seed spread at **0.0301**, essentially identical to present-day's 0.0310, with 20.4 % of
+  cell-quantities above the floor either way. The pre-stated branch was: near 0.29 it seals, near
+  0.10 the conjunctive level statistic is the wrong instrument. It came in at 0.03, below even the
+  low branch, so the 10 % floor dominates 79.6 % of cell-quantities and the nulls will keep
+  collapsing. ⚠ **Do NOT rescue it by widening the floor** — that is a threshold chosen after seeing
+  the values. **A replacement needs a NEW ESTIMAND**, and writing it is this line's next job.
+* **The transferred band is vindicated.** Every band applied to a perturbed state so far took its
+  tolerance from present-day climate on an unverified assumption. The two spreads agree to 0.001, so
+  **nothing scored to date needs recomputing** and the 2026-09-14 "up to 29 %, unmeasured" caution
+  is discharged.
 
 **Line X's own next actions, in order:**
 
-1. **Seal X4 the moment D's second pilot seed lands** — the arithmetic is done. Near 0.29: best null
-   0.066379, largest null-against-the-rest margin 0.006207, so a threshold of 0.02 is valid and the
-   bar is **0.086 against an attainable 0.895**. Near 0.10: the conjunctive level statistic is the
-   wrong instrument and X4 needs a new estimand, not a new corpus.
-2. **Implement the additive band floor** in `src/vegemu/score.py` (shared, mine to touch) so corpus
-   v2's composition columns are scorable: `band = max(rel_spread × |truth|, ABS_FLOOR)`. Ship it
-   with **no default** — `ABS_FLOOR` must be measured, and a default would get used.
-3. **Harvest X6** when T runs it.
+1. **A new estimand to replace X4.** The level-conjunctive statistic cannot work at a 10 % floor;
+   what can is an open question, and it is the interesting one. It needs no new corpus.
+2. **Implement the additive band floor** in `src/vegemu/score.py`: `band = max(rel_spread × |truth|,
+   ABS_FLOOR)`. **`ABS_FLOOR` = 0.0384, MEASURED** — p90 of the model's own absolute two-seed
+   disagreement on type shares (median 0.0027, p99 0.1148). Ship it with no default anyway.
+3. **Re-base rungs 1 and 8 on corpus `v2-constco2` when D lands it.** The spin-up was never run at
+   constant CO₂ (see below), so v1's states are post-CO₂-ramp. **Neither pass is confounded** — every
+   run shares the identical CO₂ path — but the reference basis wording "constant CO2 and CO2 never
+   written" in both verdicts is **wrong and must be restated**: CO₂ is identical in every run and
+   never written by us, but it is NOT constant in time within a run.
 
-**Owed by other lines, in order:**
+⚠ **THE CO₂ FINDING, because it touches two of this line's verdicts.** The spin-up runs model years
+1000–1999 against a transient CO₂ file, so its last 300 years carry +32.8 % CO₂ and vegetation
+carbon follows at +5.53 %/century (r = +0.987) against +0.15 %/century while CO₂ is pinned. The
+"spin-up has not converged" disclosure that appears in the X-20260909 verdict's reference basis and
+in two decision records is therefore **withdrawn**. Record:
+`docs/decisions/20260915-D-the-spinup-did-converge-the-late-rise-is-transient-co2.md`.
 
-* **line D — the second seed for 20 pilot cells (~34 core-hours) now discharges FIVE asks and is by
-  a wide margin the highest-value job open.** It pins X5's ceiling, attributes the 2.7 % soil-carbon
-  offset, gives the composition ceiling, measures `ABS_FLOOR` — **and decides whether X4 is sealable
-  at all.** No conjunctive composition number and no X4 seal may be read before it.
-* **line T** — run the X6 model arm (sealed, apparatus is T's own).
-* **line D** — corpus v2: composition joins the scored set (owner, 2026-09-14) and the genuine
-  high-emissions second run replaces the clone. Both land in ONE new corpus version.
-* **line D** — the one-cell, one-year, two-binary byte comparison: the only unproven X3 claim.
-* **integrator — `PLAN.md`'s rung ladder is stale and I cannot edit it.** Rung 1 **PASSED**
-  2026-09-14 (0.545304 vs bar 0.225690, with the blind-arm caveat above) and rung 5 **FAILED** at
-  outcome (c); both still read as undone, and the "Now" section still lists them as owed by T.
-* ~~integrator — the missing `experiment-registry` skill~~ **DONE by the integrator, and it already
-  documents today's E12 change. Nothing owed.**
-* **integrator** — still open, and honestly so: `slurm-guard` matches command TEXT, so a command
-  merely *naming* a `.py` path is refused. Keep prefixing `ALLOW_LOGIN_HEAVY=1`.
+**Owed by other lines:** D — harvest and decode `v2-constco2`, then the v1-vs-v2 comparison.
+T — stop `models/synth.py` copying composition. Both are launched or unblocked; nothing of X's
+waits on either.
+
+**Still true:** X5 `pass` 0.545304 (bar 0.225690), and the blind arm at 0.349462 must travel with it
+— the headline is 64 % blind skill. X3 `fail` at pre-named outcome (c).
 
 ## Outbound to line D (2026-09-15) — your second pilot seed now decides whether X4 can be sealed at all -- that is the fifth ask on one 34-core-hour job
 
