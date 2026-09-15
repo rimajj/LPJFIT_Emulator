@@ -18,7 +18,12 @@ three ways to build one that silently measures nothing:
      it happens to be and then transfers it everywhere, which is the very move a replicate exists to
      stop. Caught here after the first plan run produced exactly that.
 
-These tests touch no scratch and run no model. They assert the path algebra and the subset rule.
+These tests run no model and MUST NOT TOUCH THE FILESYSTEM. `meta_dir`/`manifest_dir` go through
+`vegemu.paths.scratch`, which CREATES the directory it names -- so asserting on them fails in CI,
+where /p does not exist, and passes here for the wrong reason. The version-directory naming is
+asserted through `_vdir`, which is pure string work; `run_dir`, `forcing_dir` and `config_path` are
+safe because `_under` deliberately builds a plain `Path` (see its own comment: the plan stage must
+not create 12,000 directories). CI caught exactly this.
 """
 
 from __future__ import annotations
@@ -48,9 +53,8 @@ def _pilot() -> ModuleType:
 def test_seed_one_paths_are_unsuffixed() -> None:
     """Seed 1 is the corpus. Its directory names must not acquire an `-s1`."""
     m = _pilot()
+    assert m._vdir("v1", m.SEED) == "pilot-v1"
     assert m.run_dir("v1", 42490, "control").parts[-3] == "pilot-v1"
-    assert m.meta_dir("v1").name == "pilot-v1"
-    assert m.manifest_dir("v1").parts[-2] == "pilot-v1"
     assert m.forcing_dir("v1", 42490, "control").parts[-3] == "pilot-v1"
 
 
@@ -59,7 +63,7 @@ def test_replicate_runs_are_separated_from_the_corpus() -> None:
     m = _pilot()
     assert m.run_dir("v1", 42490, "control", 2) != m.run_dir("v1", 42490, "control")
     assert m.run_dir("v1", 42490, "control", 2).parts[-3] == "pilot-v1-s2"
-    assert m.meta_dir("v1", 2).name == "pilot-v1-s2"
+    assert m._vdir("v1", 2) == "pilot-v1-s2"
     assert m.config_path("v1", 42490, "control", 2).name.endswith("-s2.js")
 
 
