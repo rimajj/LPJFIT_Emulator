@@ -2,9 +2,13 @@
 """How much does LPJmL-FIT disagree with ITSELF when the climate is perturbed?
 
     scripts/sbatch_py.sh X-perturbed-spread scripts/exp_measure_perturbed_spread.py \\
-        --seed1 /p/tmp/jamirp/vegemu/corpus/pilot-v1/corpus.parquet \\
-        --seed2 /p/tmp/jamirp/vegemu/corpus/pilot-v1-s2/replicate_s2.parquet \\
-        --out  /p/tmp/jamirp/vegemu/exp/X-perturbed-spread
+        --seed1 <scratch>/corpus/pilot-v1/corpus.parquet \\
+        --seed2 <scratch>/corpus/pilot-v1-s2/replicate_s2.parquet \\
+        --out  <scratch>/exp/X-perturbed-spread
+
+`<scratch>` is `scratch.root` in `config/paths.yaml`; it is spelled that way here because a literal
+absolute path in this repo is a red build (`P01`), and rightly so -- it would pin this script to one
+user's directory on one cluster.
 
 WHY THIS NUMBER DECIDES FIVE THINGS AT ONCE. The acceptance tolerance is
 `max(10 %, the model's own two-run spread)`. That spread has only ever been measured on PRESENT-DAY
