@@ -195,6 +195,26 @@ sealed estimand that must not be appended to.
 > resolving with --theirs silently deletes this message. Delete it deliberately once
 > acted on, never as conflict cleanup.
 
+## INBOUND from line INT (2026-09-16) — the login-node guard no longer trips on heredoc bodies or quoted assignments -- and your lessons list says it does
+
+APPLIED ON MAIN 2026-09-16 (commit f2eed96), on an explicit owner decision. The shared command lexer .claude/hooks/_lex_command.py was splitting the ALREADY-LEXED string on separator CHARACTERS, so a semicolon inside a commit message opened a fake segment whose first word was 'the' -- not a safe verb -- and the command was refused as heavy login-node work. It now segments on separator TOKENS, and holds a heredoc body back as DATA whenever every verb on the command line receiving it is one that cannot execute what it is handed.
+
+YOUR DURABLE LESSONS LIST IS NOW WRONG ON TWO OF THREE COUNTS. lines/T/STATE.md, in the bullet beginning 'The login-node guard no longer scans arguments to -m/--message/--body', ends: 'It DOES still scan heredoc bodies, shell assignments and bare paths'. All three are now false. Bare paths were fixed on 2026-09-15, so that clause was already stale when it was written; heredoc bodies and quoted shell assignments are fixed as of today. MEASURED, old lexer against new, same input to both:
+
+  MSG="see corpus/state.py:159"; git commit -m "$MSG"        UNSAFE -> SAFE
+  git commit -F - <<'MSG' ... 20 h ago; the result ... MSG    UNSAFE -> SAFE
+  git log --oneline -5 | grep -n 'corpus|train'              UNSAFE -> SAFE
+
+I cannot edit lines/T/** -- it is yours exclusively -- so please correct that bullet when you next touch the file. Suggested replacement: 'no known prose-in-a-command case still trips slurm-guard; if one does, it is a bug, not a thing to work around'. The --body "$(cat ...)" half of the advice should go too: a command substitution is denied by design and always was, so that suggestion never worked.
+
+WHAT STAYS TRUE. ALLOW_LOGIN_HEAVY=1 is still the right thing for a genuinely quick REAL check, and still the wrong thing for prose -- if the guard refuses a command that runs nothing, that is now a bug worth reporting rather than overriding. Everything the guard must refuse it still refuses: 13 must-deny cases verified unchanged, including python3 -c with a quoted program, bash -c, the no-whitespace && , the substitution, and three new heredoc cases where the body IS the program.
+
+Records: docs/decisions/20260916-INT-the-lexer-fix-is-applied-and-a-third-hole-was-found-in-review.md, and the diagnosis it acts on in 20260916-INT-the-command-lexer-resplits-prose-on-shell-operators.md. MEMORY.md:guard-matches-prose and lexer-resplits-prose are both updated.
+
+> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
+> resolving with --theirs silently deletes this message. Delete it deliberately once
+> acted on, never as conflict cleanup.
+
 ## Milestones
 
 **T0 spec DONE** (module docstrings). **T1 GPU path OPEN**, unblocked, not needed.

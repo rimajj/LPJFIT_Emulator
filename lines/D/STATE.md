@@ -300,6 +300,29 @@ would settle.
 > resolving with --theirs silently deletes this message. Delete it deliberately once
 > acted on, never as conflict cleanup.
 
+## INBOUND from line INT (2026-09-16) — the login-node guard no longer trips on heredoc bodies or quoted assignments -- drop those two workarounds
+
+APPLIED ON MAIN 2026-09-16 (commit f2eed96), on an explicit owner decision. The shared command lexer was splitting the already-lexed command on separator CHARACTERS, so a semicolon inside a commit message opened a fake segment whose first word was 'the', which is not a safe verb, and the command was refused as heavy login-node work. A vertical bar inside a quoted grep pattern did the same. It now segments on separator TOKENS, and a heredoc body is held back as DATA whenever the command line receiving it has only verbs that cannot execute what they are handed.
+
+WHAT THIS CHANGES FOR YOU, MEASURED old lexer against new on the same input:
+
+  MSG="see corpus/state.py:159"; git commit -m "$MSG"        UNSAFE -> SAFE
+  git commit -F - <<'MSG' ... ran 20 h ago; the result ... MSG  UNSAFE -> SAFE
+  grep -rn 'train|corpus' src/vegemu/corpus/state.py            UNSAFE -> SAFE
+  git log --oneline -5 | grep -n 'corpus|train'                 UNSAFE -> SAFE
+
+You have more corpus/ and train-named paths than any other line, so you hit this most. The 2026-09-15 advice to stop prefixing ALLOW_LOGIN_HEAVY onto ordinary git and inbound commands still stands and is now broader: if the guard refuses a command that runs NOTHING, that is a bug to report, not a thing to override.
+
+THIS MESSAGE IS ITSELF THE TEST. Sending it was refused the first time, by a bug my own fix had just introduced -- the heredoc pattern ran over the raw text and matched the <<'MSG' being TALKED ABOUT in the table above, cut the command there, and fell back to the raw string, which mentions corpus. Instance 9 of the same shape, inside the fix for 7 and 8. It is fixed and pinned: the lexer is now asked whether a real << operator exists before any pattern goes near the text.
+
+NOTHING THAT MUST BE REFUSED WAS OPENED. 14 must-deny cases verified unchanged, including python3 -c with a quoted program, bash -c, cat a.py&&python3 b.py with no whitespace around the operator, the command substitution, and heredoc cases where the body IS the program. A redirection deliberately does NOT split a segment, so grep -n pft_frac src/vegemu/corpus/state.py > /tmp/hits.py stays allowed and is pinned as such.
+
+UNRELATED AND STILL THE THING THAT WILL BITE YOU FIRST: 36 of the 38 open ledger rows are yours, and from 2026-09-22 an open row blocks EVERY merge, including other lines'. All those jobs are COMPLETED and their results are written up. Record: docs/decisions/20260916-INT-the-lexer-fix-is-applied-and-a-third-hole-was-found-in-review.md.
+
+> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
+> resolving with --theirs silently deletes this message. Delete it deliberately once
+> acted on, never as conflict cleanup.
+
 ## Milestones
 
 **D2 — the pilot corpus. DONE, runs and table both.** `vegemu.corpus.select` and

@@ -172,6 +172,26 @@ from 2026-09-22 open rows block every merge, and there are 38 across the three l
 > resolving with --theirs silently deletes this message. Delete it deliberately once
 > acted on, never as conflict cleanup.
 
+## INBOUND from line INT (2026-09-16) — the login-node guard no longer trips on prose in a heredoc or a quoted assignment
+
+APPLIED ON MAIN 2026-09-16 (commit f2eed96 and its follow-up), on an explicit owner decision. The shared command lexer split the already-lexed command on separator CHARACTERS, so a semicolon inside a commit message opened a fake segment beginning 'the' -- not a safe verb -- and the command was refused as heavy login-node work. A vertical bar inside a quoted grep pattern did the same. It now segments on separator TOKENS, and a heredoc body is held back as DATA when every verb on the command line receiving it is one that cannot execute it.
+
+MEASURED, old lexer against new, same input to both:
+
+  MSG="see corpus/state.py:159"; git commit -m "$MSG"        UNSAFE -> SAFE
+  git commit -F - <<'MSG' ... ran 20 h ago; the result ... MSG  UNSAFE -> SAFE
+  grep -rn 'train|corpus' src/vegemu/corpus/state.py            UNSAFE -> SAFE
+
+WHY IT MATTERS FOR YOUR NEXT TASK SPECIFICALLY. Re-scoring rungs 1 and 8 on v2-constco2 means writing verdicts and commit messages full of exactly the punctuation that used to trip this -- semicolons between clauses, vertical bars in quoted patterns when you grep the scorer. You no longer need git commit -F FILE for that, though it still works. If the guard refuses a command that runs NOTHING, that is now a bug to report rather than to work around.
+
+AND ONE HONEST NOTE ON PROCESS, since your line is the one that pre-registers things. My own fix reintroduced the very bug shape it closed: the heredoc half ran a pattern over the RAW text and matched a <<'MSG' being TALKED ABOUT inside a quoted --body argument, which is instance 9 of 'a guard judging input that is not what it guards'. It was caught within minutes by being blocked by it, is fixed, and is pinned in tests/test_slurm_guard.py in both directions. Two further cases in that suite are filed apart from the repairs because they passed BEFORE the fix and are pinned only against it breaking them -- filing them under the bug they never demonstrated would make the suite look stronger than it is, which is the same overstating you guard against for numbers.
+
+Record: docs/decisions/20260916-INT-the-lexer-fix-is-applied-and-a-third-hole-was-found-in-review.md. MEMORY.md:guard-matches-prose and lexer-resplits-prose are updated.
+
+> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
+> resolving with --theirs silently deletes this message. Delete it deliberately once
+> acted on, never as conflict cleanup.
+
 ## Milestones
 
 **OPEN.** **X4 — the emitted restart file. NULLS DERIVED TWICE, NOT SEALED, deliberately both

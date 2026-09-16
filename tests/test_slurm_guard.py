@@ -92,6 +92,9 @@ MUST_DENY = [
     # restarted from the beginning would re-match it, find no second terminator, and swallow the
     # real second command as though it were more message.
     "git commit -F - <<'MSG'\na message\nMSG\n&& python3 scripts/corpus_build.py",
+    # an assignment is exempt only because it runs nothing; when it PREFIXES something that runs,
+    # that thing is still the verb and is still checked
+    "MSG=x python3 scripts/corpus_build.py --tier pilot",
 ]
 
 MUST_ALLOW = [
@@ -146,6 +149,22 @@ MUST_ALLOW = [
     "grep -n 'def test|MUST_DENY|python3 -c|torch' tests/test_slurm_guard.py",
     "grep -rn 'train|corpus' src/vegemu/corpus/state.py",
     "git commit -F - <<'MSG'\nfix(corpus): both ran 20 h ago; the result is on main\nMSG",
+    "git log --oneline -5 | grep -n 'corpus|train'",
+    # A SHELL ASSIGNMENT CARRYING PROSE, which the same fix repaired without being aimed at it: the
+    # quoted value stays one token instead of being re-split, so the words inside it stop being
+    # read as the next command's verb. An assignment cannot execute anything on its own, and
+    # `X=python3 scripts/corpus_build.py` -- where something IS executed -- still lands in the verb
+    # check and is still denied.
+    'MSG="see corpus/state.py:159"; git commit -m "$MSG"',
+    # ⚠ INSTANCE 9, AND IT WAS IN THE FIX FOR 7 AND 8. Minutes after that fix landed, this exact
+    # call was denied: the heredoc pattern ran over the RAW text, matched a `<<'MSG'` being TALKED
+    # ABOUT inside a quoted `--body`, cut the command at that line, left an unbalanced quote, and
+    # so fell back to the raw string -- which mentions corpus/ and train, and was therefore refused
+    # as a heavy job. A message ABOUT a heredoc is not a heredoc. The lexer is now asked whether a
+    # real `<<` OPERATOR exists before any pattern is allowed near the text.
+    'python3 tools/inbound.py --to D --subject "s" --body "para one\n\n'
+    "  git commit -F - <<'MSG' ... ran 20 h ago; the result ... MSG  UNSAFE -> SAFE\n"
+    '  grep -rn corpus src/vegemu/corpus/state.py\n\nlast line"',
     # THE NEXT TWO ALREADY PASSED BEFORE THAT FIX and are pinned because the fix could have broken
     # them, not because it repaired them. Keeping them apart from the three above matters: a case
     # filed under a bug it never demonstrated is how a suite comes to look stronger than it is.

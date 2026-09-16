@@ -78,7 +78,19 @@ SEPARATORS = frozenset({";", ";;", "&", "&&", "|", "||", "|&"})
 # `<<` or `<<-`, then an optionally-quoted delimiter word. The quoting of the delimiter decides
 # whether the SHELL expands the body; it makes no difference to whether the body is a program, so
 # it is matched and discarded here.
+#
+# ⚠ THIS PATTERN IS ONLY EVER RUN ON A COMMAND ALREADY KNOWN TO CONTAIN A REAL `<<` OPERATOR — see
+# `HEREDOC_OPS` and its use in `main`. Run on any raw string it is the bug this file exists to
+# prevent, and it was: on 2026-09-16, minutes after the fix above, it matched a `<<'MSG'` being
+# TALKED ABOUT inside a quoted `--body` argument, cut the command at that line, left an unbalanced
+# quote, and so failed closed onto the raw text — denying an `inbound.py` call that runs nothing.
+# Instance 9, in the half of the fix that was written to close instances 7 and 8. A regex over raw
+# text cannot tell an operator from the same characters inside somebody's prose; only the lexer can.
 HEREDOC = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+
+# `<<` as the LEXER emits it, which is the only evidence that a heredoc is real. Inside a quoted
+# argument the same two characters stay part of that argument's token and never appear here.
+HEREDOC_OPS = frozenset({"<<", "<<-"})
 
 # Verbs that READ, COMPARE or MOVE a file and cannot execute one. Closed and explicit, the same
 # discipline as PROSE: anything not on it keeps the hooks' old keyword behaviour, so an unknown
@@ -201,8 +213,15 @@ def all_verbs_are_safe(tokens: list[str], raw: str) -> bool:
 
 def main() -> None:
     raw = sys.stdin.read()
-    command_text, bodies = split_heredoc(raw)
     try:
+        # ASK THE LEXER WHETHER THERE IS A HEREDOC AT ALL, before any pattern touches the raw text.
+        # A `<<` inside a quoted argument is part of that argument's token and never shows up as an
+        # operator, so a command that merely TALKS about a heredoc is left entirely alone.
+        raw_tokens = operator_tokens(raw)
+        if HEREDOC_OPS.isdisjoint(raw_tokens):
+            command_text, bodies = raw, []
+        else:
+            command_text, bodies = split_heredoc(raw)
         # Judge the COMMAND LINE first, with any heredoc body held back. If every verb on it is one
         # that cannot execute what it is handed, the body is data -- a commit message -- and must
         # not be read as shell OR keyword-matched. If any verb could execute it, the body may BE
@@ -210,7 +229,7 @@ def main() -> None:
         if bodies and all_verbs_are_safe(operator_tokens(command_text), command_text):
             text, safe = command_text, True
         else:
-            text, safe = raw, all_verbs_are_safe(operator_tokens(raw), raw)
+            text, safe = raw, all_verbs_are_safe(raw_tokens, raw)
         tokens = shlex.split(text)
     except ValueError:
         # Unbalanced quotes: hand back the raw command so the caller keeps its old broad matching.
