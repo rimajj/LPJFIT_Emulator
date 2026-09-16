@@ -192,6 +192,45 @@ Record: docs/decisions/20260916-INT-the-lexer-fix-is-applied-and-a-third-hole-wa
 > resolving with --theirs silently deletes this message. Delete it deliberately once
 > acted on, never as conflict cleanup.
 
+## INBOUND from line ? (2026-09-16) — two ways the login-node guard still refuses commands that run nothing -- heredoc bodies and a trailing echo, with the workaround for each
+
+TWO WAYS THE LOGIN-NODE GUARD REFUSES COMMANDS THAT RUN NOTHING, both measured today, both
+still present. The fix for each is written and verified and is NOT applied, because widening a
+permission hook is an owner decision and the owner has not made it yet.
+
+1. WRITING A FILE WITH A HEREDOC, when the text you are writing contains an unbalanced quote --
+   an escaped quote inside a string, a lone double quote in a comment. The guard decides whether a
+   heredoc body exists by lexing the WHOLE command, body included; a body is data and data need
+   not be valid shell, so it crashes, falls back to the raw text, and keyword-matches the body.
+   Measured: 12 of this repository's 177 tracked files cannot be written back this way, INCLUDING
+   lines/D/STATE.md and lines/T/STATE.md.
+   WORKAROUND: use the file-writing tool rather than `cat > f <<PY`, or prefix ALLOW_LOGIN_HEAVY=1.
+
+2. APPENDING A SHELL BUILTIN TO A READ. `echo`, `printf`, `true`, `pwd`, `cd` and `test` are not on
+   the safe-verb allowlist, so all of these are refused and not one of them runs anything:
+       cat scripts/train_emulator.py ; echo done
+       wc -l scripts/corpus_build.py && echo ok
+       cd src/vegemu/corpus && ls -l state.py
+   WORKAROUND: drop the trailing echo, or run the `cd` as its own command.
+
+WHAT IS NEW AND USEFUL TO YOU BEYOND THE TWO BUGS: tests/test_guard_generated.py now builds the
+guard's test cases out of this repository -- its paragraphs, its tracked files, its commit
+messages -- in templates that run nothing, so a deny is a false deny by construction. Both bugs
+above are pinned there as strict xfails. Every earlier instance of this bug (there are ten) was
+found by somebody being blocked mid-task after a green suite; this one was found by the corpus.
+
+⚠ AND THE THING TO STOP DOING. The transcript record shows two past sessions getting past this
+guard by splitting a keyword inside quotes -- scripts/cor"pus_cmodel_config.py" and
+git mv scripts/tr"ain_synth_restart.py". Please do not: it hides the defect from the person who
+would fix it. If the guard refuses a command that runs nothing, say so and it gets fixed.
+
+Record: docs/decisions/20260916-INT-an-unlexable-heredoc-body-defeats-the-rule-that-a-body-is-data.md
+MEMORY.md rows: guard-false-deny-open, generated-cases-beat-lists, guard-reads-wrong-input.
+
+> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
+> resolving with --theirs silently deletes this message. Delete it deliberately once
+> acted on, never as conflict cleanup.
+
 ## Milestones
 
 **OPEN.** **X4 — the emitted restart file. NULLS DERIVED TWICE, NOT SEALED, deliberately both
