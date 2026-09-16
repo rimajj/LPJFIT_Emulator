@@ -49,17 +49,14 @@ Each rung is a pre-registered experiment. Status is updated here when a verdict 
 100 real cells, 360,183 B → 3,546,287 B, byte-identical, plus both `.clm` inputs. `binfmt.md`.
 
 ⚠ **CORRECTED 2026-09-15: the spin-up DOES converge — the late rise is CO₂, and this was our error.**
-It runs model years 1000–1999 against a **transient** CO₂ file, so its last 300 years carry the real
-historical rise, +32.8 %. While CO₂ is pinned the curve is flat to **+0.15 %/century**; over the ramp
-it climbs +5.53 %/century at **r = +0.987** with CO₂. The old "not converged" fitted its trend over a
-window lying entirely inside that ramp. Found by the owner asking why a single cell showed no rise.
-**Every corpus run shares the identical CO₂ path, so no score is confounded and rungs 1 and 5
-stand** — but v1's target is a forest still adjusting to a CO₂ step, not an equilibrium. **`v2-constco2`
-is now BUILT, RUN AND DECODED** (6,000/6,000, 2026-09-15): pinning CO₂ costs **24 % of the vegetation
-carbon**, with stems **+4.0 %** — a younger, lighter forest — while the treeless rows are unchanged at
-380/6,000, so it changes *how much* forest there is, not *where*; that matches the global spin-up
-curve's +21.2 % over the ramp. **No budget drops**: a shorter run ends at a different CO₂, so it is a
-different state. `docs/reference/corpus-design.md`; record `20260915-D-the-spinup-did-converge-*`.
+Its last 300 model years carry the real historical CO₂ rise, and the old "not converged" fitted its
+trend inside that ramp; pinned, the curve is flat. **Every corpus run shares the identical CO₂ path,
+so no score is confounded and rungs 1 and 5 stand** — but a v1 end state is a forest still adjusting
+to a CO₂ step, not an equilibrium. **`v2-constco2` is BUILT, RUN AND DECODED** (6,000/6,000,
+2026-09-15): pinning CO₂ costs **24 % of the vegetation carbon** and changes *how much* forest there
+is, not *where*. **No budget drops** — a shorter run ends at a different CO₂, so it is a different
+state. Every figure, and how CO₂ was pinned: `docs/reference/corpus-design.md` §Rule 5,
+`MEMORY.md:constco2-costs-24pct`, record `20260915-D-the-spinup-did-converge-*`.
 
 ### Rung 1 — the kill test. PASSED 2026-09-14 (`X-20260909-pilot-warming-response`, line X)
 
@@ -91,21 +88,14 @@ Seven design rules, each with the reason it is not optional: `docs/reference/cor
 ### Restart synthesis (line D/T) — the approach
 
 Do **not** predict 1.9 MB of consistent state from scratch. We always hold a real, valid restart for
-the same cell under a nearby climate, so: **template-conditioned synthesis.** Every field is LEARNED
-(roster, per-tree bad-years counter, soil carbon, litter), DERIVED (carbon pools from the pipe model;
-the 20-year climate buffer straight from the climate input; the sapling gene pool), COPIED (inert
-crop/nitrogen), RELAXED (the fast soil water/ice/enthalpy/temperature block, from the template — it
-must be *mutually* consistent and nothing validates it), or FREE (random seed, tree IDs).
+the same cell under a nearby climate, so: **template-conditioned synthesis** — each field is
+LEARNED, DERIVED, COPIED, RELAXED or FREE. Validation ladder, cheapest first: **t0** byte round-trip
+→ **t1** config pre-flight → **t2** the C runs 1 year → **t3** 20 years without drift → **t4** the
+state distribution matches → **t5** = rung 4. The **short polish run** fallback is **dead, and not
+for the reason expected: at N = 1 it is a no-op** — the model carries a bad state rather than
+repairing or rejecting it, so the lever has to be applied at year 0, in the synthesis.
 ⚠ **Species composition is COPIED today and that is now a measured defect** — see rung 8.
-
-Validation ladder, cheapest first: **t0** byte round-trip → **t1** config pre-flight accepts →
-**t2** the C loads it and runs 1 year without aborting → **t3** 20 years with no drift beyond the
-two-seed spread, **scored on a WINDOW MEAN — a real restart itself passes in only 90.9 % of cells,
-and that is the ceiling** → **t4** the state distribution matches → **t5** = rung 4.
-
-The **short polish run** fallback (let the C relax the fast state for N years) is **dead, and not
-for the reason expected: at N = 1 it is a no-op** (+0.016 and −0.005). The model neither repairs the
-state nor rejects it — it carries it. The lever has to be applied at year 0, in the synthesis.
+The field classes, each step's ceiling, and what is measured: `docs/reference/restart-synthesis.md`.
 
 ### Model class (line T)
 Target is a joint distribution over a variable-length roster in trait × size × age × growth-failure
@@ -122,15 +112,14 @@ Rung 5's failure the same day is not a contradiction — the *existing scenario 
 response, which is why the designed ensemble exists. Rungs 3–4 are blocked on state fidelity, not on
 identification. ⚠ **Compute was never the bottleneck — the sessions are.**
 
-**The second seed RAN on 2026-09-15 and discharged all five asks at once** (`pilot-v1-s2`, 20 cells
-× 30 climates, 600 spin-ups). **The model's own run-to-run spread does NOT widen under climate
-perturbation**: median 0.0301 against 0.0310 at present-day climate, 20.4 % of cell-quantities above
-the 10 % floor either way. So **X4 is retired as the WRONG INSTRUMENT, not as a failure** — the floor
-dominates 79.6 % of cell-quantities, the conjunctive level statistic has no power, and a replacement
-needs a **new estimand**, never a widened floor (a threshold chosen after seeing the values). The
-transferred band was legitimate all along, so nothing scored to date needs recomputing; `ABS_FLOOR`
-= **0.0384**, measured; and the 2.7 % soil-carbon offset is a **real bias**, against a median
-two-seed spread there of 1.43 %.
+**The second seed RAN on 2026-09-15 and discharged all five asks at once** (`pilot-v1-s2`, 600
+spin-ups). **The model's own run-to-run spread does NOT widen under climate perturbation**, so
+**X4 is retired as the WRONG INSTRUMENT, not as a failure** — the 10 % floor dominates 79.6 % of
+cell-quantities, the conjunctive level statistic has no power, and a replacement needs a **new
+estimand**, never a widened floor (a threshold chosen after seeing the values). The transferred band
+was legitimate all along, so nothing scored to date needs recomputing. The 2.7 % soil-carbon offset
+is a **real bias** and is owed an attribution. Figures: `MEMORY.md:perturbed-spread-is-flat`,
+`abs-floor-measured`, `x4-wrong-instrument`, `soilc-offset-is-real`.
 
 **And the species-mix kill test passed** (rung 8), turning the synthesiser's copying of species
 composition from a disclosed simplification into a measured defect — now line T's principal build.
