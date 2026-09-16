@@ -54,9 +54,12 @@ historical rise, +32.8 %. While CO₂ is pinned the curve is flat to **+0.15 %/c
 it climbs +5.53 %/century at **r = +0.987** with CO₂. The old "not converged" fitted its trend over a
 window lying entirely inside that ramp. Found by the owner asking why a single cell showed no rise.
 **Every corpus run shares the identical CO₂ path, so no score is confounded and rungs 1 and 5
-stand** — but the target is a forest still adjusting to a CO₂ step, not an equilibrium, and is being
-rebuilt as corpus `v2-constco2`. **No budget drops**: a shorter run ends at a different CO₂, so it is
-a different state. `docs/reference/corpus-design.md`; record `20260915-D-the-spinup-did-converge-*`.
+stand** — but v1's target is a forest still adjusting to a CO₂ step, not an equilibrium. **`v2-constco2`
+is now BUILT, RUN AND DECODED** (6,000/6,000, 2026-09-15): pinning CO₂ costs **24 % of the vegetation
+carbon**, with stems **+4.0 %** — a younger, lighter forest — while the treeless rows are unchanged at
+380/6,000, so it changes *how much* forest there is, not *where*; that matches the global spin-up
+curve's +21.2 % over the ramp. **No budget drops**: a shorter run ends at a different CO₂, so it is a
+different state. `docs/reference/corpus-design.md`; record `20260915-D-the-spinup-did-converge-*`.
 
 ### Rung 1 — the kill test. PASSED 2026-09-14 (`X-20260909-pilot-warming-response`, line X)
 
@@ -120,29 +123,26 @@ response, which is why the designed ensemble exists. Rungs 3–4 are blocked on 
 identification. ⚠ **Compute was never the bottleneck — the sessions are.**
 
 **The second seed RAN on 2026-09-15 and discharged all five asks at once** (`pilot-v1-s2`, 20 cells
-× 30 climates, 600 spin-ups). Its headline is that **the model's own run-to-run spread does NOT
-widen under climate perturbation**: median 0.0301 against 0.0310 at present-day climate, with an
-identical 20.4 % of cell-quantities above the 10 % floor. Consequences, all pre-stated:
-
-* **The emitted-restart experiment (X4) is retired as the WRONG INSTRUMENT, not as a failure.** The
-  floor dominates 79.6 % of cell-quantities, so the conjunctive level statistic has no power and its
-  nulls will keep collapsing. A replacement needs a new estimand, **not** a widened floor — that
-  would be a threshold chosen after seeing the values. This closes the oldest open item here.
-* **The transferred band was legitimate all along**, so nothing scored to date needs recomputing.
-* **`ABS_FLOOR` = 0.0384**, measured, against a 0.10 that would blind the test to 53.9 % of types.
-* **The 2.7 % soil-carbon offset is a real bias**: the model's own median spread there is 1.43 %.
+× 30 climates, 600 spin-ups). **The model's own run-to-run spread does NOT widen under climate
+perturbation**: median 0.0301 against 0.0310 at present-day climate, 20.4 % of cell-quantities above
+the 10 % floor either way. So **X4 is retired as the WRONG INSTRUMENT, not as a failure** — the floor
+dominates 79.6 % of cell-quantities, the conjunctive level statistic has no power, and a replacement
+needs a **new estimand**, never a widened floor (a threshold chosen after seeing the values). The
+transferred band was legitimate all along, so nothing scored to date needs recomputing; `ABS_FLOOR`
+= **0.0384**, measured; and the 2.7 % soil-carbon offset is a **real bias**, against a median
+two-seed spread there of 1.43 %.
 
 **And the species-mix kill test passed** (rung 8), turning the synthesiser's copying of species
 composition from a disclosed simplification into a measured defect — now line T's principal build.
 
 | open, in value order | owner | blocked on |
 |---|---|---|
-| **corpus `v2-constco2` — the constant-CO₂ rebuild; 6,000 spin-ups LAUNCHED 2026-09-15, jobs 2204789–2204813** | **D** | harvest + decode |
-| re-score rungs 1 and 8 on `v2-constco2` and compare against `v1` — does the CO₂ ramp change either pass? | **X** | the rebuild |
+| **re-score rungs 1 and 8 on `v2-constco2`**, and restate both verdicts' wrong "constant CO₂" basis wording | **X** | nothing — v2 landed 2026-09-15 |
 | **stop `models/synth.py` copying species composition**; it needs its own t0–t4 pass, not just a score | **T** | nothing |
 | a NEW estimand for the emitted restart, replacing X4 | **X** | nothing |
 | the additive band floor in the shared scorer, now with a measured 0.0384 | **X** | nothing |
 | one cell, one year, two binaries, byte-compared — the only unproven rung-5 claim | **D** | nothing |
+| 38 open ledger rows whose results have ALL landed; they block every merge from 2026-09-22 | **D T X** | nothing |
 
 **Full acceptance (rung 7) has no defensible date**: the conjunctive pass rate is 0.0351 against an
 attainable ceiling of **0.5585, not 1.0**, what closes that gap is unknown, and it needs the mid or

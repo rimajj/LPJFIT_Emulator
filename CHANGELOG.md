@@ -5,6 +5,17 @@ Entries are written as `changelog.d/<line>-<slug>.md` fragments and folded in at
 
 ## [Unreleased]
 
+<!-- collated 2026-09-16 from 1 fragment(s) -->
+
+### Changed
+- **The roadmap now says the constant-CO₂ corpus is finished rather than in flight.** It was built, run and decoded on 2026-09-15 — 6,000 of 6,000 spin-ups — and the roadmap still listed it as launched and awaiting collection, which would have sent the next session to redo work already done. Holding CO₂ genuinely fixed costs **24 % of the forest's vegetation carbon** and yields 4 % more stems: a younger, lighter forest. The number of locations with no trees at all does not change, 380 of 6,000, so this is a change in how much forest there is, not in where forest is.
+- **The open-work table is re-derived from what has actually landed.** Re-scoring the two passing gates on the new corpus is no longer blocked. Added: thirty-eight submitted compute jobs whose results have all already been written up, but whose ledger entries were never closed — they begin blocking every merge on 2026-09-22.
+- The measured cost of holding CO₂ fixed is recorded as a durable fact, which only the integration checkout can write, so it does not live solely in one work line's notes.
+
+### Fixed
+- **Two corrections to the always-loaded fact file that had been requested eight days earlier and never made.** Both could only be made from the integration checkout, and nothing polls that kind of request, so both sat. (1) The note on which compiled versions of the vegetation model produced our stored reference runs said there were two; there are three, and it called the difference between them a confound when the evidence gathered on 2026-09-08 showed the opposite — every behavioural change between those two builds is switched off unless an environment variable is set, and the restart file's layout is unchanged. What is still unproven is byte-equality, and that is now what the note says. (2) A missing warning is added: in the first corpus version, the two runs of the high-emissions scenario are byte-identical copies, so that scenario has no second realisation there and no measure of the model's own run-to-run spread may be taken from it.
+- **The path configuration's provenance comment named two compiled versions where three produced stored reference data.** The third, from July 2026, produced the only genuine second run of the high-emissions scenario. It was documented beside that one entry but not in the file's header warning, which is what a reader checks first.
+
 <!-- collated 2026-09-15 from 1 fragment(s) -->
 
 ### Added

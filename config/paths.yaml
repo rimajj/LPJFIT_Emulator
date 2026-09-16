@@ -41,9 +41,11 @@ lpjml:
   version: "5.6.004"                                  # [VERIFIED 2026-09-02] VERSION file
 
   # ⚠ BINARY PROVENANCE IS LOAD-BEARING AND THE BUILDS ARE NOT INTERCHANGEABLE.
-  # `bin/lpjml` was last rebuilt 2026-08-12. The stored Historical + ssp370-seed1 ground truth was
-  # produced by the 2026-02-05 build (kept as `pristine` below); the ssp126 leg by an Aug-12 build.
-  # Two builds are never byte-identical (the build date is compiled in), so:
+  # `bin/lpjml` was last rebuilt 2026-08-12. Stored ground truth spans THREE builds, not two: the
+  # Historical + ssp370-seed1 legs came from the 2026-02-05 build (kept as `pristine` below), the
+  # genuine ssp370 second seed from a **Jul-21 2026** build (see that key's own note below), and the
+  # ssp126 leg from the Aug-12 build. Two builds are never byte-identical (the build date is
+  # compiled in), so:
   #   - generate the WHOLE corpus with ONE binary and record which in every provenance.json;
   #   - when comparing against STORED ground truth, gate the provenance first;
   #   - after any rebuild, run the decoded-variable equality check before quoting any number.
