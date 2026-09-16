@@ -111,6 +111,13 @@ SAFE_VERBS = frozenset(
         "cp", "mv", "rm", "mkdir", "touch", "chmod", "ln",
         # the two tools this repo drives constantly, neither of which can launch a job
         "git", "ruff",
+        # PRINT, TEST AND MOVE ABOUT. Added 2026-09-16 on an owner decision, after measuring that
+        # eight of ten ordinary read-only commands were refused for want of them: a session writes
+        # `wc -l x.py ; echo done` or `cd src/vegemu/corpus && ls -l state.py`, and the trailing
+        # builtin turned the whole command unsafe. None of these can execute a file. The two such
+        # commands that were allowed before survived only because `.py;` is not `.py `, so the
+        # keyword regex missed them -- punctuation luck, not a safety property.
+        "echo", "printf", "true", "false", "pwd", "cd", "test", "[",
     ]
 )  # fmt: skip
 
@@ -211,17 +218,63 @@ def all_verbs_are_safe(tokens: list[str], raw: str) -> bool:
     return True
 
 
+def command_and_bodies(raw: str) -> tuple[str, list[str]]:
+    """`(command_text, bodies)` — ASK THE LEXER whether any `<<` in `raw` is a real operator.
+
+    A `<<` inside a quoted argument stays part of that argument's token and never comes back as an
+    operator, so a command that merely TALKS about a heredoc is left entirely alone. That is
+    instance 9's fix, unchanged.
+
+    ⚠ INSTANCE 10, MEASURED 2026-09-16, THE THIRD HOLE IN THE SAME MORNING'S FIX. That question was
+    asked by lexing the RAW text — body included. But a heredoc body is DATA, and data need not be
+    balanced shell: one escaped quote in it and `shlex` raises, the whole command falls down the
+    fail-closed path, and the body is keyword-matched after all. **The rule that a body is data was
+    defeated by the step that decides whether there IS a body.** With `cat` as the receiver, which
+    can execute nothing:
+
+        cat > /tmp/t.py <<'PY'          <- DENIED as heavy Python on the login node
+        print("the corpus's seed" + 'x\\'y')
+        PY
+
+    12 of this repository's own 177 tracked files could not be written back this way, including
+    this file and two lines' state files.
+
+    THE FIX. When `raw` will not lex, walk the lines and ask the same question of each PREFIX that
+    does lex: a body begins on the line AFTER its redirection, so any prefix that lexes is command
+    text, and the prefix ending at the redirection line is the one that answers. If no lexable
+    prefix carries a real `<<`, the text is an unbalanced COMMAND rather than an unbalanced body,
+    the `ValueError` propagates, and the caller fails closed exactly as before.
+
+    ⚠ THE FIRST DRAFT LOOKED AT THE FIRST LINE ONLY, and the corpus of commands this repository has
+    actually issued showed it too narrow: `cd <dir>` then `git commit -F - <<'EOF'` puts the
+    redirection on line two, and that is the commonest committing idiom here.
+
+    Applied 2026-09-16 on an explicit owner decision, together with the `SAFE_VERBS` additions
+    above. Record: `docs/decisions/20260916-INT-an-unlexable-heredoc-body-defeats-the-rule-that-a-
+    body-is-data.md`.
+    """
+    try:
+        tokens = operator_tokens(raw)
+    except ValueError:
+        pass
+    else:
+        return (raw, []) if HEREDOC_OPS.isdisjoint(tokens) else split_heredoc(raw)
+    prefix = ""
+    for line in raw.split("\n"):
+        prefix = f"{prefix}\n{line}" if prefix else line
+        try:
+            tokens = operator_tokens(prefix)
+        except ValueError:
+            continue  # still inside a quoted argument, or already inside the body
+        if not HEREDOC_OPS.isdisjoint(tokens):
+            return split_heredoc(raw)
+    raise ValueError("unbalanced command text, and no heredoc redirection to explain it")
+
+
 def main() -> None:
     raw = sys.stdin.read()
     try:
-        # ASK THE LEXER WHETHER THERE IS A HEREDOC AT ALL, before any pattern touches the raw text.
-        # A `<<` inside a quoted argument is part of that argument's token and never shows up as an
-        # operator, so a command that merely TALKS about a heredoc is left entirely alone.
-        raw_tokens = operator_tokens(raw)
-        if HEREDOC_OPS.isdisjoint(raw_tokens):
-            command_text, bodies = raw, []
-        else:
-            command_text, bodies = split_heredoc(raw)
+        command_text, bodies = command_and_bodies(raw)
         # Judge the COMMAND LINE first, with any heredoc body held back. If every verb on it is one
         # that cannot execute what it is handed, the body is data -- a commit message -- and must
         # not be read as shell OR keyword-matched. If any verb could execute it, the body may BE
@@ -229,7 +282,11 @@ def main() -> None:
         if bodies and all_verbs_are_safe(operator_tokens(command_text), command_text):
             text, safe = command_text, True
         else:
-            text, safe = raw, all_verbs_are_safe(raw_tokens, raw)
+            # Re-lexed rather than carried down from the check above: when the body goes back in,
+            # the text being judged is the raw text again, and the raw text may be the thing that
+            # will not lex -- in which case this raises and the command fails closed, which is the
+            # right answer for a body whose receiver could execute it.
+            text, safe = raw, all_verbs_are_safe(operator_tokens(raw), raw)
         tokens = shlex.split(text)
     except ValueError:
         # Unbalanced quotes: hand back the raw command so the caller keeps its old broad matching.

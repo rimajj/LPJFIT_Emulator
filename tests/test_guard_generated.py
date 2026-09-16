@@ -193,15 +193,6 @@ def test_a_message_handed_to_git_on_stdin_is_never_a_job() -> None:
     _report("commit messages on stdin", cases)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "instance 10: an unlexable heredoc body defeats the by-capability rule. The fix is "
-        "written and verified in the 2026-09-16 record and NOT applied -- it widens what a "
-        "permission hook treats as safe, which is an owner decision. STRICT, so the day the fix "
-        "lands this test passes, the XPASS turns the suite red, and the marker has to go."
-    ),
-)
 def test_writing_one_of_this_repos_own_files_with_a_heredoc_is_never_a_job() -> None:
     """INSTANCE 10, and the reason this file exists at all.
 
@@ -224,21 +215,13 @@ def test_writing_one_of_this_repos_own_files_with_a_heredoc_is_never_a_job() -> 
     _report("file writes", cases)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "the safe-verb allowlist has no echo, printf, true, pwd, cd or test, so appending any of "
-        "them to a read flips the whole command to unsafe. Fix written and verified in the "
-        "2026-09-16 record, NOT applied -- widening a permission hook is an owner decision. "
-        "STRICT, so landing the fix turns this XPASS red and the marker has to go."
-    ),
-)
 def test_a_read_with_a_shell_builtin_appended_is_never_a_job() -> None:
-    """`wc -l x.py ; echo done` is a read and a print, and the guard refuses it.
+    """`wc -l x.py ; echo done` is a read and a print, and the guard used to refuse it.
 
     None of these verbs can execute a file, so by the allowlist's own stated discipline they
-    belong on it. Eight of ten such commands are refused today; the survivors survive only on the
-    punctuation accident that `.py;` is not `.py `, which is not a safety property.
+    belong on it. Eight of ten such commands were refused until 2026-09-16; the two survivors
+    survived only on the accident that `.py;` is not `.py `, so the keyword regex missed them --
+    punctuation luck, not a safety property.
     """
     paths = _tracked("scripts/*.py", "src/vegemu/**/*.py")[:5]
     suffixes = ("; echo done", "&& echo ok", "; pwd", "; true", "; test -f /tmp/x")
