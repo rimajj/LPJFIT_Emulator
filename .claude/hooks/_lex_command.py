@@ -32,6 +32,14 @@ FAILS CLOSED. A command that will not lex prints UNSAFE and its own raw text, so
 back to the old broad matching rather than to a bypass. Callers must also treat a crashed or empty
 result, or a first line that is neither word verbatim, as UNSAFE.
 
+EXIT STATUS, ADDED 2026-09-16: 0 when the text lexed, 3 when it did not and the raw fallback was
+printed instead. WHY A CALLER NEEDS TO TELL THOSE APART, when for six weeks none did. Falling back
+to raw text is the safe direction for a rule that DENIES -- it can only over-match, i.e. deny more.
+It is the UNSAFE direction for a rule that ALLOWS: an escape-hatch prefix merely QUOTED inside a
+commit message is not a prefix, and on the raw fallback a regex cannot tell the two apart, so the
+hatch would open on somebody's prose. So an allow-rule must require status 0; a deny-rule may keep
+ignoring it, which is why adding this changed no existing caller's behaviour.
+
 ...AND THE SAME SHAPE TWICE MORE, MEASURED 2026-09-16 — instances 7 and 8. Stripping prose by FLAG
 closed the flag door and left two others open, both of which let somebody else's text back in as
 shell. Neither command runs anything:
@@ -289,10 +297,11 @@ def main() -> None:
             text, safe = raw, all_verbs_are_safe(operator_tokens(raw), raw)
         tokens = shlex.split(text)
     except ValueError:
-        # Unbalanced quotes: hand back the raw command so the caller keeps its old broad matching.
+        # Unbalanced quotes: hand back the raw command so the caller keeps its old broad matching,
+        # and say so in the exit status -- a rule that ALLOWS on a match must not fire on raw text.
         print("UNSAFE")
         print(raw)
-        return
+        raise SystemExit(3)
     print("SAFE" if safe else "UNSAFE")
     print(strip_prose(tokens))
 

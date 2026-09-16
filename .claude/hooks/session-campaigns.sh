@@ -12,8 +12,22 @@ cd "$REPO" 2>/dev/null || exit 0
 BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '')"
 LINE=""; [[ "$BRANCH" == line/* ]] && LINE="${BRANCH#line/}"
 
-OUT="$(timeout 25 python3 tools/campaigns.py status ${LINE:+--line "$LINE"} --format hook 2>/dev/null || true)"
-[[ -n "$OUT" ]] && { echo; echo "$OUT"; }
+# ⚠ SILENCE HERE USED TO MEAN EITHER "no open campaigns" OR "the replay could not run", and this
+# hook is the ONLY thing that carries a launched job across the session boundary that launched it.
+# Results land hours to days later, so a campaign nobody is told about is a campaign nobody harvests
+# -- and an unharvested row blocks every merge once it goes overdue. `2>/dev/null || true` made the
+# worse of those two states look exactly like the better one.
+OUT="$(timeout 25 python3 tools/campaigns.py status ${LINE:+--line "$LINE"} --format hook 2>&1)"
+RC=$?
+if (( RC == 0 )); then
+  [[ -n "$OUT" ]] && { echo; echo "$OUT"; }
+else
+  echo
+  echo "⚠ THE CAMPAIGN REPLAY COULD NOT RUN (exit $RC). THIS IS NOT 'NO OPEN CAMPAIGNS'."
+  [[ "$RC" == 124 ]] && echo "  It timed out after 25 s; the ledger may be large or the FS slow."
+  printf '%s\n' "$OUT" | tail -3 | sed 's/^/  /'
+  echo "  Any launched job is still out there. Check by hand: tools/campaigns.py status"
+fi
 
 # The sweeper's push inbox: results that arrived while nobody was looking.
 INBOX="campaigns/.inbox"

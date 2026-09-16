@@ -39,10 +39,23 @@ if [[ "$BRANCH" == "main" ]] && compgen -G "changelog.d/*.md" >/dev/null 2>&1; t
 fi
 
 # Flags approaching or past their flip date.
-FLAGS="$(python3 tools/check_flags.py 2>&1 | grep -E 'F0[123]' || true)"
-[[ -n "$FLAGS" ]] && OUT="$OUT
+#
+# ⚠ A CHECKER THAT CRASHED IS NOT "NO OPEN FLAGS". This used to be one pipeline ending in `|| true`,
+# so a traceback produced no `F0x` line and the hook printed nothing -- indistinguishable from a
+# clean sweep. One calm message covering two opposite states, which is the shape `MEMORY.md:two-
+# states-one-message` exists to make suspect. Non-zero is NOT the signal: check_flags exits non-zero
+# when it has findings, which is the normal case. Only a traceback means it could not run.
+FLAGS_OUT="$(python3 tools/check_flags.py 2>&1)"
+if [[ "$FLAGS_OUT" == *"Traceback (most recent call last)"* ]]; then
+  OUT="$OUT
+  ⚠ check_flags could not run, so FLAGS ARE UNKNOWN -- this is not 'none open':
+$(printf '%s' "$FLAGS_OUT" | tail -3 | sed 's/^/    /')"
+else
+  FLAGS="$(printf '%s' "$FLAGS_OUT" | grep -E 'F0[123]' || true)"
+  [[ -n "$FLAGS" ]] && OUT="$OUT
   flags need a decision:
 $(echo "$FLAGS" | sed 's/^/    /')"
+fi
 
 # Document budget headroom, so compaction happens before the wall rather than at it.
 if [[ -n "$LINE" && -f "lines/$LINE/STATE.md" ]]; then

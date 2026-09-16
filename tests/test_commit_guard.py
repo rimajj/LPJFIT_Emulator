@@ -148,6 +148,89 @@ def test_no_deny_rule_reads_the_raw_command() -> None:
     )
 
 
+# --- the escape hatch, which until 2026-09-16 had never once opened -------------------------------
+#
+# WHY A DENY CASE IS THE PROBE. "The hatch opened" and "the checkers ran and found nothing" are both
+# `allow`, so an ordinary commit cannot tell them apart -- the same invisibility that let the dead
+# hatch sit undetected for six weeks. Prefixing a command that MUST_DENY makes the difference
+# observable: only the hatch can turn that one into `allow`.
+_DENIED = "git add src/vegemu/score.py && git commit -m 'feat: a thing'"
+
+
+def test_the_prefix_form_the_refusal_advertises_actually_opens_the_hatch() -> None:
+    """It is written as a prefix on the command, and a PreToolUse hook cannot see that as an env var.
+
+    The hook reads the HARNESS's environment, never the environment of the command it is about to
+    allow, so `ALLOW_COMMIT_GUARD_SKIP=1 git commit ...` -- the exact line the refusal prints -- set
+    nothing. Fixed in slurm-guard.sh on 2026-09-08 (`MEMORY.md:hook-env-blind`); that fix named both
+    hatches in ITS file and missed this third one next door.
+    """
+    assert verdict(_DENIED) == "deny", "the probe is only meaningful if this is denied without it"
+    assert verdict(f"ALLOW_COMMIT_GUARD_SKIP=1 {_DENIED}") == "allow"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # QUOTED INSIDE A MESSAGE IS NOT A PREFIX. Writing about the hatch must not open it -- the
+        # shape this repo has now measured eleven times, a guard judging text that is not what it
+        # guards. The lexer strips the argument of `-m`, so the hatch never sees this.
+        'git add x && git commit -m "bypass with ALLOW_COMMIT_GUARD_SKIP=1 git commit -m msg"',
+        "git add x && git commit -m 'ALLOW_COMMIT_GUARD_SKIP=1 is the documented hatch'",
+        # ...AND NOT ON TEXT THAT WILL NOT LEX. An unbalanced quote makes the lexer hand back the raw
+        # command, prose and all. Every DENY rule may read that safely, because raw text can only
+        # make it deny more; an ALLOW rule read off the same fallback would open on the prose above.
+        'git add x && git commit -m "an unclosed quote ALLOW_COMMIT_GUARD_SKIP=1 git commit x',
+    ],
+)
+def test_the_hatch_does_not_open_on_text_that_merely_contains_the_prefix(command: str) -> None:
+    assert verdict(command) == "deny", f"the hatch opened on prose: {command}"
+
+
+def test_a_checker_that_crashes_is_reported_as_a_broken_hook_not_as_a_finding(
+    tmp_path: Path,
+) -> None:
+    """A hook outage must not wear a verdict's clothes.
+
+    Both outcomes exit non-zero, and the hook used to fold them together: on 2026-09-10 four
+    checkers died on an import and every commit of that session was refused with four tracebacks
+    where four findings should have been. The cause is fixed at the source (tools/_common.py
+    re-execs under the configured interpreter, pinned by tests/test_checker_bootstrap.py); this pins
+    the other half -- that ANY other reason a checker dies is still reported for what it is.
+    """
+    (tmp_path / "tools").mkdir()
+    for name in ("check_ownership", "check_experiments", "check_secrets", "check_no_abs_paths"):
+        (tmp_path / "tools" / f"{name}.py").write_text("", encoding="utf-8")
+    # The one that dies. Not a fake failure of a real checker: a stand-in whose only job is to exit
+    # the way a crashing one does, in a throwaway repo, so the hook's HANDLING is what is measured.
+    (tmp_path / "tools" / "check_budgets.py").write_text(
+        "raise RuntimeError('this checker could not start')\n", encoding="utf-8"
+    )
+    staged = tmp_path / "MEMORY.md"
+    staged.write_text("| id | fact | source | verified |\n", encoding="utf-8")
+    for argv in (["init", "-q"], ["add", "MEMORY.md"]):
+        subprocess.run(["git", *argv], cwd=tmp_path, check=True, capture_output=True)
+
+    env = {k: v for k, v in os.environ.items() if k not in _OVERRIDES}
+    env["CLAUDE_PROJECT_DIR"] = str(tmp_path)
+    proc = subprocess.run(
+        [str(HOOK)],
+        input=json.dumps({"tool_input": {"command": "git commit -m 'docs: a thing'"}}),
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+    )
+    payload = json.loads(proc.stdout.strip() or "{}").get("hookSpecificOutput", {})
+    reason = str(payload.get("permissionDecisionReason", ""))
+    # It still denies: a commit whose checks did not run is unchecked, not clean.
+    assert payload.get("permissionDecision") == "deny", proc.stdout
+    assert "THE COMMIT GUARD IS BROKEN" in reason, reason
+    assert "refused this commit" not in reason, (
+        "a crash is still being presented as a verdict about the staged files:\n" + reason
+    )
+
+
 def test_both_guards_share_one_lexer_rather_than_a_second_copy() -> None:
     """Two copies of the prose stripper is how the two hooks drifted apart in the first place."""
     for hook in ("commit-guard.sh", "slurm-guard.sh"):

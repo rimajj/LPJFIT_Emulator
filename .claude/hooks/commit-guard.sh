@@ -14,11 +14,14 @@
 # closure, plus undefined/unused names). Full ruff is CI's job -- a guard that nags about formatting
 # on every commit gets bypassed, and a bypassed guard is worse than none.
 #
-# Escape hatch: ALLOW_COMMIT_GUARD_SKIP=1, which requires a `Guard-skip: <reason>` trailer that CI
-# counts and reports -- so a bypass is visible rather than free.
+# Escape hatch: ALLOW_COMMIT_GUARD_SKIP=1 written as a PREFIX ON THE COMMAND, which requires a
+# `Guard-skip: <reason>` trailer that CI counts and reports -- so a bypass is visible rather than
+# free. It is matched in the command text, for the reason given where it is read, below.
 set -uo pipefail
 CMD="$(cat | python3 -c 'import json,sys;print(json.load(sys.stdin).get("tool_input",{}).get("command",""))' 2>/dev/null || true)"
 [[ "$CMD" =~ (^|[[:space:];&|])git[[:space:]]+(-[^[:space:]]+[[:space:]]+)*commit ]] || exit 0
+# The exported form, kept because it costs nothing and works from a shell the caller controls. It is
+# NOT the form this hook's refusal message advertises, and on its own it never opened -- see below.
 [[ -n "${ALLOW_COMMIT_GUARD_SKIP-}" ]] && exit 0
 
 REPO="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
@@ -28,8 +31,31 @@ REPO="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}
 # $CMD, so no rule can be tripped by what a commit message happens to say. FAILS CLOSED: a command
 # that will not lex, a missing or crashed lexer, and an empty result all fall back to the raw
 # command, i.e. to the old broad matching, which can never widen into a bypass.
-CMD_SCAN="$(printf '%s' "$CMD" | python3 "$(dirname "${BASH_SOURCE[0]}")/_lex_command.py" 2>/dev/null | tail -n +2)"
-[[ -z "$CMD_SCAN" ]] && CMD_SCAN="$CMD"
+LEX_OUT="$(printf '%s' "$CMD" | python3 "$(dirname "${BASH_SOURCE[0]}")/_lex_command.py" 2>/dev/null)"
+LEX_RC=$?
+CMD_SCAN="$(printf '%s' "$LEX_OUT" | tail -n +2)"
+[[ -z "$CMD_SCAN" ]] && { CMD_SCAN="$CMD"; LEX_RC=1; }
+
+# THE ESCAPE HATCH THIS HOOK ADVERTISES, READ OFF THE COMMAND TEXT -- and until 2026-09-16 it had
+# never once opened. A PreToolUse hook runs in the HARNESS's environment, not in the shell the
+# command is about to run in, so the `ALLOW_COMMIT_GUARD_SKIP=1 git commit ...` printed in the
+# refusal below set nothing this hook could see. The guard could therefore not be lifted at all,
+# while telling you it could. The identical defect in slurm-guard.sh was fixed on 2026-09-08
+# (`MEMORY.md:hook-env-blind`); that fix named "both slurm-guard hatches" and this third one, in the
+# sibling file, was missed. Measured cost: on 2026-09-10 a session blocked by a broken checker got
+# past this guard by rewording its command until the filter at the top stopped matching -- an
+# unaudited bypass, where the hatch exists precisely to leave a `Guard-skip:` trace that CI counts.
+#
+# ⚠ ONLY ON TEXT THAT LEXED (`LEX_RC == 0`), and this is the half that is easy to get wrong. When
+# the lexer fails it hands back the RAW command, prose and all. Every OTHER rule in this file may
+# safely read that fallback, because they all DENY and raw text can only make them deny more. This
+# rule ALLOWS, so on the fallback a commit whose MESSAGE merely quoted the prefix would open the
+# guard -- the eleventh instance of a guard judging input that is not what it guards, avoided here
+# only because the shape was already named. An unlexable command is refused, and rewriting it with
+# balanced quotes costs one tool call.
+if (( LEX_RC == 0 )) && [[ "$CMD_SCAN" =~ (^|[[:space:]\;\&\|])ALLOW_COMMIT_GUARD_SKIP=[^[:space:]]+[[:space:]] ]]; then
+  exit 0
+fi
 
 cd "$REPO" 2>/dev/null || exit 0
 
@@ -97,9 +123,31 @@ fi
 [[ -z "$STAGED" ]] && exit 0
 
 FINDINGS=""
-run() { local out; out="$($@ 2>&1)" || FINDINGS="$FINDINGS
+BROKEN=""
+# A CHECKER THAT COULD NOT START IS NOT A FINDING ABOUT THE COMMIT. Both outcomes exit non-zero, so
+# this used to fold them together and deny with a traceback as the stated reason -- which is a hook
+# outage wearing a verdict's clothes, and on 2026-09-10 it refused every commit of a session for
+# four of them at once. A crash is told from a finding by the one thing only a crash prints.
+#
+# The 2026-09-10 cause is fixed at the source: tools/_common.py re-execs under the interpreter named
+# in config/paths.yaml, so too old a `python3` no longer kills the checkers (tests/test_checker_
+# bootstrap.py pins it). This is the remaining half -- any OTHER reason a checker dies still has to
+# report itself honestly. It still DENIES, because a commit whose checks did not run is unchecked.
+run() {
+  local out status
+  out="$("$@" 2>&1)"; status=$?
+  (( status == 0 )) && return
+  if [[ "$out" == *"Traceback (most recent call last)"* ]]; then
+    BROKEN="$BROKEN
 
-$out"; }
+\$ $* (exit $status)
+$out"
+  else
+    FINDINGS="$FINDINGS
+
+$out"
+  fi
+}
 
 run python3 tools/check_budgets.py --staged
 run python3 tools/check_ownership.py --staged
@@ -118,6 +166,24 @@ fi
 SHFILES="$(echo "$STAGED" | grep '\.sh$' || true)"
 # shellcheck disable=SC2086
 [[ -n "$SHFILES" ]] && run python3 tools/check_no_abs_paths.py $SHFILES
+
+if [[ -n "$BROKEN" ]]; then
+  python3 - "$BROKEN" <<'PY'
+import json, sys
+reason = f"""THE COMMIT GUARD IS BROKEN. This is not a finding about your commit.
+
+A checker crashed instead of returning a verdict, so this commit is UNCHECKED, not faulty. Nothing
+below describes anything wrong with the files you staged.
+{sys.argv[1]}
+
+Fix the hook, then commit normally. If you must commit before it is fixed, say so on the record:
+  ALLOW_COMMIT_GUARD_SKIP=1 git commit ...   and add a trailer:  Guard-skip: <why>
+and run the checkers by hand first, so the trailer's reason is true."""
+print(json.dumps({"hookSpecificOutput":{"hookEventName":"PreToolUse",
+  "permissionDecision":"deny","permissionDecisionReason":reason}}))
+PY
+  exit 0
+fi
 
 if [[ -n "$FINDINGS" ]]; then
   python3 - "$FINDINGS" <<'PY'
