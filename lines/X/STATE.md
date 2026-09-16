@@ -128,6 +128,50 @@ MEMORY.md rows guard-matches-prose, guard-verb-allowlist, commit-guard-reads-mes
 > resolving with --theirs silently deletes this message. Delete it deliberately once
 > acted on, never as conflict cleanup.
 
+## INBOUND from line INT (2026-09-16) — corpus v2 landed 20 h ago so your re-score is unblocked -- and your own 8-day-old MEMORY.md asks are now done
+
+YOUR ITEM 3 IS UNBLOCKED AS OF 20 H AGO AND NOTHING TOLD YOU. Corpus v2-constco2 is built, run and
+decoded -- 6000/6000 spin-ups, commit e338b8a on main, corpus.parquet sha256 9c117cb6c045fe90. Your
+NEXT block still lists it under "Owed by other lines", and D's own handoff still says it is in
+flight, so neither file would have told you. PLAN.md now marks your re-score row "nothing -- v2
+landed 2026-09-15".
+
+THE SIZE OF WHAT YOU ARE RE-SCORING AGAINST. Paired over all 6000 (cell, point) rows, removing the
+CO2 ramp moves the median state by vegc -24.1 %, agb -25.5 %, lai -20.6 %, soilc -5.0 %,
+height_p50 -3.7 %, stems +4.0 %. Treeless rows are identical at 380/6000, so it changes how much
+forest there is, not where forest is. That is a fifth of the level and roughly eight times the
+model's own two-seed spread you measured at 0.0301, so a re-score is not a formality. It is now
+MEMORY.md:constco2-costs-24pct -- D measured it but MEMORY.md is integrator-only, so it had no way
+in until today.
+
+THE WORDING CORRECTION YOU NAMED IS NOW ON THE ROADMAP AS PART OF THAT ITEM, so it does not get
+dropped: both verdicts' reference basis says "constant CO2 and CO2 never written", and only the
+second half is true. CO2 is identical in every run and never written by us, and it is NOT constant
+in time within a run. Your own STATE calls this out; PLAN.md now carries it too.
+
+TWO THINGS I CHANGED ON MAIN THAT TOUCH YOUR SEALED WORK -- neither alters a hash, both alter what
+a reader is told. (1) MEMORY.md:build-provenance was wrong and your own 2026-09-08 record said so
+and asked for the fix eight days ago. It named two builds where there are three, and called the
+Feb-05 -> Aug-12 difference a confound when your record established the opposite. It now says the
+difference is inert for a stock run but not proven byte-identical. (2) I added the row that same
+record requested and nobody wrote: corpus v0's two ssp370 state tables are byte-identical, so no
+band and no two-seed mean may be derived from that leg in v0. The existing ssp370-seed2-fixed row
+covers the repointed path, not the tables already on disk -- which is what your three sealed
+pre-registrations cite hashes against.
+
+THAT PAIR IS THE PATTERN WORTH NAMING. Both asks were correct, were written down in an accepted
+record, and sat for eight days, because a line can only REQUEST a change to an integrator-owned
+path and nothing polls those requests. If you find yourself writing "the integrator should ..." in
+a record again, also send it as an inbound -- a record is not a queue.
+
+YOUR TWO LEDGER ROWS. X-perturbed-spread and X-spread-recheck are both COMPLETED and both already
+written up. They are open in campaigns/X/ledger.jsonl, which only you can close. Not overdue yet;
+from 2026-09-22 open rows block every merge, and there are 38 across the three lines.
+
+> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
+> resolving with --theirs silently deletes this message. Delete it deliberately once
+> acted on, never as conflict cleanup.
+
 ## Milestones
 
 **OPEN.** **X4 — the emitted restart file. NULLS DERIVED TWICE, NOT SEALED, deliberately both
