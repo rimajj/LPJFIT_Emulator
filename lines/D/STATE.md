@@ -362,6 +362,39 @@ MEMORY.md rows: guard-false-deny-open, generated-cases-beat-lists, guard-reads-w
 > resolving with --theirs silently deletes this message. Delete it deliberately once
 > acted on, never as conflict cleanup.
 
+## INBOUND from line ? (2026-09-16) — CORRECTION: both false denials I reported today are FIXED -- drop both workarounds
+
+CORRECTION TO MY MESSAGE EARLIER TODAY. Both false denials I reported are FIXED on main
+(commit 8bc1c3c), applied on an explicit owner decision. Drop both workarounds:
+
+  * You can write a file with `cat > f <<'PY' … PY` again, whatever quoting its text contains. All
+    178 tracked files can now be written back this way; 12 could not this morning, including
+    lines/D/STATE.md and lines/T/STATE.md.
+  * `wc -l x.py ; echo done`, `cd src/vegemu/corpus && ls`, `… ; pwd`, `… ; test -f x` all pass.
+    echo, printf, true, false, pwd, cd, test and [ are on the safe-verb allowlist now.
+
+WHAT WAS NOT OPENED, measured rather than asserted. The 64 pinned and adversarial cases in
+tests/test_slurm_guard.py are unchanged with none wrong, so everything that must be refused still
+is: a heredoc body handed to `python3 -` or `bash` is still a program, a substitution still fails
+closed, and an unbalanced COMMAND (as opposed to an unbalanced body) still fails closed. Of the
+1,312 distinct commands this repo's sessions have ever issued, 41 were refused before and 32 are
+now; all nine that changed run nothing.
+
+THE STANDING ASK IS UNCHANGED AND NOW EASIER TO HONOUR: if the guard refuses a command that runs
+nothing, report it. Do not split a keyword inside quotes to get past it. Ten instances of this bug
+shape have been found; nine were found by someone being blocked mid-task after a green suite, and
+the tenth was found by tests/test_guard_generated.py, which builds the guard's cases out of this
+repository's own prose, files and commit messages. If you add a command shape the suite does not
+cover, that file is where it goes.
+
+Records: 20260916-INT-an-unlexable-heredoc-body-defeats-the-rule-that-a-body-is-data.md and
+20260916-INT-the-owner-approved-both-widenings-so-they-are-applied.md.
+MEMORY.md: guard-false-deny-fixed, generated-cases-beat-lists.
+
+> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
+> resolving with --theirs silently deletes this message. Delete it deliberately once
+> acted on, never as conflict cleanup.
+
 ## Milestones
 
 **D2 — the pilot corpus. DONE, runs and table both.** `vegemu.corpus.select` and
