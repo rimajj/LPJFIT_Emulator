@@ -158,7 +158,7 @@ _DENIED = "git add src/vegemu/score.py && git commit -m 'feat: a thing'"
 
 
 def test_the_prefix_form_the_refusal_advertises_actually_opens_the_hatch() -> None:
-    """It is written as a prefix on the command, and a PreToolUse hook cannot see that as an env var.
+    """It is a prefix on the command, and a PreToolUse hook cannot see that as an env var.
 
     The hook reads the HARNESS's environment, never the environment of the command it is about to
     allow, so `ALLOW_COMMIT_GUARD_SKIP=1 git commit ...` -- the exact line the refusal prints -- set
@@ -177,9 +177,9 @@ def test_the_prefix_form_the_refusal_advertises_actually_opens_the_hatch() -> No
         # guards. The lexer strips the argument of `-m`, so the hatch never sees this.
         'git add x && git commit -m "bypass with ALLOW_COMMIT_GUARD_SKIP=1 git commit -m msg"',
         "git add x && git commit -m 'ALLOW_COMMIT_GUARD_SKIP=1 is the documented hatch'",
-        # ...AND NOT ON TEXT THAT WILL NOT LEX. An unbalanced quote makes the lexer hand back the raw
-        # command, prose and all. Every DENY rule may read that safely, because raw text can only
-        # make it deny more; an ALLOW rule read off the same fallback would open on the prose above.
+        # ...AND NOT ON TEXT THAT WILL NOT LEX. An unbalanced quote makes the lexer hand back
+        # the raw command, prose and all. Every DENY rule may read that safely, because raw text
+        # can only make it deny more; an ALLOW rule on the same fallback opens on the prose above.
         'git add x && git commit -m "an unclosed quote ALLOW_COMMIT_GUARD_SKIP=1 git commit x',
     ],
 )

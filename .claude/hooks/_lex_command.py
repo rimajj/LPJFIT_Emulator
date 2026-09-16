@@ -301,7 +301,7 @@ def main() -> None:
         # and say so in the exit status -- a rule that ALLOWS on a match must not fire on raw text.
         print("UNSAFE")
         print(raw)
-        raise SystemExit(3)
+        raise SystemExit(3) from None  # an expected outcome, not an error while handling one
     print("SAFE" if safe else "UNSAFE")
     print(strip_prose(tokens))
 
