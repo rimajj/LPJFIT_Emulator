@@ -78,6 +78,20 @@ MUST_DENY = [
     "bash -c 'python3 scripts/corpus_build.py'",
     # a substitution can hide any program at all behind a safe-looking verb
     "cat $(python3 scripts/corpus_build.py --print-path)",
+    # ⚠ THE TWO WAYS THE 2026-09-16 SEPARATOR-TOKEN FIX COULD HAVE OPENED A HOLE. Segmenting on
+    # separator TOKENS rather than characters must not stop a real second command from splitting
+    # out, and a heredoc body must keep being read as a PROGRAM whenever the command receiving it
+    # could execute what it is handed. `python3 -` and `bash` both can.
+    "python3 - <<'PY'\nimport torch\ntorch.zeros(1)\nPY",
+    "bash <<'EOF'\npython3 scripts/corpus_build.py --tier pilot\nEOF",
+    # the body is data only when the RECEIVING verb is safe -- here the receiver is not, and the
+    # keyword that makes it heavy lives in the body
+    "python3 - <<'PY'\nrun('scripts/corpus_build.py')\nPY",
+    # ⚠ WHAT COMES AFTER THE TERMINATOR IS COMMAND AGAIN, NOT BODY. Found by review of the fix
+    # above, not by being bitten: lifting a body out leaves the `<<DELIM` in place, so a scan that
+    # restarted from the beginning would re-match it, find no second terminator, and swallow the
+    # real second command as though it were more message.
+    "git commit -F - <<'MSG'\na message\nMSG\n&& python3 scripts/corpus_build.py",
 ]
 
 MUST_ALLOW = [
@@ -123,6 +137,25 @@ MUST_ALLOW = [
     "git add scripts/corpus_build.py",
     # a pipeline is exempt only if EVERY segment's verb is one that cannot run a file
     "head -50 src/vegemu/corpus/state.py | wc -l",
+    # ⚠ INSTANCES 7 AND 8, MEASURED 2026-09-16 AS DENIALS OF ORDINARY WORK. All three were denied
+    # as "heavy Python on the login node" and not one of them runs anything. The segmenter split
+    # the already-lexed string on separator CHARACTERS, and a character cannot tell an operator
+    # from the same character inside a quoted argument or a heredoc body: an English semicolon
+    # opened a segment whose first word was "the", and a vertical bar inside a quoted search
+    # pattern opened one whose first word was a filename. Verified denied before the fix.
+    "grep -n 'def test|MUST_DENY|python3 -c|torch' tests/test_slurm_guard.py",
+    "grep -rn 'train|corpus' src/vegemu/corpus/state.py",
+    "git commit -F - <<'MSG'\nfix(corpus): both ran 20 h ago; the result is on main\nMSG",
+    # THE NEXT TWO ALREADY PASSED BEFORE THAT FIX and are pinned because the fix could have broken
+    # them, not because it repaired them. Keeping them apart from the three above matters: a case
+    # filed under a bug it never demonstrated is how a suite comes to look stronger than it is.
+    #   - the message is protected by prose stripping, so it would go red if the PROSE list were
+    #     narrowed rather than if the segmenter regressed
+    'git commit -m "corpus v2 decoded; scores stand | rungs 1 and 5 unaffected"',
+    #   - a redirection CONTINUES its command rather than starting a new one. `>` is deliberately
+    #     absent from SEPARATORS, and adding it -- which the shlex punctuation set invites, since
+    #     it tokenises `<`, `>` and `(` alongside the real separators -- newly denies this.
+    "grep -n pft_frac src/vegemu/corpus/state.py > /tmp/hits.py",
 ]
 
 # The overrides the guard's own messages advertise, in the only form a Bash tool call can use.
