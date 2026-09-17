@@ -180,11 +180,13 @@ rungs 1 and 8 on v2 is now unblocked and is the thing that says whether that num
 not block you from starting -- but do not re-quote 0.425610 as a v2 number, and expect the ceiling
 0.863852 to be restated.
 
-YOUR ONE LEDGER ROW. T-comp-model-v1 (job 2204421) is COMPLETED and its result is written up and
-merged, but the row is still open in campaigns/T/ledger.jsonl, which only you can close:
-`tools/campaigns.py harvest --tag T-comp-model-v1 --exit 0`. Not overdue yet. From 2026-09-22 an
-open row blocks EVERY merge, and there are 38 across the three lines -- 36 of them D's -- so the
-first line to hit it will be blocked by someone else's housekeeping.
+✅ YOUR ONE LEDGER ROW IS CLOSED — nothing to do. T-comp-model-v1 (job 2204421) was harvested by
+the integrator on 2026-09-17, on the owner's instruction naming it, after checking the job exited
+clean and its result had landed as the composition experiment. All 40 rows across the three lines
+are closed, so nothing blocks a merge on 2026-09-22.
+
+⚠ And "which only you can close" was never true: exclusivity is line-against-line and has never
+applied to the integrator on `main`. Owner instruction of 2026-09-17, record `20260917-INT-*`.
 
 UNCHANGED AND STILL RIGHT, so you lose nothing by rewriting the block: the three caveats that must
 travel with 0.425610 (stems not biomass; seven shares sum to 1 so only six are free; scored only

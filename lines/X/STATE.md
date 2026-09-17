@@ -173,9 +173,13 @@ record, and sat for eight days, because a line can only REQUEST a change to an i
 path and nothing polls those requests. If you find yourself writing "the integrator should ..." in
 a record again, also send it as an inbound -- a record is not a queue.
 
-YOUR TWO LEDGER ROWS. X-perturbed-spread and X-spread-recheck are both COMPLETED and both already
-written up. They are open in campaigns/X/ledger.jsonl, which only you can close. Not overdue yet;
-from 2026-09-22 open rows block every merge, and there are 38 across the three lines.
+✅ YOUR TWO LEDGER ROWS ARE CLOSED — nothing to do. X-perturbed-spread and X-spread-recheck were
+harvested by the integrator on 2026-09-17, on the owner's instruction naming them, after checking
+both exited clean and both spread.json files are on disk and already quoted in MEMORY.md. All 40
+rows across the three lines are closed, so nothing blocks a merge on 2026-09-22.
+
+⚠ And "which only you can close" was never true: exclusivity is line-against-line and has never
+applied to the integrator on `main`. Owner instruction of 2026-09-17, record `20260917-INT-*`.
 
 > Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
 > resolving with --theirs silently deletes this message. Delete it deliberately once

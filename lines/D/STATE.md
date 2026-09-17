@@ -13,14 +13,14 @@ pre-registrations and verdicts (X).
 
 ## NEXT — start here
 
-**CORPUS `v2-constco2` IS IN FLIGHT — 6,000 spin-ups, jobs 2204789–2204813, launched 2026-09-15.**
-Plan and build are done (200/200 cells, all 200 control points byte-identical). **Harvest and decode
-it, then hand line X a v1-vs-v2 comparison.** The two commands, in order:
-
-```
-scripts/sbatch_py.sh D-pilot-v2-harvest scripts/corpus_pilot.py --stage harvest --version v2-constco2
-NCPUS=16 scripts/sbatch_py.sh D-pilot-v2-decode scripts/corpus_pilot.py --stage decode --version v2-constco2 --workers 16
-```
+✅ **CORPUS `v2-constco2` IS LANDED — do NOT relaunch it.** This block said "in flight, harvest and
+decode it" for two days after both had run: exactly how a session is sent to redo finished work.
+**Re-verified from the runs on 2026-09-17**, not from this file: 6,000/6,000 spin-ups across all 24
+manifests carry `lpjml successfully terminated`; `corpus.parquet` is 6,000 × 181 (sha256
+`9c117cb6c045fe90…`). Second seed `pilot-v1-s2` likewise: 602/602, `replicate_s2.parquet` 600 × 181.
+✅ **All 40 ledger rows are CLOSED** (integrator, 2026-09-17) — nothing blocks the 2026-09-22 merge.
+**The v1-vs-v2 comparison owed to X is measured, in `MEMORY.md:constco2-costs-24pct`:** pinning CO₂
+costs 24 % of the forest (median vegc −24.1 %, agb −25.5 %, lai −20.6 %, soilc −5.0 %, stems +4.0 %).
 
 **WHY v2 EXISTS, and it is the biggest thing found this week.** The spin-up was **never run at
 constant CO₂**. Its CO₂ input is a transient file and the run covers model years 1000–1999, so the
