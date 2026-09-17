@@ -37,14 +37,23 @@ does not build models (T) or generate data (D).
 
 1. **A new estimand to replace X4.** The level-conjunctive statistic cannot work at a 10 % floor;
    what can is an open question, and it is the interesting one. It needs no new corpus.
-2. **Implement the additive band floor** in `src/vegemu/score.py`: `band = max(rel_spread × |truth|,
-   ABS_FLOOR)`. **`ABS_FLOOR` = 0.0384, MEASURED** — p90 of the model's own absolute two-seed
-   disagreement on type shares (median 0.0027, p99 0.1148). Ship it with no default anyway.
-3. **Re-base rungs 1 and 8 on corpus `v2-constco2` when D lands it.** The spin-up was never run at
-   constant CO₂ (see below), so v1's states are post-CO₂-ramp. **Neither pass is confounded** — every
-   run shares the identical CO₂ path — but the reference basis wording "constant CO2 and CO2 never
-   written" in both verdicts is **wrong and must be restated**: CO₂ is identical in every run and
-   never written by us, but it is NOT constant in time within a run.
+   **⚠ THIS IS NOW THIS LINE'S ONLY OPEN DESIGN QUESTION** — 2 and 3 below are done.
+2. ✅ **DONE 2026-09-17 (integrator, on the owner's instruction).** The additive band floor is in
+   `src/vegemu/score.py`: `band = max(rel_spread × |truth|, abs_floor)`, with
+   `ABS_FLOOR_COMPOSITION = 0.0384` carrying its own provenance. **`abs_floor` is required and
+   keyword-only — there is no default**, so a floor measured in stem shares cannot leak onto soil
+   carbon. All five existing call sites pass `abs_floor=0.0`, which reproduces every committed
+   number bit-for-bit; `tests/test_band.py` pins that, and pins that the parameter stays required.
+   `SCORED_CONJUNCTIVE` is deliberately untouched: adding `pft_frac_*` to it would silently
+   redefine sealed estimands, so it belongs with item 1.
+3. **Re-base rungs 1 and 8 on corpus `v2-constco2`.** D landed it on 2026-09-15 (6,000/6,000,
+   verified again 2026-09-17), so this is unblocked and is the bigger half of the old item 3.
+   ✅ **The wording half is DONE 2026-09-17**: all three affected verdicts now carry a marked
+   correction appended to their own reference-basis paragraph, so the wrong sentence cannot be read
+   without it — X-20260909 and X-20260914 for "constant CO2 and CO2 never written" *and* the
+   withdrawn "spin-up is not converged", and X-20260908-heldout-forcing-leg for citing the
+   superseded record. **The sealed pre-registrations keep the original wording and were not
+   edited.** No score moved; every run shares one CO₂ path.
 
 ⚠ **THE CO₂ FINDING, because it touches two of this line's verdicts.** The spin-up runs model years
 1000–1999 against a transient CO₂ file, so its last 300 years carry +32.8 % CO₂ and vegetation

@@ -124,14 +124,23 @@ is a **real bias** and is owed an attribution. Figures: `MEMORY.md:perturbed-spr
 **And the species-mix kill test passed** (rung 8), turning the synthesiser's copying of species
 composition from a disclosed simplification into a measured defect — now line T's principal build.
 
+⚠ **The integrator may now do any line's work directly** (owner, 2026-09-17), so "owner" below is
+who the item belongs to, not who must do it. Record `20260917-INT-*`.
+
 | open, in value order | owner | blocked on |
 |---|---|---|
-| **re-score rungs 1 and 8 on `v2-constco2`**, and restate both verdicts' wrong "constant CO₂" basis wording | **X** | nothing — v2 landed 2026-09-15 |
+| **re-score rungs 1 and 8 on `v2-constco2`** — the wording half is DONE, this is the measurement | **X** | nothing — v2 landed 2026-09-15 |
 | **stop `models/synth.py` copying species composition**; it needs its own t0–t4 pass, not just a score | **T** | nothing |
 | a NEW estimand for the emitted restart, replacing X4 | **X** | nothing |
-| the additive band floor in the shared scorer, now with a measured 0.0384 | **X** | nothing |
 | one cell, one year, two binaries, byte-compared — the only unproven rung-5 claim | **D** | nothing |
-| 38 open ledger rows whose results have ALL landed; they block every merge from 2026-09-22 | **D T X** | nothing |
+
+**Closed 2026-09-17.** The additive band floor is in the shared scorer, measured at 0.0384 and with
+no default, so a floor in stem shares cannot leak onto soil carbon; every committed number is
+reproduced bit-for-bit. All three verdicts carrying the wrong "constant CO₂" basis, and the two
+carrying the withdrawn "spin-up is not converged", now carry a correction in the same paragraph as
+the wrong sentence — the sealed pre-registrations were not edited. And **all 40 open ledger rows are
+closed**, each verified from the runs rather than from a document (6,602/6,602 spin-ups successful);
+they would have blocked every merge from 2026-09-22.
 
 **Full acceptance (rung 7) has no defensible date**: the conjunctive pass rate is 0.0351 against an
 attainable ceiling of **0.5585, not 1.0**, what closes that gap is unknown, and it needs the mid or
