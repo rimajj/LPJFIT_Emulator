@@ -142,8 +142,11 @@ def main() -> int:
     assert not np.array_equal(h1, h2), "the historical leg has no second realisation"
     assert not np.array_equal(f1, f2), f"the {args.test_leg} leg has no second realisation"
 
-    truth_future, band_own = acceptance_band_transferred(f1, f2, f1, f2)
-    _, band_transferred = acceptance_band_transferred(f1, f2, h1, h2)
+    # abs_floor=0.0 -> the purely relative band, byte-identical to every number committed before
+    # the additive floor existed. These quantities carry physical units; a floor measured in STEM
+    # SHARES (score.ABS_FLOOR_COMPOSITION) would be meaningless on them.
+    truth_future, band_own = acceptance_band_transferred(f1, f2, f1, f2, abs_floor=0.0)
+    _, band_transferred = acceptance_band_transferred(f1, f2, h1, h2, abs_floor=0.0)
     bands = {"transferred": band_transferred, "own": band_own}
 
     cfg = EmulatorConfig(n_jobs=args.n_jobs)

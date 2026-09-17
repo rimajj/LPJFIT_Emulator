@@ -180,7 +180,9 @@ def main() -> int:  # noqa: PLR0915 -- one linear procedure, reported in one pla
     n_scored = len(SCORED_CONJUNCTIVE)
 
     # The band. truth is the two controls' mean; the tolerance is max(10 %, their relative spread).
-    truth, band = acceptance_band(mats["control"], mats["control_seed2"])
+    # abs_floor=0.0 -> the purely relative band, byte-identical to every drift number committed
+    # before the additive floor existed. These are physical stocks and trait quantiles, not shares.
+    truth, band = acceptance_band(mats["control"], mats["control_seed2"], abs_floor=0.0)
     rel_band = np.where(np.abs(truth) > 0, band / np.abs(truth), np.nan)
 
     hits = {n: band_hits(m, truth, band) for n, m in mats.items()}

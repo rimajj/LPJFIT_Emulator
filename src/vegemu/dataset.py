@@ -99,7 +99,11 @@ def assemble(
     climate = leg.climate.filter(pl.Series(keep))
     s1 = matrix(leg.seed1.filter(pl.Series(keep)), quantities)
     s2 = matrix(leg.seed2.filter(pl.Series(keep)), quantities)
-    truth, band = acceptance_band(s1, s2)
+    # abs_floor=0.0 -> the purely relative band, byte-identical to every number committed before
+    # the additive floor existed. `quantities` here is the 22 of SCORED_CONJUNCTIVE, which carry
+    # physical units (gC/m2, m2/m2, stems); an absolute floor measured in STEM SHARES would be
+    # meaningless on them. Composition is scored on its own arm and passes ABS_FLOOR_COMPOSITION.
+    truth, band = acceptance_band(s1, s2, abs_floor=0.0)
     lon = np.asarray(climate["lon"].to_numpy(), dtype=np.float64)
     lat = np.asarray(climate["lat"].to_numpy(), dtype=np.float64)
     return Scored(

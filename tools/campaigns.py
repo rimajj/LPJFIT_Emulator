@@ -315,7 +315,7 @@ def _close(a: argparse.Namespace, event: str) -> int:
                 f"campaigns: --artifact-sha256 must be 64 hex characters, got {len(digest)}: "
                 f"{digest!r}\n"
                 "  This is a sha256 of the artifact, not a prefix of one. Recompute it in full:\n"
-                "  python -c \"import hashlib,pathlib;"
+                '  python -c "import hashlib,pathlib;'
                 'print(hashlib.sha256(pathlib.Path(P).read_bytes()).hexdigest())"',
                 file=sys.stderr,
             )

@@ -36,6 +36,30 @@ import polars as pl
 FLOOR = 0.10  # the 10 % in max(10 %, two-seed spread)
 
 # --------------------------------------------------------------------------------------------
+# THE ADDITIVE FLOOR. A RELATIVE band is meaningless for a quantity that lives near zero: a type
+# whose true share is 0.002 gets a band of 0.0002, and nothing -- including a second run of the
+# model itself -- can land inside it. So the band is `max(rel_spread * |truth|, abs_floor)`, and
+# `abs_floor` carries the units of the quantity.
+#
+# ⚠ THERE IS NO DEFAULT, DELIBERATELY, AND THAT IS THE WHOLE DESIGN. The measured value below is
+# in UNITS OF STEM SHARE and is meaningful for `pft_frac_*` and nothing else -- an absolute floor
+# of 0.0384 would be absurd on soil carbon (gC/m2) and merely wrong on LAI. A default would leak
+# a floor measured for one quantity onto every other, silently, which is the shape this repo keeps
+# getting bitten by. Every call site must therefore say what floor applies to ITS quantities;
+# `abs_floor=0.0` recovers the old purely-relative band exactly, and is the right answer for the
+# 22 quantities of `SCORED_CONJUNCTIVE`.
+#
+# MEASURED, NOT CHOSEN (`MEMORY.md:abs-floor-measured`, `20260915-X` record): the p90 of the
+# model's OWN absolute two-seed disagreement on type shares, over the pilot's perturbed pairs.
+# Median 0.0027, p90 0.0384, p99 0.1148. Taking p90 means the floor admits the disagreement the
+# model has with itself in 90 % of cell-quantities and no more.
+#
+# ⚠ NEVER RAISE IT TO RESCUE A FAILING TEST. A threshold chosen after seeing the values is not a
+# threshold. X4 was retired as the wrong instrument rather than rescued by a wider floor, and that
+# precedent is the reason this constant states its own provenance.
+ABS_FLOOR_COMPOSITION = 0.0384
+
+# --------------------------------------------------------------------------------------------
 # The conjunctive scored set: counts AND trait medians AND trait distributions, which is what
 # the acceptance criterion demands. 22 quantities.
 # --------------------------------------------------------------------------------------------
@@ -160,14 +184,26 @@ def relative_spread(
 
 
 def acceptance_band(
-    seed1: npt.NDArray[np.float64], seed2: npt.NDArray[np.float64], floor: float = FLOOR
+    seed1: npt.NDArray[np.float64],
+    seed2: npt.NDArray[np.float64],
+    floor: float = FLOOR,
+    *,
+    abs_floor: float,
 ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
     """(truth, band) from the two seeds. `band` is an ABSOLUTE tolerance, per cell per quantity.
 
-    truth = the two-seed mean; band = max(floor, |s1-s2|/|truth|) * |truth|.
+    truth = the two-seed mean; band = max(max(floor, |s1-s2|/|truth|) * |truth|, abs_floor).
+
+    `abs_floor` is REQUIRED and keyword-only: it carries the units of the quantities in `seed1`,
+    so no default can be right for all of them. Pass `0.0` for the purely relative band -- which
+    is byte-identical to this function before the additive floor existed -- or
+    `ABS_FLOOR_COMPOSITION` for `pft_frac_*`. See that constant for why there is no default.
     """
     truth = (seed1 + seed2) / 2.0
-    return truth, relative_spread(seed1, seed2, floor) * np.abs(truth)
+    band: npt.NDArray[np.float64] = np.maximum(
+        relative_spread(seed1, seed2, floor) * np.abs(truth), abs_floor
+    )
+    return truth, band
 
 
 def acceptance_band_transferred(
@@ -176,6 +212,8 @@ def acceptance_band_transferred(
     ref_seed1: npt.NDArray[np.float64],
     ref_seed2: npt.NDArray[np.float64],
     floor: float = FLOOR,
+    *,
+    abs_floor: float,
 ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
     """(truth, band) where the tolerance's SIZE comes from a different leg than the truth.
 
@@ -191,9 +229,15 @@ def acceptance_band_transferred(
     every summary -- median 0.03027 vs 0.03207, p90 0.16350 vs 0.16529, and 19.30 % vs 20.01 % of
     cell-quantities above the 10 % floor. State it with the number whenever a transferred band is
     used, and report the same-leg band beside it.
+
+    `abs_floor` is REQUIRED and keyword-only, for the reason given on `ABS_FLOOR_COMPOSITION`. It
+    is applied to the transferred band exactly as to the same-leg one, so the two stay comparable.
     """
     truth = (seed1 + seed2) / 2.0
-    return truth, relative_spread(ref_seed1, ref_seed2, floor) * np.abs(truth)
+    band: npt.NDArray[np.float64] = np.maximum(
+        relative_spread(ref_seed1, ref_seed2, floor) * np.abs(truth), abs_floor
+    )
+    return truth, band
 
 
 def band_hits(

@@ -173,8 +173,11 @@ def main() -> int:
             f"p90 {s['p90']:.6f} frac>floor {s['frac_above_floor']:.4f}"
         )
 
-    truth_future, band_own = acceptance_band_transferred(f1, f2, f1, f2)
-    _, band_transferred = acceptance_band_transferred(f1, f2, h1, h2)
+    # abs_floor=0.0 -> the purely relative band, byte-identical to every number committed before
+    # the additive floor existed. These quantities carry physical units; a floor measured in STEM
+    # SHARES (score.ABS_FLOOR_COMPOSITION) would be meaningless on them.
+    truth_future, band_own = acceptance_band_transferred(f1, f2, f1, f2, abs_floor=0.0)
+    _, band_transferred = acceptance_band_transferred(f1, f2, h1, h2, abs_floor=0.0)
     bands = {"own": band_own, "transferred": band_transferred}
 
     # How much actually changed. If the future state sits inside the band around the present one in
