@@ -33,11 +33,17 @@ if [[ -z "$LINE" ]]; then
   cat <<TXT
 LINE: none (branch $BRANCH, integrator worktree).
 
-This worktree is for INTEGRATION and shared edits only: merging lines, collating changelog
-fragments, MEMORY.md, config/, and cross-cutting decision records. Feature work does not belong
-here -- config/ownership.toml enforces that, and the commit guard will refuse it.
+You are the INTEGRATOR, and on the owner's instruction of 2026-09-17 you may do ANY line's work
+from here. Nothing in config/ownership.toml stops you: line exclusivity is line-vs-line and has
+never fired on main. The text that used to sit here said the opposite, and it was simply wrong.
 
-To work a line, launch a session in ITS worktree:
+Three rules still bind you, and none is about ownership -- they protect evidence, not territory:
+  * an ACCEPTED decision record is immutable; supersede it with a new one
+  * a SEALED pre-registration is immutable; supersede it with a new experiment id
+  * campaigns/*/ledger.jsonl and experiments/*/result.jsonl are append-only, written by tool
+
+Still PREFER a line's own worktree when that line is being actively worked -- one branch, one
+session, no rebase races. Scheduling advice now, not a permission boundary:
   cd $(worktree D)   # line D — data: binary formats, corpus generation, provenance
   cd $(worktree T)   # line T — training: models, GPU, inference
   cd $(worktree X)   # line X — experiments: pre-registrations, nulls, verdicts

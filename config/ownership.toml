@@ -18,7 +18,17 @@ unowned = "deny"
 inbound_tool = "tools/inbound.py"
 
 # ---------------------------------------------------------------------------
-# Exclusive: only the owning line may write these.
+# Exclusive: LINE AGAINST LINE. Only the owning line may write these FROM ANOTHER LINE'S BRANCH.
+#
+# ⚠ THE INTEGRATOR IS NOT BOUND BY THESE, and never was -- owner instruction, 2026-09-17, and the
+# code has always agreed: check_ownership.py resolves the line from the branch name, so on `main`
+# there is no line and O01 cannot fire; path-guard.sh guards each of these behind `[[ -n "$LINE" ]]`.
+# What was wrong until 2026-09-17 was the PROSE -- the session greeting told every integrator
+# session that feature work "does not belong here" and would be refused, which was false, and sent
+# session after session away to a line worktree for work it could have done on the spot.
+#
+# So these rules exist to stop line D writing line T's files, which is what keeps merges
+# conflict-free. They do not, and did not, fence off the integrator.
 # ---------------------------------------------------------------------------
 
 [[rule]]
@@ -75,7 +85,8 @@ owner = "*"
 kind = "shared"
 
 # ---------------------------------------------------------------------------
-# Integrator-only: request the change, do not make it from a line.
+# Integrator-only: request the change, do not make it from a line. (The integrator, on `main`,
+# writes these directly -- and, since 2026-09-17, everything above them too.)
 # ---------------------------------------------------------------------------
 
 [[rule]]

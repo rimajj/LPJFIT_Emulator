@@ -67,11 +67,20 @@ Rotation is mechanical: `tools/rotate_state.py <L>`, `tools/rotate_memory.py`.
 | **D** | `line/D` · `/p/projects/open/Jamir/vg-D` | data: the binary formats, corpus generation, provenance |
 | **T** | `line/T` · `/p/projects/open/Jamir/vg-T` | training: models, GPU, inference |
 | **X** | `line/X` · `/p/projects/open/Jamir/vg-X` | experiments: pre-registrations, nulls, verdicts |
-| — | `main` · `/p/projects/open/Jamir/vegemu` | integration only |
+| — | `main` · `/p/projects/open/Jamir/vegemu` | integration, **and any line's work** |
 
-One session per line at a time; your line is the branch of the directory you launched in. Ownership is
-`config/ownership.toml` (machine-read, `unowned = deny`) — not a prose table. The only sanctioned
-cross-line write is `tools/inbound.py`.
+⚠ **THE INTEGRATOR MAY DO EVERY LINE'S WORK, DIRECTLY** (owner, 2026-09-17). Exclusivity in
+`config/ownership.toml` is line-against-line and has never fired on `main`; the prose that said
+otherwise was false and cost sessions. Still prefer a line's own worktree while that line is being
+actively worked — one branch, one session, no rebase races. That is scheduling, not permission.
+
+Between lines, one session per line; your line is the branch of the directory you launched in, and the
+only sanctioned cross-line write is `tools/inbound.py`. Ownership is `config/ownership.toml`
+(machine-read, `unowned = deny`) — not a prose table.
+
+**What still binds the integrator is evidence, not territory**, and supersession is always open:
+an accepted decision record and a sealed pre-registration are immutable; `campaigns/*/ledger.jsonl`
+and `experiments/*/result.jsonl` are append-only and written by tool.
 
 **Per-line files, never per-line sections of a shared file.** Sections still conflict; files never do.
 
