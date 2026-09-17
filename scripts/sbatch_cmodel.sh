@@ -70,7 +70,25 @@ if [[ ! "$LINE" =~ ^[DTX]$ ]]; then
 fi
 
 LPJROOT="$(python3 "$REPO/tools/_paths.py" lpjml.lpjroot)"
-LPJBIN="$(python3 "$REPO/tools/_paths.py" lpjml.binary)"
+# WHICH BINARY. Default `lpjml.binary`, the Aug-12 build that produced the corpus. LPJ_BINARY_KEY
+# names a DIFFERENT key in config/paths.yaml -- it is a key, never a path, so a run can only ever
+# use a binary the provenance file already knows about, and the ledger row records which.
+#
+# ⚠ THIS EXISTS FOR ONE OUTSTANDING TEST, and until 2026-09-17 its absence WAS the blocker. Stored
+# ground truth spans three builds. The Feb-05 -> Aug-12 difference is argued inert (every
+# behavioural change sits behind unset rung-2 env vars, the restart layout is unchanged), and that
+# argument travels in `MEMORY.md:build-provenance` and in X-20260908-heldout-forcing-leg's
+# reference basis with the honest caveat "what is NOT proven is byte-equality: the decisive test --
+# one cell, one year, one restart, both binaries, byte-compare -- has not been run, because the
+# Feb-05 binary is preserved but no wrapper exists yet to run it". Now one does.
+LPJ_BINARY_KEY="${LPJ_BINARY_KEY:-lpjml.binary}"
+[[ "$LPJ_BINARY_KEY" == lpjml.* ]] || {
+  echo "sbatch_cmodel: LPJ_BINARY_KEY must be a config/paths.yaml key under lpjml." >&2
+  echo "  got '$LPJ_BINARY_KEY'; try lpjml.binary or lpjml.binary_pristine" >&2
+  exit 2
+}
+LPJBIN="$(python3 "$REPO/tools/_paths.py" "$LPJ_BINARY_KEY")" || {
+  echo "sbatch_cmodel: no such key in config/paths.yaml: $LPJ_BINARY_KEY" >&2; exit 2; }
 LPJCHECK="$(python3 "$REPO/tools/_paths.py" lpjml.lpjcheck)"
 export LPJROOT
 export LPJOUTPATH="$RUN_DIR"
@@ -291,11 +309,14 @@ if [[ -n "$MANIFEST" ]]; then
   # finished. The harvest command counts the members that printed the model's own line, and the
   # answer must be $NRUNS -- anything less is a partial campaign wearing a green exit code.
   HARVEST="grep -l '^lpjml successfully terminated' \$(awk -F'\t' 'NF{print \$3\"/lpjml.\"\$1\".log\"}' $MANIFEST) | wc -l   # must be $NRUNS"
-  CMDLINE="LPJ_DEFINES='$DEFINES' scripts/sbatch_cmodel.sh --manifest $MANIFEST $TAG"
+  CMDLINE="LPJ_BINARY_KEY='$LPJ_BINARY_KEY' LPJ_DEFINES='$DEFINES' scripts/sbatch_cmodel.sh --manifest $MANIFEST $TAG"
 else
   HARVEST="grep '^lpjml successfully terminated' logs/$TAG.$JOBID.out"
-  CMDLINE="LPJ_DEFINES='$DEFINES' scripts/sbatch_cmodel.sh $TAG $CONFIG $RUN_DIR"
+  CMDLINE="LPJ_BINARY_KEY='$LPJ_BINARY_KEY' LPJ_DEFINES='$DEFINES' scripts/sbatch_cmodel.sh $TAG $CONFIG $RUN_DIR"
 fi
+# ⚠ THE BINARY IS PART OF THE RUN'S IDENTITY, exactly as LPJ_DEFINES is: the same config under a
+# different build is a different simulation, and that is the whole point of the key existing. A
+# ledger row that did not name it could not reproduce its own run.
 echo "  $HARVEST"
 
 python3 "$REPO/tools/campaigns.py" launch \

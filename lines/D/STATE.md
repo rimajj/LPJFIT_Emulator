@@ -51,8 +51,17 @@ and that is an owner question, not a measurement.
    to north, so the first 20 of 200 are one temperate band. `tests/test_pilot_replicate.py`.
 3. **The 17 empty controls are NOT a reason to re-select cells** — 14 are the model being right,
    and dropping them narrows the envelope the design spans. `20260909-D-corpus-v1-decoded.md`.
-4. **Still owed, unchanged:** one cell, one year, two binaries, byte-compared — the only unproven
-   rung-5 claim.
+4. **Still owed:** one cell, one year, two binaries, byte-compared — the only unproven rung-5 claim.
+   ⚠ **ITS STATED BLOCKER IS GONE as of 2026-09-17.** "The Feb-05 binary is preserved but no
+   wrapper exists yet to run it" was true and is not any more: `scripts/sbatch_cmodel.sh` takes
+   `LPJ_BINARY_KEY=lpjml.binary_pristine`, validated against `config/paths.yaml` (a key, never a
+   path) and recorded in the ledger row, because the build is part of a run's identity exactly as
+   `LPJ_DEFINES` is. **The run itself has NOT been done** — that is the whole of what is left.
+   Both builds are on disk and differ (11,907,840 B Aug-12 vs 11,819,784 B Feb-05).
+   When you do it: compare the **restart** bytes; never `cmp` two NetCDF outputs, because a
+   wall-clock timestamp goes into the `history` attribute (`MEMORY.md:netcdf-cmp`). And a
+   single-cell subset run is not a per-cell replica of a global one — hold the restart, the config,
+   the year and the seed identical, so the ONLY difference is the binary.
 
 **Closed this session, do not re-open:** the ssp370 second seed (wired on main 2026-09-14), the
 carbon-sign blocker (the restart starts HIGH, not halved), and both corpus-v2 decisions.

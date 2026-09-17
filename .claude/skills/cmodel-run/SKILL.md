@@ -17,6 +17,26 @@ job and the `--check` pre-flight, so nothing below depends on what your shell ha
 TIME=00:30:00 scripts/sbatch_cmodel.sh <tag> <config.js> <run-dir>
 ```
 
+## Which build you are running — `LPJ_BINARY_KEY`, added 2026-09-17
+
+Default is `lpjml.binary`, the Aug-12 build that produced the whole corpus. To run an older one:
+
+```bash
+LPJ_BINARY_KEY=lpjml.binary_pristine scripts/sbatch_cmodel.sh <tag> <config.js> <run-dir>
+```
+
+It is a **key in `config/paths.yaml`, never a path**, so a run can only use a build the provenance
+file already knows about, and the ledger row records which one. ⚠ **The build is part of a run's
+identity, exactly like `LPJ_DEFINES`** — the same config under a different build is a different
+simulation. Stored ground truth spans **three** builds (`MEMORY.md:build-provenance`).
+
+⚠ **The outstanding test this was added for is still NOT RUN**: one cell, one year, one restart,
+both builds, byte-compare. Until it is, "the Feb-05 → Aug-12 difference is inert" stays an argument
+from inspection, not a measurement, and the caveat travels with every number from the low-emissions
+leg. When you do run it: compare the **restart** bytes, and never `cmp` two NetCDF outputs — a
+wall-clock timestamp goes into the `history` attribute, so identical physics differ in bytes
+(`MEMORY.md:netcdf-cmp`). Compare decoded variables instead.
+
 Override with `LPJ_MODULES="…"` if the binary is rebuilt against a different set. The job also
 runs `ldd` on the binary before spending its allocation, so a wrong set now fails with the missing
 library named, instead of a cryptic one-second death.
