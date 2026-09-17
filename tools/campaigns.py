@@ -303,7 +303,24 @@ def _close(a: argparse.Namespace, event: str) -> int:
     if getattr(a, "exit", None) is not None:
         row["exit"] = a.exit
     if getattr(a, "artifact_sha256", None):
-        row["artifact_sha256"] = a.artifact_sha256
+        # ⚠ VALIDATED BECAUSE THE LEDGER IS APPEND-ONLY: a wrong digest here cannot be edited out,
+        # only superseded by a later row, and a digest nobody can recompute is worse than none.
+        # Measured 2026-09-17: a 40-character string was accepted and written for
+        # D-pilot-s2-decode -- the first 16 characters of the real digest, with an invented tail,
+        # because only a truncated form had ever been printed. Nothing rejected it. The length
+        # alone would have.
+        digest = str(a.artifact_sha256).strip().lower()
+        if len(digest) != 64 or not all(ch in "0123456789abcdef" for ch in digest):
+            print(
+                f"campaigns: --artifact-sha256 must be 64 hex characters, got {len(digest)}: "
+                f"{digest!r}\n"
+                "  This is a sha256 of the artifact, not a prefix of one. Recompute it in full:\n"
+                "  python -c \"import hashlib,pathlib;"
+                'print(hashlib.sha256(pathlib.Path(P).read_bytes()).hexdigest())"',
+                file=sys.stderr,
+            )
+            return 2
+        row["artifact_sha256"] = digest
     if getattr(a, "rows_out", None) is not None:
         row["rows_out"] = a.rows_out
     append(c.line, row)
