@@ -177,6 +177,31 @@ MUST_ALLOW = [
     "grep -n pft_frac src/vegemu/corpus/state.py > /tmp/hits.py",
 ]
 
+# ---------------------------------------------------------------------------------------------
+# INSTANCE 11, measured 2026-09-18. NOT FIXED, and deliberately not fixed by the agent that found
+# it: unlike instances 1-10 this is not an accident of matching, it is the documented design.
+#
+# `find src/vegemu/corpus -name '*.py'` is refused as "heavy Python on the login node". It runs
+# nothing. It is denied because `find` is absent from SAFE_VERBS, so the keyword block is not
+# skipped; the command then mentions `.py` and contains `corpus` -- as a DIRECTORY PATH COMPONENT --
+# and both conditions are met. Measured: `find scripts -name '*.py'` is allowed and
+# `find src/vegemu/corpus -name '*.py'` is denied, so the trigger is the path, not the tool.
+#
+# WHY IT IS NOT JUST WIDENED HERE. `_lex_command.py` excludes `find` and `xargs` on purpose and
+# says why: "`-exec` and piping into a runner are their ordinary use, not an exotic one". That is
+# a real argument and `find -exec python3 ...` genuinely runs a job. The narrow change that would
+# keep it -- treat `find` as safe only when it carries no `-exec`, `-execdir`, `-ok`, `-okdir` or
+# `-delete` -- is still a WIDENING of a permission hook, and the standing rule is that the owner
+# approves those. The two widenings of 2026-09-16 were applied on an explicit owner decision.
+#
+# So it is pinned as expected-to-fail rather than asserted. When the owner rules, the marker comes
+# off and this becomes an ordinary MUST_ALLOW case -- which is exactly how the 2026-09-16 pins were
+# discharged.
+KNOWN_FALSE_DENIALS = [
+    "find src/vegemu/corpus -name '*.py'",
+    "find src/vegemu/corpus scripts -name '*.py'",
+]
+
 # The overrides the guard's own messages advertise, in the only form a Bash tool call can use.
 MUST_ALLOW_WITH_HATCH = [
     "ALLOW_LOGIN_HEAVY=1 python3 scripts/corpus_build.py --tier pilot",
@@ -275,3 +300,21 @@ def test_the_escape_hatch_is_named_the_same_way_in_the_message_and_the_check() -
     for var in ("ALLOW_LOGIN_HEAVY", "ALLOW_RAW_SBATCH"):
         # once in the prefix check, once in the message that offers it
         assert text.count(var) >= 2, f"{var} is checked or advertised, but not both"
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "instance 11, measured 2026-09-18 and unfixed: `find` is not in SAFE_VERBS, so a directory "
+        "path containing `corpus` plus a `*.py` pattern reads as a heavy job. Fixing it widens a "
+        "permission hook, which is an owner decision -- see the comment above KNOWN_FALSE_DENIALS."
+    ),
+)
+@pytest.mark.parametrize("command", KNOWN_FALSE_DENIALS)
+def test_find_over_a_corpus_path_is_wrongly_denied(command: str) -> None:
+    """`strict=True` on purpose: if the guard is widened, this goes from xfail to XPASS and FAILS.
+
+    That is the point. A pin that quietly starts passing is how a fixed defect keeps being
+    described as open; this one forces whoever fixes it to move the case into MUST_ALLOW.
+    """
+    assert verdict(command) == "allow", f"the guard refused a command that runs nothing: {command}"
