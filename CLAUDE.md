@@ -116,14 +116,17 @@ Skill: `experiment-registry` (the lifecycle, and every error code E01–E14 with
 git pull --rebase origin main            # at session start, and again before merging
 # work; commit (Conventional Commits, one logical change; the commit guard runs the checkers)
 git push --force-with-lease origin line/<L>     # the rebase rewrites pushed commits; a plain push is rejected
-tools/expected_gates.py                  # prints EXACTLY which gates this diff triggers
-tools/wait_gates.py                      # polls only those; never poll a gate that will not run
+tools/expected_gates.py --ref <sha>       # prints EXACTLY which gates this diff triggers
+tools/wait_gates.py --ref <sha>          # polls only those; never poll a gate that will not run
 tools/merge.sh <L>                       # flock'd: ff-only pull, --no-ff merge of origin/line/<L>,
                                          # collate changelog fragments, check the campaign ledger, push
 ```
 
 ⚠ **A skipped workflow reports no status at all, not "skipped"** — so polling for a gate that will not
 run hangs forever. `expected_gates.py` computes the list from the diff; if it prints none, merge now.
+⚠ **On `main`, pass `--ref <the pre-push sha>` to both.** Their default base is `origin/main`, which
+after your push is your own commit — an empty diff, so both answer "no gate will run" for every
+commit main ever carries. On a line branch the default is right and `--ref` is unnecessary.
 Never `git switch main` in a line worktree (`main` is checked out in the integration worktree; git
 refuses). Drive it with `git -C`, which `tools/merge.sh` does.
 
