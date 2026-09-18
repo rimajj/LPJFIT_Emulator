@@ -35,14 +35,32 @@ from _common import repo_root
 ANCHOR = "## Milestones"
 
 
+# What the integration branch is called in a message heading. `main` is not a line, but it IS a
+# sender -- the integrator writes to lines constantly -- and every such block already says "INT".
+INTEGRATOR = "INT"
+
+
 def current_line(root: Path) -> str:
+    """The sender token for this worktree: a line letter, or INT on the integration branch.
+
+    WHY `main` IS HANDLED EXPLICITLY. This used to return "" for any non-`line/` branch, and the
+    caller turned "" into "?" -- so every message the integrator sent without remembering
+    `--from INT` was headed "INBOUND from line ?". Six such blocks were written on 2026-09-16 and
+    are in the repository. A recipient cannot reply to "?", and cannot tell whether the block came
+    from a line that had not been created yet or from the integrator; the sender is part of what
+    makes a message actionable, so guessing it from the branch must not silently fail.
+    """
     branch = subprocess.run(
         ["git", "-C", str(root), "rev-parse", "--abbrev-ref", "HEAD"],
         capture_output=True,
         text=True,
         check=False,
     ).stdout.strip()
-    return branch.split("/", 1)[1] if branch.startswith("line/") else ""
+    if branch.startswith("line/"):
+        return branch.split("/", 1)[1]
+    if branch == "main":
+        return INTEGRATOR
+    return ""
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -56,7 +74,15 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     root = repo_root()
-    sender = args.sender or current_line(root) or "?"
+    sender = args.sender or current_line(root)
+    if not sender:
+        print(
+            "inbound: cannot tell which line is sending "
+            "(branch is neither `main` nor `line/<L>`).\n"
+            "  Pass --from explicitly. A block headed `from line ?` cannot be replied to.",
+            file=sys.stderr,
+        )
+        return 2
     if args.to == sender:
         print("inbound: that is your own line.", file=sys.stderr)
         return 2
@@ -118,8 +144,9 @@ def main(argv: list[str] | None = None) -> int:
             "check the\n  block is still in their file after any rebase that touches it.",
             file=sys.stderr,
         )
-    print("Note their STATE.md has a 120-line budget -- if this pushes them over, the")
-    print("message still lands but they will have to rotate; keep it short.")
+    print("Note this block is FREE against their 120-line budget for 14 days, and counts against")
+    print("it after that -- so an unactioned message eventually turns their build red. That is")
+    print("deliberate (it is what makes the inbox get triaged), and it is why you keep it short.")
     return 0
 
 

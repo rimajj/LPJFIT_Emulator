@@ -21,6 +21,7 @@ So the same limits now fail a commit and fail CI, and raising one is an owner ac
 
 from __future__ import annotations
 
+import datetime as _dt
 import re
 import subprocess
 import sys
@@ -57,35 +58,70 @@ def _budget_for(rel: str, budgets: list[dict]) -> dict | None:
 
 
 # A cross-line message, as `tools/inbound.py` writes it into the recipient's file and mirrors it
-# into the sender's. Matched loosely on purpose: the subject line is free text.
-_INBOUND_HEADING = re.compile(r"^##\s+(INBOUND from line|Outbound to line)\b", re.IGNORECASE)
+# into the sender's. The DATE IS REQUIRED for the exemption: it is what makes the block ageable, and
+# an undated heading is not what the tool writes, so it is counted as ordinary content.
+_INBOUND_HEADING = re.compile(
+    r"^##\s+(?:INBOUND from line|Outbound to line)\b[^(]*\((?P<date>\d{4}-\d{2}-\d{2})\)",
+    re.IGNORECASE,
+)
+
+# How long a cross-line message stays free. Two weeks, which is deliberately the same horizon
+# `tools/rotate_state.py` already prints as its own advice ("anything more than about two weeks
+# old" belongs in the journal) -- so the gate and the documented procedure now say one thing.
+#
+# NOT IN budgets.toml ON PURPOSE. Editing that file requires the owner-approval trailer (B06), and
+# this constant TIGHTENS the gate rather than lifting a cap, so it must not be something an agent
+# can quietly retune. Making it owner-tunable is an owner act.
+INBOUND_GRACE_DAYS = 14
 
 
-def _without_inbound(lines: list[str]) -> list[str]:
-    """The file minus any cross-line message block, for the purposes of the line budget.
+def _is_fresh(datestr: str, today: _dt.date) -> bool:
+    """Is this message still transient -- i.e. too new for the recipient to have triaged it?"""
+    try:
+        sent = _dt.date.fromisoformat(datestr)
+    except ValueError:
+        return False  # unparseable => not exempt; the budget is the safe default
+    return (today - sent).days <= INBOUND_GRACE_DAYS
 
-    WHY THESE LINES ARE NOT CHARGED TO THE OWNER. `tools/inbound.py` is the one sanctioned
-    cross-line write, and the budget is a repo-wide gate over every tracked file. Charged
-    naively, the two combine into a trap: line X sitting at 117 of its 120 lines has three lines
-    of headroom, an inbound block costs eight whatever its body says, and so ANY message from
-    another line turns the build red for everyone -- through no action of the recipient, who
-    cannot pre-empt it and may not open a session for days. That happened on 2026-09-10 and is
-    what prompted this.
 
-    An inbound is also not what the budget is defending against. The budget keeps DURABLE state
-    short and forces rotation; an inbound is transient by construction -- it is read, actioned,
-    and rotated away, and the tool's own header tells the recipient so. The recipient's own
-    content is still counted exactly as before, so a line cannot buy headroom by being messaged.
+def _without_inbound(lines: list[str], today: _dt.date | None = None) -> list[str]:
+    """The file minus any cross-line message block that is still FRESH.
+
+    WHY FRESH AND NOT FOREVER. The exemption is real and stays: the budget is a repo-wide gate over
+    every tracked file, so charged naively it becomes a trap that fires on the recipient. Line X
+    sitting at 117 of its 120 lines has three lines of headroom, an inbound block costs eight
+    whatever its body says, and so ANY message from another line turns the build red for everyone --
+    through no action of the recipient, who cannot pre-empt it and may not open a session for days.
+    That happened on 2026-09-10 and is what prompted the exemption.
+
+    WHY IT MUST EXPIRE. The exemption was written on the premise, stated in its own docstring, that
+    "an inbound is transient by construction -- it is read, actioned, and rotated away". Nothing
+    made that true. Rotation needs a human to add an `## ARCHIVE` heading, and an exempt block
+    creates no pressure to do it, so the inbox only ever grows: by 2026-09-18 line D's STATE.md was
+    436 lines of which 338 were 17 message blocks, all uncounted, and the gate reported it clean at
+    a budget of 120. Two of those blocks carried undischarged one-line asks against corpus v2 --
+    line T's soil-type columns and the treeless `pft_frac_*` NaN fix -- both of which said "land it
+    in the version bump, it gets more expensive after". v2 was built and declared closed without
+    either. That is invariant 9 exactly: a chore with a triggering event and no failing gate.
+
+    So a message is free while the recipient plausibly has not seen it, and after that it is theirs:
+    it has been read and actioned (rotate it) or it has not (that is the thing worth failing over).
+    The clock is the trigger the chore never had. `check_skill_hygiene` below already fails a build
+    on elapsed time alone, so this is the repo's existing shape, not a new one.
 
     A block runs from its heading to the next `## ` heading, or to the end of the file.
     """
+    today = today or _dt.date.today()
     out: list[str] = []
     skipping = False
     for ln in lines:
-        if _INBOUND_HEADING.match(ln):
-            skipping = True
-            continue
-        if skipping and ln.startswith("## "):
+        m = _INBOUND_HEADING.match(ln)
+        if m:
+            # A stale block stops any skip in progress and is counted from its own heading down.
+            skipping = _is_fresh(m.group("date"), today)
+            if skipping:
+                continue
+        elif skipping and ln.startswith("## "):
             skipping = False
         if not skipping:
             out.append(ln)
@@ -103,7 +139,12 @@ def check_line_budgets(rel: str, lines: list[str], budgets: list[dict], rep: Rep
         # Say both numbers when they differ, so "123 lines" in the editor and "115 lines" in the
         # finding do not read as a bug in the gate.
         counted = (
-            f"{n} lines" if n == len(lines) else f"{n} of {len(lines)} lines (inbound uncounted)"
+            f"{n} lines"
+            if n == len(lines)
+            else (
+                f"{n} of {len(lines)} lines "
+                f"({len(lines) - n} in messages under {INBOUND_GRACE_DAYS} days old)"
+            )
         )
         rep.add(
             rel,

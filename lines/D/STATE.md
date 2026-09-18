@@ -19,8 +19,9 @@ decode it" for two days after both had run: exactly how a session is sent to red
 manifests carry `lpjml successfully terminated`; `corpus.parquet` is 6,000 × 181 (sha256
 `9c117cb6c045fe90…`). Second seed `pilot-v1-s2` likewise: 602/602, `replicate_s2.parquet` 600 × 181.
 ✅ **All 40 ledger rows are CLOSED** (integrator, 2026-09-17) — nothing blocks the 2026-09-22 merge.
-**The v1-vs-v2 comparison owed to X is measured, in `MEMORY.md:constco2-costs-24pct`:** pinning CO₂
-costs 24 % of the forest (median vegc −24.1 %, agb −25.5 %, lai −20.6 %, soilc −5.0 %, stems +4.0 %).
+**The v1-vs-v2 comparison owed to X is measured — do NOT redo it** (`MEMORY.md:constco2-costs-24pct`):
+pinning CO₂ costs 24 % of the forest (median vegc −24.1 %, agb −25.5 %, lai −20.6 %, soilc −5.0 %,
+stems +4.0 %). That number is what decides whether rungs 1 and 8 re-score on v2 or merely re-base.
 
 **WHY v2 EXISTS, and it is the biggest thing found this week.** The spin-up was **never run at
 constant CO₂**. Its CO₂ input is a transient file and the run covers model years 1000–1999, so the
@@ -43,25 +44,27 @@ and that is an owner question, not a measurement.
 
 **Then, in order:**
 
-1. **Compare v2 against v1 and give X the number**: how far does the end state move when the CO₂
-   ramp is removed? That decides whether rungs 1 and 8 need re-scoring on v2 or merely re-basing.
-2. **The replicate machinery is built and proven** — `--seed N --subset M`, `pilot-v1-s2`, 600 runs,
+1. **The replicate machinery is built and proven** — `--seed N --subset M`, `pilot-v1-s2`, 600 runs,
    600/600 complete, and its measurement retired X4 and pinned `ABS_FLOOR` at 0.0384. A v2
    replicate is the same commands. ⚠ `--subset` is a STRIDE, not a prefix: the cell list runs south
    to north, so the first 20 of 200 are one temperate band. `tests/test_pilot_replicate.py`.
-3. **The 17 empty controls are NOT a reason to re-select cells** — 14 are the model being right,
+2. **The 17 empty controls are NOT a reason to re-select cells** — 14 are the model being right,
    and dropping them narrows the envelope the design spans. `20260909-D-corpus-v1-decoded.md`.
-4. **Still owed:** one cell, one year, two binaries, byte-compared — the only unproven rung-5 claim.
-   ⚠ **ITS STATED BLOCKER IS GONE as of 2026-09-17.** "The Feb-05 binary is preserved but no
-   wrapper exists yet to run it" was true and is not any more: `scripts/sbatch_cmodel.sh` takes
-   `LPJ_BINARY_KEY=lpjml.binary_pristine`, validated against `config/paths.yaml` (a key, never a
-   path) and recorded in the ledger row, because the build is part of a run's identity exactly as
-   `LPJ_DEFINES` is. **The run itself has NOT been done** — that is the whole of what is left.
-   Both builds are on disk and differ (11,907,840 B Aug-12 vs 11,819,784 B Feb-05).
-   When you do it: compare the **restart** bytes; never `cmp` two NetCDF outputs, because a
-   wall-clock timestamp goes into the `history` attribute (`MEMORY.md:netcdf-cmp`). And a
-   single-cell subset run is not a per-cell replica of a global one — hold the restart, the config,
-   the year and the seed identical, so the ONLY difference is the binary.
+3. **Still owed:** one cell, one year, two binaries, byte-compared — the only unproven rung-5 claim.
+   ⚠ **Its stated blocker is gone (2026-09-17):** `scripts/sbatch_cmodel.sh` takes
+   `LPJ_BINARY_KEY=lpjml.binary_pristine` — a key validated against `config/paths.yaml`, never a
+   path — and records it in the ledger row, so **only the run itself is left**. Both builds are on
+   disk and differ (11,907,840 B Aug-12 vs 11,819,784 B Feb-05). Compare the **restart** bytes;
+   never `cmp` two NetCDF outputs (a wall-clock timestamp goes into `history`,
+   `MEMORY.md:netcdf-cmp`). Hold the restart, config, year and seed identical so the ONLY difference
+   is the binary — a single-cell subset run is not a per-cell replica of a global one.
+
+⚠ **TWO OF T's ASKS MISSED THE v2 BUMP, and both said they had to be in it** (found 2026-09-18 in
+the source, not a document): the four soil columns are absent — `CLIMATE_FEATURES` has only
+`soildepth` — and `corpus/state.py:106` still writes 0.0 not NaN into `pft_frac_*` for a treeless
+cell, so `score.blank_treeless_composition` stays load-bearing at 4 sites. **Neither is free now** —
+both change what a decode produces, so the pinned `corpus.parquet` would no longer match its own
+code. Owner's call. Record: `20260918-INT-the-inbox-exemption-never-expired-*.md`.
 
 **Closed this session, do not re-open:** the ssp370 second seed (wired on main 2026-09-14), the
 carbon-sign blocker (the restart starts HIGH, not halved), and both corpus-v2 decisions.
