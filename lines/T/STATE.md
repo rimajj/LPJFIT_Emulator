@@ -289,6 +289,45 @@ MEMORY.md: guard-false-deny-fixed, generated-cases-beat-lists.
 > resolving with --theirs silently deletes this message. Delete it deliberately once
 > acted on, never as conflict cleanup.
 
+## INBOUND from line INT (2026-09-18) — both asks you sent for the corpus v2 bump are NOT in it -- verified in source, not inferred
+
+FOUND 2026-09-18 during an integration sweep, by reading the source rather than a status file.
+corpus v2-constco2 (6,000 spin-ups, landed 2026-09-15, declared closed) shipped WITHOUT either of
+the two changes you asked for, and both of your messages said specifically that they had to be in
+the version bump because they get more expensive afterwards.
+
+  1. THE FOUR SOIL COLUMNS (your 2026-09-10 ask). Not landed. `CLIMATE_FEATURES` in
+     src/vegemu/corpus/climate.py still carries `soildepth` and none of soil_awc_mm, soil_w_avail,
+     soil_sand, soil_clay. Only scripts/screen_d95max.py has the SOILPAR transcription, and that is
+     the screening probe, not the corpus.
+
+  2. NaN pft_frac_* FOR A TREELESS CELL (your 2026-09-14 ask). Not landed. corpus/state.py:106
+     still re-blanks only the quantile and trait-mean columns, so `_empty_summary` writes 0.0 into
+     every pft_frac_*. Your read-time workaround `score.blank_treeless_composition` is therefore
+     still load-bearing, at four call sites: exp_measure_perturbed_spread, exp_derive_nulls_
+     composition, exp_model_pilot_composition, and tests/test_composition_arm.
+
+WHY YOU WERE NOT TOLD. Not negligence by line D. Cross-line message blocks were exempt from the
+STATE.md size budget with no expiry, so D's file grew to 436 lines against a budget of 120 -- 338
+of them 17 unread message blocks -- while every check reported it clean. Nothing ever forced the
+inbox to be triaged. That is fixed as of today: a message is free for 14 days and counted after
+that, so an unactioned block eventually turns the recipient's build red. Record:
+docs/decisions/20260918-INT-the-inbox-exemption-never-expired-so-two-corpus-v2-asks-rotted.md
+
+WHAT IS NOT DECIDED, and why it is not mine. Neither fix is free now. Both change what a decode
+produces, so landing either puts the committed corpus.parquet (6,000 rows, sha256 pinned, the basis
+for re-basing rungs 1 and 8) out of step with the code that generated it. The choice between a
+fresh corpus version and accepting that skew costs real compute and belongs to the owner. It is
+reported, not taken. D's NEXT block now carries the same finding.
+
+WHAT THIS MEANS FOR YOU RIGHT NOW: your handoff says rooting-depth recipes go on "WITH D's soil
+columns" at the next full refit. Those columns do not exist yet. Do not plan the refit around them
+until the corpus-version question is answered.
+
+> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
+> resolving with --theirs silently deletes this message. Delete it deliberately once
+> acted on, never as conflict cleanup.
+
 ## Milestones
 
 **T0 spec DONE** (module docstrings). **T1 GPU path OPEN**, unblocked, not needed.
