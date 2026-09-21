@@ -1,0 +1,292 @@
+schema_version: 1
+
+exp_id: X-20260921-pilot-composition-response-constco2-resealed
+line: X
+
+status: sealed
+
+supersedes: X-20260921-pilot-composition-response-constco2
+
+title: "CAN THE SPECIES MIX SHIFT, AND CAN THAT BE LEARNED, WHEN THE FOREST IS ACTUALLY STATIONARY"
+question: >
+  Shown a cell's real present-day forest and a perturbed climate, can the emulator predict HOW THE
+  SEVEN TREE TYPES' STEM SHARES CHANGE better than the best information-free competitor -- when the
+  target state is a genuine equilibrium rather than a forest still climbing a CO2 ramp?
+
+  X6 (`X-20260914-pilot-composition-response`) answered YES on pilot corpus v1, at 0.425610 against
+  a bar of 0.337858, and that is what turned the synthesiser's copying of species composition from
+  a disclosed simplification into a MEASURED capability gap -- currently line T's principal build.
+  A finding that redirects a line's work should not rest on a corpus whose end state is not the
+  product's target. v1's spin-up ran against a transient CO2 file, so its last 300 years carry a
+  +32.8 % CO2 rise; corpus v2-constco2 pins CO2 and re-runs the identical design, and the resulting
+  forest holds 24 % less vegetation carbon.
+
+  ⚠ AND COMPOSITION IS THE ARM WHERE A CO2 CHANGE IS MOST LIKELY TO BITE, WHICH IS WHY THIS IS NOT
+  BOOKKEEPING. CO2 fertilisation is not type-neutral in LPJmL-FIT: it acts through photosynthesis
+  and water-use efficiency, so a CO2 ramp is itself a competitive re-weighting between types. Some
+  of the shift X6 measured could have been the corpus's CO2 transient rather than its climate
+  perturbation. THE FALSIFIABLE CLAIM: the learnable composition response is a CLIMATE response and
+  survives with CO2 held fixed, clearing a bar derived from v2's own nulls by the same construction
+  X6 used.
+
+  If it does not, the case for building a composition head weakens, and line T's principal build
+  was redirected by a CO2 artefact.
+
+estimand:
+  name: skill_composition_mean
+  definition: >
+    UNCHANGED FROM X-20260914-pilot-composition-response, deliberately and to the letter. Only the
+    corpus varies.
+
+    For each of the seven tree PFTs, the type's STEM SHARE is bincount(type ids) / total stems in
+    the cell's end-of-spin-up roster. Compute
+    1 - SUM((dpred - dtrue)^2) / SUM(dtrue^2) pooled over all scored (cell, climate) pairs, where
+    dtrue = share(cell, perturbed point) - share(cell, control) is a WITHIN-CELL PAIRED CONTRAST.
+    The statistic is the unweighted mean of the seven.
+
+    ⚠ THE THREE THINGS THAT MUST TRAVEL WITH ANY NUMBER FROM THIS ESTIMAND, unchanged from X6 and
+    restated because they are what makes it readable. (1) Shares count STEMS, NOT BIOMASS, so a type
+    that is numerically rare but holds the canopy scores small. (2) The seven shares SUM TO 1, so
+    only six are free and no single term is independent evidence. (3) It is scored ONLY where a
+    forest existed at both ends -- 5,258 of 5,800 pairs on this corpus, the identical count to v1 --
+    which tilts what remains toward the milder perturbations.
+
+    ⚠ THIS IS A SEPARATE ESTIMAND FROM THE RESPONSE TEST AND THE TWO ARE NEVER SUMMED OR AVERAGED.
+    `RESPONSE_QUANTITIES` is a sealed experiment's estimand and its score only reproduces while that
+    tuple has exactly seven members; appending the composition columns to it would silently redefine
+    a sealed experiment. A test in the repository asserts that tuple is untouched.
+
+    TREELESS HANDLING. `corpus/state.py` still writes 0.0 into `pft_frac_*` for a cell with no
+    stems, so `score.blank_treeless_composition` masks those columns at read time, exactly as in X6.
+    A share at zero stems is 0/0 -- undefined, not zero -- and left in it reads as "type 3's share
+    fell from 0.81 to 0.00", which is the cell going treeless, an event `stems_per_patch` already
+    scores in full in the response test. 493 pairs are dropped because the CONTROL has no mix and 49
+    because the ARM went treeless, 542 of 5,800 -- the identical bookkeeping to v1, because constant
+    CO2 does not change which cells can hold a forest. Every arm is scored on the IDENTICAL set (the
+    pairs where the truth is defined) and a missing prediction is imputed as NO CHANGE, so no arm is
+    scored on an easier subset than its competitors.
+  reference_basis: >
+    LPJmL-FIT 5.6.004, binary built 2026-08-12 -- ONE binary for all 6,000 runs. Pilot corpus
+    v2-constco2: 200 cells x 30 climates x 1 seed, each a single-cell 1000-year spin-up, npatch=25,
+    tree PFTs only, base climate window 1970-1999. Shares are read from the end-of-spin-up restart
+    file, which is UNCENSORED, so every stem counts including those under the 5 m cut the per-tree
+    text output applies. Cell eligibility was stems_total > 0 in the historical seed-1
+    end-of-spin-up restart = 56,986 cells, NOT the acceptance criterion's 54,020. Dimensionless; a
+    ratio of sums of squares, i.e. a ratio and not a level.
+
+    ⚠ CO2 IS CONSTANT AT 276.59 ppm, AND THIS TIME THAT SENTENCE IS TRUE. Every run reads its own
+    constant CO2 forcing file. The same sentence in X-20260914's reference basis was NOT true of v1
+    and has been corrected in that experiment's verdict. The emulator still never sees CO2 as a
+    feature and must not respond to it (invariant 8): pinning CO2 removes a confound from the
+    TARGET, it does not add an input.
+
+    ⚠ THE TARGET IS NOW AN EQUILIBRIUM. X-20260914 inherited the disclosure that the 1000-year
+    spin-up is not converged; that was a forced CO2 response read as drift and is WITHDRAWN. With
+    CO2 pinned the trajectory is flat to +0.15 %/century. Record:
+    `docs/decisions/20260915-D-the-spinup-did-converge-the-late-rise-is-transient-co2.md`.
+  units: dimensionless
+  kind: ratio
+
+data:
+  corpus: /p/tmp/jamirp/vegemu/corpus/pilot-v2-constco2
+  # The corpus's own decoded table (corpus.parquet, 6,000 x 181), which identifies the CORPUS
+  # VERSION. `plan_sha256` is cells x design and is IDENTICAL to v1's -- the guarantee this
+  # comparison rests on: same 200 cells, same 30 design points, CO2 forcing the only difference.
+  #
+  # ⚠ THE MODEL ARM DOES NOT READ corpus.parquet. It reads the 78-column decode named in the
+  # leakage checks below, because `build_features` would otherwise absorb corpus.parquet's extra
+  # 103 columns into the feature set. The wide table is the version anchor, the narrow one is the
+  # input, and they come from the same `summarise_cell` over the same 6,000 restarts.
+  corpus_sha256: "9c117cb6c045fe90692fbee431dc3a33bf6ced1e4d5e7f4fb2350a1bce16903c"
+  plan_sha256: "bad787ade3fc609b25cf8ebc87dfd0978e4a869068d9408c73945ec3dc667f99"
+  n_rows: 5258
+
+  split:
+    kind: blocked_spatial
+    k: 5
+    seed: 42
+    block_degrees: [15, 5]
+
+  leakage_checks:
+    - "A held-out cell's 29 perturbed states are held out TOGETHER with the cell: the fold is assigned per cell, never per (cell, climate) pair."
+    - "The held-out cell's CONTROL composition IS an input, deliberately and disclosed -- it is the template roster the synthesiser copies today, and it is exactly what the proportional nulls use, which is what makes them fair competitors."
+    - "Whole 15-degree tiles are held out together via vegemu.score.blocked_spatial_folds, the same function that assigned the folds in the null derivation; 164 populated 15-degree tiles and 194 at 5 degrees, identical to v1 because v2 reuses v1's cell list exactly."
+    - "The feature set excludes lon, lat and cell id; only the nearest_cell_response null sees coordinates."
+    - "CO2 is never a feature. On THIS corpus it is also a constant, so it cannot carry information even accidentally (invariant 8)."
+    - "Every arm is scored on the identical pair set -- the pairs where the TRUTH is defined -- and a missing prediction is imputed as no change, so no arm can buy skill by declining the hard rows. The imputation count is reported per arm, per quantity."
+    - "NO v1 ARTEFACT REACHES THIS RUN. The model arm is given `--version pilot-v2-constco2` and `--cache /p/tmp/jamirp/vegemu/exp/X-pilot-decode-v2corpus/state_pilot-v2-constco2.parquet`; v1's table has identical shape and column names, so a mis-pointed cache would score silently and wrongly -- the run's metrics.json records the cache path."
+    - "⚠ THE CACHE IS THE 78-COLUMN DECODED STATE TABLE, NOT THE 181-COLUMN `corpus.parquet`, AND THE DISTINCTION IS THE WHOLE FEATURE SET. This arm shares `build_features` with the response experiment, and it turns EVERY column that is not in FORBIDDEN into a control feature -- so handing it `corpus.parquet` would silently add that table's 103 climate-feature and design-axis columns to the 75 state features X6's model arm was given. `state_pilot-v2-constco2.parquet` is VERIFIED to carry the identical 78 column names in the identical order as the `state_pilot-v1.parquet` X6 consumed, with no non-numeric column. That is what makes the two scores comparable at all."
+    - "THE TWO DECODES OF v2 AGREE BIT-FOR-BIT ON WHAT IS SCORED. Both tables come from `vegemu.corpus.state.summarise_cell` over the same 6,000 restarts; re-deriving the response nulls from the second reproduced all seven values from the first to 0.0e+00 (jobs 2262326 and 2262385). The composition nulls sealed here were first derived on `corpus.parquet` (job 2262329) and RE-DERIVED on this exact cache (job 2262392) before this file was sealed: all seven values and the ceiling reproduce to 0.0e+00, so the sealed numbers are not sensitive to which decode produced them."
+
+nulls:
+  # Construction and tolerances are X-20260914's, unchanged. Only the VALUES are re-derived, because
+  # the corpus changed. Each was measured out of fold on the v2 table by
+  # scripts/exp_derive_nulls_composition.py, job 2262329, before this file was written and before
+  # the model arm was submitted.
+  - id: no_response
+    description: >
+      Predict no change in any share, in every cell at every level. The decisive floor: does the
+      emulator do anything at all better than saying the species mix stays as it is?
+    expected:
+      statistic: skill_composition_mean
+      value: 0.0
+      tolerance: 0.000001
+      derivation: >
+        ANALYTIC and exact -- with dpred = 0 the numerator equals the denominator. It stays pinned
+        at exactly 0.0 only because a missing prediction is imputed as no change, which is what this
+        null says everywhere. Confirmed at 0.000000 on pilot-v2-constco2, job 2262329.
+
+  - id: level_mean_response
+    description: >
+      Every held-out cell is given the MEAN share change of the training cells at that same design
+      point. "The climate perturbation shifts the mix the same way everywhere."
+    expected:
+      statistic: skill_composition_mean
+      value: 0.032731
+      tolerance: 0.01
+      derivation: >
+        Measured out of fold under 15-degree blocking, job 2262329, reproduced exactly on the model
+        arm's own cache in job 2262392; 0.039256 at 5 degrees. Barely
+        moved from v1's 0.034332. It is near zero on both corpora, and that is the shape of the
+        problem this estimand exists to measure: which types replace which is a cell-specific fact,
+        not a global one.
+
+  - id: proportional_median_response
+    description: >
+      THE BEST NULL, and the one the emulator actually has to beat. Every held-out cell is given the
+      MEDIAN FRACTIONAL share change of the training cells at that design point, applied to its own
+      control shares: "every type changes by the same fraction of the share it already holds."
+    expected:
+      statistic: skill_composition_mean
+      value: 0.160203
+      tolerance: 0.01
+      derivation: >
+        Measured out of fold under 15-degree blocking, job 2262329; 0.165348 at 5 degrees. Slightly
+        WEAKER than on v1 (0.177858), unlike the response arm's best null, which strengthened. The
+        two move in opposite directions because they measure different things: a smaller forest is
+        better described by a common fractional change in its STOCKS, and less well by a common
+        fractional change in its MIX.
+
+  - id: proportional_mean_response
+    description: >
+      The same construction with the donor fractions aggregated by MEAN instead of median. On the
+      record as a measurement rather than as a remark: it is the obvious way to build the null and
+      it is unusable.
+    expected:
+      statistic: skill_composition_mean
+      value: -18.041954
+      tolerance: 1.0
+      derivation: >
+        Measured, job 2262329; -17.503925 at 5 degrees. It fails because a near-zero control share
+        in the denominator sends a few donor ratios enormous, which then multiply onto types that
+        are abundant elsewhere. v1 returned -27.619377 under the same construction. A heavy-tailed
+        ratio needs a median.
+
+  - id: nearest_cell_response
+    description: "Copy the share change of the geographically nearest TRAINING cell at the same design point. The pure spatial-address null."
+    expected:
+      statistic: skill_composition_mean
+      value: -0.328520
+      tolerance: 0.01
+      derivation: >
+        Measured, job 2262329; -0.277500 at 5 degrees. NEGATIVE: copying a neighbour's composition
+        shift is worse than predicting no shift at all. v1: -0.357056.
+
+  - id: nearest_analogue_response
+    description: "Copy the share change of the climatically most similar TRAINING cell -- nearest in the five standardised baseline coordinates the design varies. THE space-for-time null."
+    expected:
+      statistic: skill_composition_mean
+      value: -0.340200
+      tolerance: 0.01
+      derivation: >
+        Measured, job 2262329; -0.268802 at 5 degrees. Also negative, on both corpora (v1:
+        -0.366684). Space-for-time substitution does not transfer the roster -- which is the same
+        conclusion the response test reaches for the trait medians.
+
+  - id: shuffled_cells
+    description: "The true share change, permuted across cells within each design point. The sanity null."
+    expected:
+      statistic: skill_composition_mean
+      value: -0.839838
+      tolerance: 0.05
+      derivation: >
+        Near -1 by construction. Measured at -0.839838, identical at both blocking radii since the
+        permutation does not use the folds. v1: -0.835107.
+
+decision_rule:
+  statistic: skill_composition_mean
+  comparator: model_minus_best_null
+  pass_if: "> 0.140"
+  arms: [model, no_response, level_mean_response, proportional_median_response, proportional_mean_response, nearest_cell_response, nearest_analogue_response, shuffled_cells]
+  multiplicity: none
+  power_note: >
+    THE THRESHOLD IS RE-DERIVED FROM v2's OWN NULLS BY EXACTLY THE CONSTRUCTION X-20260914 USED, AND
+    IT IS NOT INHERITED -- neither from X6 nor from the sibling response experiment, whose threshold
+    is a different number for a different estimand. Under `model_minus_best_null` the no-power rule
+    scores each null on the model's own comparator, so what constrains the threshold is the gap
+    between the best null and the RUNNER-UP. On v2, proportional_median_response beats
+    level_mean_response by 0.127472 at 15 deg and by 0.126092 at 5 deg; the larger gap is 0.127472.
+    X-20260914 set 0.160 against a larger gap of 0.148198, leaving 0.011802 of headroom. The same
+    headroom here gives 0.139274, rounded up to 0.140 -- which clears the larger gap with 0.012528
+    to spare, and which no null satisfies at either radius.
+
+    A pass therefore requires the model to reach 0.300203, against X6's bar of 0.337858. ⚠ THE BAR
+    IS LOWER THAN X6's AND THAT IS NOT A WEAKENED TEST -- it is the same rule applied to a best null
+    that is itself weaker on this corpus. The two headline numbers must each be read against their
+    own bar; they are not interchangeable and neither are the bars.
+
+    ⚠ THE LARGE SEPARATION IS WHY THE BAR IS HIGH, NOT A REASON IT IS LOW. A null that far ahead of
+    its runner-up is a null that would otherwise pass, so it raises the threshold by exactly the
+    amount it demonstrates the test is well powered.
+
+    If any null returns something other than its stated value the outcome is `invalid`, not fail.
+    If any null satisfies pass_if the estimand has no power and the outcome MUST be `invalid`.
+
+  ceiling_note: >
+    ⚠ A PASS IS READ AGAINST 0.862853, NEVER AGAINST 1.0. LPJmL-FIT is stochastic and the target is
+    a paired contrast of single runs, so a perfect emulator predicts the noise-free change and its
+    residual is the model's own realisation noise. Re-derived on the v2 contrasts, job 2262329:
+    0.862853 at rho = 0 (independent noise, the CONSERVATIVE LOWER BOUND) and 0.931426 at rho = 0.5.
+    Per type at rho = 0: 0.9790 / 0.7385 / 0.9042 / 0.9817 / 0.9731 / 0.7615 / 0.7019. The bar of
+    0.300203 is 34.8 % of that lower bound. It is within 0.001 of v1's 0.863852, as expected: sigma
+    comes from the same two ground-truth restarts in both cases.
+
+    ⚠ AND THAT IS ALSO ITS WEAKNESS, WHICH v1's CEILING DID NOT CARRY. Those two ground-truth runs
+    were spun up under the TRANSIENT CO2 path, so a noise magnitude measured on a CO2-forced forest
+    is being applied to contrasts from a constant-CO2 forest. The direction of the error is not
+    known. Pinning it properly needs a second seed of the v2 corpus, which does not exist and is not
+    requested by this experiment. The ceiling is quoted as a bound with this caveat attached.
+
+    The control and perturbed arms also share a random seed, so the true ceiling lies between
+    rho = 0 and rho = 1 for that reason as well.
+
+  outcomes_note: >
+    THREE DISTINGUISHABLE RESULTS, ALL PRE-NAMED BEFORE THE RUN.
+    (a) model > 0.300203 -- the composition response is learnable on a stationary forest, so it is a
+    CLIMATE response and not a CO2 artefact. This is the outcome that keeps line T's composition
+    head justified, and only this one lets the justification be stated without the v1 CO2 caveat.
+    (b) model beats proportional_median_response but by 0.140 or less -- a real but insufficient
+    signal once CO2 is pinned. That would mean part of what X6 measured was the corpus's CO2
+    transient re-weighting the types, and line T's principal build rests on a weaker footing than
+    the 0.4256 headline implies. It licenses one more arm, not a retraction.
+    (c) model <= proportional_median_response -- the composition response is not learnable here at
+    all. ⚠ (c) IS NOT EVIDENCE THAT COMPOSITION DOES NOT RESPOND: the leading type still changes in
+    24.6 % of scored pairs on this corpus by the simplest test there is (v1: 24.9 %), so (c) would
+    be a statement about learnability from these features, never about the model's physics. It would
+    however mean the measured defect that redirected line T was corpus-dependent, and line T must be
+    told in the same session.
+    ⚠ NONE of the three licenses a claim about composition under a SCENARIO leg: this ensemble
+    identifies the response by construction and the scenario legs do not identify it at all
+    (`X-20260908-heldout-forcing-leg`, outcome (c)).
+    ⚠ NONE of the three is a fidelity claim. 200 of 54,020 cells; the acceptance criterion is
+    untouched by any outcome here.
+
+compute:
+  launcher: scripts/sbatch_py.sh
+  tag: X-composition-constco2b
+  partition: priority
+  est_core_hours: 4
+
+outputs:
+  - path: /p/tmp/jamirp/vegemu/exp/X-20260921-pilot-composition-response-constco2-resealed/metrics.json
+    kind: metrics
