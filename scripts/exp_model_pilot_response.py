@@ -256,7 +256,12 @@ def decide(
     }
 
 
-def main() -> int:
+def _parser() -> argparse.ArgumentParser:
+    """Split out of `main` so the option list can grow without pushing it over PLR0915.
+
+    The statement-count limit is worth keeping on `main` -- it is the function that does the
+    fitting and the scoring -- and argparse calls are the cheapest statements in it.
+    """
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--version", default="pilot-v1")
     ap.add_argument("--out", required=True)
@@ -276,7 +281,11 @@ def main() -> int:
         default="X-20260909-pilot-warming-response",
         help="stamped into the output for append_result.py",
     )
-    args = ap.parse_args()
+    return ap
+
+
+def main() -> int:
+    args = _parser().parse_args()
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)

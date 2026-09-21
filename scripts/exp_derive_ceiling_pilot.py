@@ -172,12 +172,16 @@ def main() -> int:
     # pilot-v2-constco2 it printed a v2 ceiling directly beneath "bar to pass = 0.225690", which is
     # v1's bar against v1's nulls -- the exact shape of a wrong number a verdict then quotes. The
     # defaults keep every earlier invocation byte-identical; a run on another corpus passes its own.
-    ap.add_argument("--bar", type=float, default=0.225690, help="the pass bar to test reachability against")
-    ap.add_argument("--best-null", type=float, default=0.145690, help="the best null the bar was built on")
+    ap.add_argument(
+        "--bar", type=float, default=0.225690, help="the pass bar to test reachability against"
+    )
+    ap.add_argument(
+        "--best-null", type=float, default=0.145690, help="the best null the bar was built on"
+    )
     ap.add_argument(
         "--bar-source",
         default="X-20260909-pilot-warming-response, pilot-v1",
-        help="which pre-registration --bar/--best-null come from; printed so the pair cannot be read as this corpus's own",
+        help="where --bar/--best-null come from; printed so they cannot be read as this corpus's",
     )
     args = ap.parse_args()
 
