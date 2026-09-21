@@ -13,61 +13,63 @@ does not build models (T) or generate data (D).
 
 ## NEXT — start here
 
-**Three things closed on 2026-09-15, and the oldest open item on this line is one of them.**
+**BOTH KILL TESTS RE-PASS WITH CO2 PINNED (2026-09-21), so neither result was a CO2 artefact** —
+this closes what PLAN.md carried as the top open item. `v2-constco2` holds 24 % less vegetation
+carbon than v1, so neither pass implied the other, and composition was the arm genuinely at risk:
+CO2 fertilisation is not type-neutral, so a ramp is itself a re-weighting between types.
 
-* **X6 `X-20260914-pilot-composition-response` — PASS.** 0.425610 against the sealed bar of
-  0.337858 and best null 0.177858; passes at 5 deg too. **All seven nulls returned their
-  pre-registered values**, so it is a pass and not an `invalid`. Quote it as **49 % of the
-  attainable 0.863852**, and say that ceiling is still a lower bound. Verdict is rendered and
-  committed. Consequence for line T: the synthesiser copying species composition is now a MEASURED
-  defect, and that is its principal build.
-* **X4 — RETIRED AS THE WRONG INSTRUMENT, not as a fail.** D's replicate measured the perturbed
-  two-seed spread at **0.0301**, essentially identical to present-day's 0.0310, with 20.4 % of
-  cell-quantities above the floor either way. The pre-stated branch was: near 0.29 it seals, near
-  0.10 the conjunctive level statistic is the wrong instrument. It came in at 0.03, below even the
-  low branch, so the 10 % floor dominates 79.6 % of cell-quantities and the nulls will keep
-  collapsing. ⚠ **Do NOT rescue it by widening the floor** — that is a threshold chosen after seeing
-  the values. **A replacement needs a NEW ESTIMAND**, and writing it is this line's next job.
-* **The transferred band is vindicated.** Every band applied to a perturbed state so far took its
-  tolerance from present-day climate on an unverified assumption. The two spreads agree to 0.001, so
-  **nothing scored to date needs recomputing** and the 2026-09-14 "up to 29 %, unmeasured" caution
-  is discharged.
+| | model | bar | best null | ceiling (rho=0) | v1 was |
+|---|---|---|---|---|---|
+| warming response | **0.558968** | 0.257725 | 0.162725 | 0.848545 | 0.545304 / 0.225690 |
+| composition | **0.445852** | 0.300203 | 0.160203 | 0.862853 | 0.425610 / 0.337858 |
 
-**Line X's own next actions, in order:**
+`X-20260921-pilot-{warming,composition}-response-constco2-resealed`. All fourteen nulls returned
+their pre-registered values EXACTLY, so neither is `invalid`. Quote as **65.9 %** and **51.7 %** of
+their ceilings, never against 1.0, never summed — different estimands.
 
-1. **A new estimand to replace X4.** The level-conjunctive statistic cannot work at a 10 % floor;
-   what can is an open question, and it is the interesting one. It needs no new corpus.
-   **⚠ THIS IS NOW THIS LINE'S ONLY OPEN DESIGN QUESTION** — 2 and 3 below are done.
-2. ✅ **DONE 2026-09-17 (integrator, on the owner's instruction).** The additive band floor is in
-   `src/vegemu/score.py`: `band = max(rel_spread × |truth|, abs_floor)`, with
-   `ABS_FLOOR_COMPOSITION = 0.0384` carrying its own provenance. **`abs_floor` is required and
-   keyword-only — there is no default**, so a floor measured in stem shares cannot leak onto soil
-   carbon. All five existing call sites pass `abs_floor=0.0`, which reproduces every committed
-   number bit-for-bit; `tests/test_band.py` pins that, and pins that the parameter stays required.
-   `SCORED_CONJUNCTIVE` is deliberately untouched: adding `pft_frac_*` to it would silently
-   redefine sealed estimands, so it belongs with item 1.
-3. **Re-base rungs 1 and 8 on corpus `v2-constco2`.** D landed it on 2026-09-15 (6,000/6,000,
-   verified again 2026-09-17), so this is unblocked and is the bigger half of the old item 3.
-   ✅ **The wording half is DONE 2026-09-17**: all three affected verdicts now carry a marked
-   correction appended to their own reference-basis paragraph, so the wrong sentence cannot be read
-   without it — X-20260909 and X-20260914 for "constant CO2 and CO2 never written" *and* the
-   withdrawn "spin-up is not converged", and X-20260908-heldout-forcing-leg for citing the
-   superseded record. **The sealed pre-registrations keep the original wording and were not
-   edited.** No score moved; every run shares one CO₂ path.
+⚠ **EACH BAR WAS RE-DERIVED FROM v2's OWN NULLS**, by each original's own rule. So the response bar
+ROSE (its best null is harder on v2) and the composition bar FELL. **Compare each score against its
+own bar** — the raw numbers are not interchangeable and neither are the bars.
 
-⚠ **THE CO₂ FINDING, because it touches two of this line's verdicts.** The spin-up runs model years
-1000–1999 against a transient CO₂ file, so its last 300 years carry +32.8 % CO₂ and vegetation
-carbon follows at +5.53 %/century (r = +0.987) against +0.15 %/century while CO₂ is pinned. The
-"spin-up has not converged" disclosure that appears in the X-20260909 verdict's reference basis and
-in two decision records is therefore **withdrawn**. Record:
-`docs/decisions/20260915-D-the-spinup-did-converge-the-late-rise-is-transient-co2.md`.
+**FOUR THINGS THAT MUST TRAVEL WITH THOSE NUMBERS.**
+1. **Blind arm 0.362322** → the headline is **64.8 % blind skill** and the forcing-attributable
+   part is **+0.196646**, within 0.001 of v1's +0.195842. Scrambled (0.331019) falls below blind,
+   so the model does read the forcing. Job 2262406.
+2. **Composition loses to no-change at 2 of 29 levels** — `core_t+0_p13` (−0.0882), `lhs10`
+   (−0.0665), both cold; the response arm wins 29 of 29. Not enough to overturn either pooled
+   number, but it is the shape of the remaining gap.
+3. **Both ceilings borrow their noise from the two ground-truth spin-ups, which ran under the
+   TRANSIENT CO2 path**, applied here to constant-CO2 contrasts. Error direction unknown; pinning
+   it needs a v2 second seed, which does not exist and was not requested.
+4. 200 of 54,020 cells: no fidelity claim, acceptance criterion untouched, nothing about a leg.
 
-**Owed by other lines:** D — harvest and decode `v2-constco2`, then the v1-vs-v2 comparison.
-T — stop `models/synth.py` copying composition. Both are launched or unblocked; nothing of X's
-waits on either.
+**THIS LINE'S NEXT ACTIONS, in order:**
 
-**Still true:** X5 `pass` 0.545304 (bar 0.225690), and the blind arm at 0.349462 must travel with it
-— the headline is 64 % blind skill. X3 `fail` at pre-named outcome (c).
+1. **A new estimand to replace X4** — still the only open DESIGN question here, unblocked, needs no
+   new corpus. The level-conjunctive statistic cannot work at a 10 % floor. ⚠ Do NOT widen the floor.
+2. **Move the forcing-attributable +0.196646.** With the corpus question settled, the BLIND ARM at
+   0.362322 is the competitor that matters, not the nulls. Making blindness the DECISION competitor
+   needs its own exp_id — it would force the bar to ~0.56, a harder question, not a re-run.
+3. **A blind arm for COMPOSITION has never been run**, so how much of the 0.4459 comes from the
+   forcing rather than from knowing the starting roster is unmeasured. The ablation script exists.
+
+⚠ **TWO SEALED EXPERIMENTS TRIP E13 ON 2026-10-21 AND NOTHING CAN BE DONE UNDER TODAY'S RULES.**
+`X-20260921-pilot-{warming,composition}-response-constco2` (no `-resealed`) were sealed then
+superseded within the hour, before any job ran. They cannot be marked `abandoned:`: E13 says add
+that key to the pre-registration, E03 rejects any edit to a sealed file by hash — measured both
+ways today. Finding and the two candidate repairs:
+`docs/decisions/20260921-INT-a-sealed-experiment-cannot-be-marked-abandoned-*.md`. **Recommended
+repair is an append-only `abandoned` row in the registry, NOT an E03 carve-out.**
+
+**WHY THEY WERE SUPERSEDED — a trap worth knowing.** Their leakage checks named `corpus.parquet`
+as the model arm's `--cache`. It has 181 columns and `build_features` turns EVERY column outside
+FORBIDDEN into a feature, so it would have handed the model 103 climate and design columns the v1
+experiments never saw — a different experiment wearing the same name. The correct input is the
+78-column `state_pilot-v2-constco2.parquet` (job 2262385), verified to carry v1's 78 names in the
+same order. All fourteen nulls reproduce to 0.0e+00 across the two decodes; nothing scientific moved.
+
+**Still true:** X3 `fail` at outcome (c) — no warmed climate may be quoted from the scenario-leg
+map. X4 unsealed and unsealable as designed. The band floor is in `score.py`, `abs_floor` required.
 
 ## Outbound to line D (2026-09-15) — your second pilot seed now decides whether X4 can be sealed at all -- that is the fifth ask on one 34-core-hour job
 
