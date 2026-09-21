@@ -1,0 +1,329 @@
+schema_version: 1
+
+exp_id: X-20260921-pilot-warming-response-constco2
+line: X
+
+status: sealed
+
+supersedes: X-20260909-pilot-warming-response
+
+title: "THE KILL TEST RE-ASKED ON A FOREST THAT IS ACTUALLY STATIONARY: the same 200 cells and 30 climates, spun up at constant CO2"
+question: >
+  Shown a cell's real present-day forest and a perturbed climate, can the emulator predict HOW THAT
+  FOREST CHANGES better than the best information-free competitor -- when the target state is a
+  genuine equilibrium rather than a forest still climbing a CO2 ramp?
+
+  X5 (`X-20260909-pilot-warming-response`) answered YES on pilot corpus v1, at 0.545304 against a
+  bar of 0.225690. That answer is not withdrawn and nothing about it is suspect: every one of v1's
+  6,000 runs shares one identical CO2 path, so the contrast is clean and no score is confounded.
+  What v1 cannot support is the word its product name depends on. Its spin-up ran model years
+  1000-1999 against a TRANSIENT CO2 file, so the last 300 years carry a +32.8 % CO2 rise and
+  vegetation carbon follows it at +5.53 %/century (r = +0.987). A v1 end state is therefore a forest
+  still adjusting to a CO2 step, not the stationary forest a climate supports -- and the stationary
+  forest is Product A's entire target.
+
+  Corpus v2-constco2 pins CO2 and re-runs the identical design. It is a different forest, not a
+  rescaled one: pinning CO2 costs 24 % of the vegetation carbon (median vegc -24.1 %, agb -25.5 %,
+  lai -20.6 %, soilc -5.0 %, stems +4.0 %). So this is a real re-measurement and its answer is not
+  implied by v1's. THE FALSIFIABLE CLAIM: the learnable warming response survives onto the
+  equilibrium corpus at the same strength, i.e. the model clears a bar derived from v2's own nulls
+  by the same construction v1 used.
+
+  If it does not, then what X5 measured was partly the emulator learning a CO2-fertilisation
+  transient it will never be asked to reproduce, and Product A's kill test has not in fact passed.
+
+estimand:
+  name: skill_response_mean
+  definition: >
+    UNCHANGED FROM X-20260909-pilot-warming-response, deliberately and to the letter, because the
+    only thing this experiment varies is the corpus. Changing the statistic and the data at the same
+    time would make the comparison unreadable.
+
+    For each of seven quantities -- stems per patch, above-ground biomass, leaf area index, soil
+    carbon, and the medians of stem height, wood density and specific leaf area -- compute
+    1 - SUM((dpred - dtrue)^2) / SUM(dtrue^2) pooled over all scored (cell, climate) pairs, where
+    dtrue = state(cell, perturbed point) - state(cell, control) is a WITHIN-CELL PAIRED CONTRAST.
+    The statistic is the unweighted mean of the seven. Denominator SUM(dtrue^2), not the variance of
+    dtrue: that pins the no-response null analytically at exactly 0.0. Unweighted so no single
+    quantity's variance dominates.
+
+    ⚠ THE POOLED NUMBER MAY NOT BE REPORTED ALONE. The per-level table (29 rows, one per perturbed
+    design point) is part of the result, not an appendix, because the response is NOT monotone in
+    temperature: on THIS corpus only 43.5 % of the 200 cells have a monotone above-ground-carbon
+    response across 0 / +2 / +4 / +6 K (v1: 40.5 %), and a level-averaged score is exactly the
+    summary that hides it. A pass on the pooled statistic accompanied by a fail at more than half
+    the 29 levels must be reported as such in the verdict.
+
+    TREELESS HANDLING, FIXED HERE AND NOT LATER, AND IT IS UNCHANGED BY THE CO2 PINNING. 380 of the
+    6,000 runs (6.33 %, touching 39 of the 200 cells) end with no stems -- the identical count to
+    v1, which is itself a finding: constant CO2 moves how much forest there is, not which cells can
+    hold one. For the count and stock quantities those rows are KEPT: zero is a legitimate value and
+    a collapse to zero is the largest response in the corpus, so all 5,800 pairs score. For the
+    three trait medians a treeless arm has no median at all -- a wood density of zero is not light
+    wood, it is no wood -- so those rows are dropped per-quantity and 5,620 of 6,000 state rows
+    remain. The consequence is a disclosure, not a footnote: the trait medians are therefore scored
+    on cells where vegetation SURVIVED, which selects toward the milder perturbations, and the
+    surviving row count is reported beside every trait number.
+  reference_basis: >
+    LPJmL-FIT 5.6.004, binary built 2026-08-12 -- ONE binary for all 6,000 runs, so no
+    build-mismatch arm is needed here (unlike the stored ground-truth legs). Pilot corpus
+    v2-constco2: 200 cells x 30 climates x 1 seed, each a single-cell 1000-year spin-up, npatch=25,
+    tree PFTs only, base climate window 1970-1999. State is read from the end-of-spin-up restart
+    file, which is UNCENSORED, so it includes stems under 5 m that the per-tree text output drops.
+    Cell eligibility was stems_total > 0 in the historical seed-1 end-of-spin-up restart = 56,986
+    cells, which is NOT the acceptance criterion's 54,020 (that counts cells with a VISIBLE tree);
+    quote one or the other, never both as one number. Dimensionless; a ratio of sums of squares,
+    i.e. a ratio and not a level.
+
+    ⚠ CO2 IS CONSTANT AT 276.59 ppm, AND THIS TIME THAT SENTENCE IS TRUE. Every run reads its own
+    constant CO2 forcing file. The identical sentence in X-20260909's reference basis was NOT true
+    of v1 and has been corrected in that experiment's verdict; correcting it is half of why this
+    experiment exists. The emulator still never sees CO2 as a feature and must not respond to it
+    (invariant 8) -- pinning CO2 removes a confound from the TARGET, it does not add an input.
+
+    ⚠ THE TARGET IS NOW AN EQUILIBRIUM, WHICH IS THE POINT, AND THE DISCLOSURE THAT USED TO SIT HERE
+    IS WITHDRAWN. X-20260909 disclosed "the 1000-year spin-up is not converged (57.9 % of vegetated
+    cells still moving, median +6.8 %/century)". That was a forced CO2 response read as drift: with
+    CO2 pinned the same curve is flat to +0.15 %/century. So unlike v1, what this experiment
+    estimates IS the stationary forest a climate supports, and a claim about Product A's target is
+    licensed by it. Record:
+    `docs/decisions/20260915-D-the-spinup-did-converge-the-late-rise-is-transient-co2.md`.
+  units: dimensionless
+  kind: ratio
+
+data:
+  corpus: /p/tmp/jamirp/vegemu/corpus/pilot-v2-constco2
+  # ⚠ TWO HASHES, AND X-20260909 CONFLATED THEM. `corpus_sha256` here is the DECODED STATE TABLE
+  # (corpus.parquet, 6,000 x 181, decode_s1.json), which is the artefact the score is actually
+  # computed from. The field of that name in X-20260909 holds `bad787ade3fc...`, which is the PLAN
+  # hash -- cells x design -- and v2 carries THE SAME plan hash. That is not a collision, it is the
+  # guarantee this comparison rests on: identical 200 cells, identical 30 design points, so v1 and
+  # v2 differ in the CO2 forcing and in nothing else.
+  corpus_sha256: "9c117cb6c045fe90692fbee431dc3a33bf6ced1e4d5e7f4fb2350a1bce16903c"
+  plan_sha256: "bad787ade3fc609b25cf8ebc87dfd0978e4a869068d9408c73945ec3dc667f99"
+  n_rows: 5800
+
+  split:
+    kind: blocked_spatial
+    k: 5
+    seed: 42
+    block_degrees: [15, 5]
+
+  leakage_checks:
+    - "A held-out cell's 29 perturbed states are held out TOGETHER with the cell: the fold is assigned per cell, never per (cell, climate) pair, so no arm of a cell can train on another arm of the same cell."
+    - "The held-out cell's CONTROL state IS an input, deliberately and disclosed. PLAN.md's synthesis is template-conditioned -- in production a real restart for the cell under its present climate always exists -- so withholding it would test a task nobody has to solve. It is also exactly the information the proportional nulls use, which is what makes them fair competitors rather than a handicap."
+    - "Whole 15-degree tiles are held out together via vegemu.score.blocked_spatial_folds, the same function that assigned the folds in the null derivation; the 5-degree arm is reported alongside, never substituted. Verified identical fold geometry to v1: 164 populated 15-degree tiles and 194 at 5 degrees, because v2 reuses v1's cell list exactly."
+    - "The feature set excludes lon, lat and cell id; only the nearest_cell_response null sees coordinates. Asserted in the training script before fitting."
+    - "CO2 is never a feature. On THIS corpus it is also a constant, so it cannot carry information even accidentally (invariant 8)."
+    - "The 30 design points are the SAME at every cell, so a model can learn a per-point average response from the training cells. That is not leakage -- it is precisely the information the level_mean_response null already has, which is why that null is in the decision arms."
+    - "NO v1 ARTEFACT REACHES THIS RUN. The model arm is given `--version pilot-v2-constco2` and `--cache <v2 corpus.parquet>`; v1's decoded state lives at a different path and is not read. This matters because the two tables have identical shape and column names, so a mis-pointed cache would score silently and wrongly -- the run's own metrics.json records the cache path and its hash."
+
+nulls:
+  # THE SEVEN NULLS, THEIR CONSTRUCTION AND THEIR TOLERANCES ARE X-20260909's, UNCHANGED. Only the
+  # VALUES are re-derived, because the corpus changed. Each was measured out of fold on the v2 table
+  # by scripts/exp_derive_nulls_pilot.py (job 2262326 at 15 deg, job 2262327 at 5 deg), before this
+  # file was written and before the model arm was submitted.
+  - id: no_response
+    description: >
+      Predict no change at all: dpred = 0 in every cell at every level. The decisive floor -- the
+      emulator is handed a perturbed climate and asked whether it does anything at all better than
+      saying the forest stays as it is.
+    expected:
+      statistic: skill_response_mean
+      value: 0.0
+      tolerance: 0.000001
+      derivation: >
+        ANALYTIC and exact. With dpred = 0 the numerator equals the denominator, so the statistic is
+        1 - 1 = 0 for every quantity and hence for their mean. Confirmed at 0.000000 on
+        pilot-v2-constco2, job 2262326.
+
+  - id: level_mean_response
+    description: >
+      Every held-out cell is given the MEAN response of the training cells at that same design
+      point. "The climate perturbation does the same thing everywhere." Knows the level, knows
+      nothing about the cell.
+    expected:
+      statistic: skill_response_mean
+      value: 0.098170
+      tolerance: 0.01
+      derivation: >
+        Measured out of fold under 15-degree blocking, job 2262326; 0.101780 at 5 degrees, job
+        2262327. Barely moved from v1's 0.095610 -- the level-average response is close to scale-free
+        in CO2, which is what "pinning CO2 changes how much forest, not where" predicts.
+
+  - id: proportional_median_response
+    description: >
+      THE BEST NULL, and the one the emulator actually has to beat. Every held-out cell is given the
+      MEDIAN FRACTIONAL response of the training cells at that design point, applied to its own
+      control level: "every cell changes by the same fraction of what it already has." The estimand
+      is a difference of levels and the cells run from Amazon to Sahel, so this is the competitor a
+      scientist would propose against level_mean_response, and it is stronger.
+    expected:
+      statistic: skill_response_mean
+      value: 0.162725
+      tolerance: 0.01
+      derivation: >
+        Measured out of fold under 15-degree blocking, job 2262326; 0.164244 at 5 degrees, job
+        2262327. ⚠ IT IS HARDER TO BEAT ON v2 THAN ON v1 -- 0.162725 against 0.145690 -- so this
+        re-score is not a softer test than the one it supersedes. A smaller, CO2-unforced forest is
+        better described by "everyone changes by the same fraction of what they have", which is
+        exactly the null a stationary target should strengthen.
+
+  - id: proportional_mean_response
+    description: >
+      The same construction with the donor fractions aggregated by MEAN instead of median. Included
+      because it is the obvious way to build the null and it is unusable, and that has to be on the
+      record as a measurement rather than as a remark.
+    expected:
+      statistic: skill_response_mean
+      value: -15.027258
+      tolerance: 1.0
+      derivation: >
+        Measured, job 2262326; -15.003662 at 5 degrees. It fails for the same reason as on v1 -- a
+        near-zero control in the denominator at the cells that go treeless under some perturbation
+        sends a few donor ratios enormous -- but only half as badly (v1: -27.402105), because the
+        v2 control forests it divides by are themselves smaller and the ratio's tail is shorter.
+        A heavy-tailed ratio needs a median, which is what proportional_median_response uses.
+
+  - id: nearest_cell_response
+    description: >
+      Copy the response of the geographically nearest TRAINING cell at the same design point. The
+      pure spatial-address null.
+    expected:
+      statistic: skill_response_mean
+      value: -0.277597
+      tolerance: 0.01
+      derivation: >
+        Measured, job 2262326; -0.362872 at 5 degrees. NEGATIVE, and that is a result rather than a
+        defect: copying a neighbour's response is worse than predicting no change at all. It stays
+        negative at both radii and on both corpora.
+
+  - id: nearest_analogue_response
+    description: >
+      Copy the response of the climatically most similar TRAINING cell -- nearest in the five
+      standardised baseline coordinates the design itself varies. THE space-for-time null.
+    expected:
+      statistic: skill_response_mean
+      value: -0.201083
+      tolerance: 0.01
+      derivation: >
+        Measured, job 2262326; -0.123398 at 5 degrees. Negative on v2 as on v1 (-0.239753), i.e.
+        space-for-time substitution remains worse than predicting no change, and the finding does
+        not depend on the CO2 regime of the corpus.
+
+  - id: shuffled_cells
+    description: "The true response, permuted across cells within each design point. The sanity null."
+    expected:
+      statistic: skill_response_mean
+      value: -0.800043
+      tolerance: 0.05
+      derivation: >
+        Near -1 by construction: for a permutation independent of the target the numerator tends to
+        2*SUM(dtrue^2) minus a term in the squared mean. Measured at -0.800043 with the script's
+        permutation seed, identical at both blocking radii since the permutation does not use the
+        folds. v1 returned -0.797389 under the same construction.
+
+decision_rule:
+  statistic: skill_response_mean
+  comparator: model_minus_best_null
+  pass_if: "> 0.095"
+  arms:
+    - model
+    - no_response
+    - level_mean_response
+    - proportional_median_response
+    - proportional_mean_response
+    - nearest_cell_response
+    - nearest_analogue_response
+    - shuffled_cells
+  multiplicity: none
+  power_note: >
+    THE THRESHOLD IS RE-DERIVED FROM v2's OWN NULLS BY EXACTLY THE CONSTRUCTION X-20260909 USED, AND
+    IT IS NOT INHERITED. Under `model_minus_best_null` the no-power rule scores each null on the
+    model's own comparator, so what constrains the threshold is the gap between the best null and
+    the RUNNER-UP, not the best null's value. On v2 proportional_median_response beats
+    level_mean_response by 0.064555 at 15 deg and by 0.062464 at 5 deg; the larger gap is 0.064555.
+    X-20260909 set 0.080 against a larger gap of 0.050080, i.e. it left 0.029920 of headroom. The
+    same headroom here gives 0.094475, rounded up to 0.095 -- which clears the larger gap with
+    0.030445 to spare, and which no null satisfies at either radius.
+
+    ⚠ THE BAR IS THEREFORE HIGHER THAN v1's, AND THAT IS NOT A MOVED GOALPOST -- IT IS THE SAME RULE
+    APPLIED TO A STRONGER BEST NULL. A pass requires the model to reach 0.257725, against v1's
+    0.225690. Anyone comparing the two headline numbers must compare each against its own bar; the
+    raw scores are not interchangeable and neither are the bars.
+
+    WHY THE TWO STRONG NULLS ARE BOTH HERE. A single strong null beside several weak ones forces the
+    threshold above the margin by which it beats them, which is how the no-power rule bites. These
+    two measure the same kind of skill -- level-driven, cell-blind response -- so neither can pass a
+    threshold the other does not, and the rule stays a real check instead of an arithmetic accident.
+
+    ⚠ THE BLIND ARM IS DELIBERATELY NOT A DECLARED NULL HERE, AND THAT IS A CHOICE ON THE RECORD.
+    X-20260909's single largest weakness is that every one of its pre-registered nulls was
+    information-free, so the learned-but-treatment-blind competitor that scores 0.349462 on v1 was
+    a POST-HOC arm. The temptation is to promote it to a null here. Doing so would change the
+    question: a null is judged on the model's own comparator, so a blind arm near 0.35 would carry a
+    margin of about 0.19 over the next null, forcing the threshold above 0.19 and the bar to about
+    0.54 -- a different and much harder experiment, whose result would no longer be readable as
+    "did v1's answer survive the corpus change?". It is run here as a REPORTED DIAGNOSTIC via
+    `scripts/diag_pilot_response_ablation.py` on the same v2 table and its value is required in the
+    verdict beside the headline, exactly as it is for v1. Making blindness the decision competitor
+    is a legitimate and probably necessary experiment; it needs its own exp_id and its own bar.
+
+    ⚠ THE SPATIAL NULLS ARE NEGATIVE AND THAT IS THE FINDING TO PROTECT. Both borrowing nulls score
+    below "no change", so the response is cell-specific and does not transfer between cells. A model
+    that lands between -0.28 and 0.0 has learned something worse than silence and must be reported
+    as such, not debugged away: the predecessor's operator inverted the sign of the aggregate warming
+    response and was reported as a success for two months.
+
+    If any null returns something other than its stated value the outcome is `invalid`, not fail.
+    If any null satisfies pass_if the estimand has no power and the outcome MUST be `invalid`.
+
+  ceiling_note: >
+    ⚠ A PASS IS READ AGAINST 0.848545, NEVER AGAINST 1.0, AND THE CEILING MOVED. LPJmL-FIT is
+    stochastic and the target is a paired contrast of single runs, so a perfect emulator predicts the
+    noise-free change and its residual is the model's own realisation noise. Re-derived on the v2
+    contrasts by scripts/exp_derive_ceiling_pilot.py, job 2262328: 0.848545 at rho = 0 (independent
+    noise, the CONSERVATIVE LOWER BOUND), against v1's 0.869730. Per quantity at rho = 0:
+    stems 0.7627, agb 0.8303, lai 0.9419, soilc 0.9751, height 0.6456, wooddens 0.8863, sla 0.8979.
+    The bar of 0.257725 is 30.4 % of that lower bound.
+
+    ⚠ AND THE CEILING CARRIES A BASIS MISMATCH THAT v1's DID NOT. sigma is estimated from the only
+    two-seed pair that exists at these cells -- the ground truth's historical seed-1 and seed-2
+    end-of-spin-up restarts -- and those two runs were spun up under the TRANSIENT CO2 path, not a
+    pinned one. So a noise magnitude measured on a CO2-forced forest is being applied to contrasts
+    from a constant-CO2 forest. It is the best estimate available and the direction of the error is
+    not known, so the ceiling is quoted as a bound with this caveat attached, never as a number.
+    Pinning it properly needs a second seed of the v2 corpus, which does not exist and is not
+    requested by this experiment.
+
+    The control and perturbed arms also share a random seed, so the true ceiling lies between
+    rho = 0 and rho = 1 (where it is 1.0) for that reason as well. Both bounds stay quoted as bounds.
+
+  outcomes_note: >
+    THREE DISTINGUISHABLE RESULTS, ALL PRE-NAMED BEFORE THE RUN, because the informative part is
+    which one lands.
+    (a) model > 0.257725 -- the learnable warming response survives onto the equilibrium corpus.
+    This is the only outcome that lets Product A's kill test be described as passed for a STATIONARY
+    target; until it lands, that description belongs to v1's transient target only.
+    (b) model beats proportional_median_response but by 0.095 or less -- the response is still
+    there and is still cell-specific, but it is materially weaker once the CO2 transient is removed.
+    That would mean part of what X5 measured was the emulator learning a CO2-fertilisation signal
+    it will never be asked to reproduce, and the honest headline becomes the v2 number, not v5's.
+    (c) model <= proportional_median_response -- the response is not learnable on the equilibrium
+    corpus at all. That does not retract X5, which remains a correct statement about its own
+    corpus; it would mean X5's target was the wrong one and Product A has no passed kill test.
+    ⚠ NONE of the three licenses a claim about a SCENARIO leg: this ensemble identifies the response
+    by construction and the scenario legs do not identify it at all
+    (`X-20260908-heldout-forcing-leg`, outcome (c)).
+    ⚠ NONE of the three is a fidelity claim. This is a kill test on 200 of 54,020 cells, and the
+    acceptance criterion is untouched by any outcome here.
+
+compute:
+  launcher: scripts/sbatch_py.sh
+  tag: X-pilot-response-constco2
+  partition: priority
+  est_core_hours: 8
+
+outputs:
+  - path: /p/tmp/jamirp/vegemu/exp/X-20260921-pilot-warming-response-constco2/metrics.json
+    kind: metrics
