@@ -168,6 +168,17 @@ def main() -> int:
     ap.add_argument("--state", required=True, help="decoded pilot state parquet")
     ap.add_argument("--out", required=True)
     ap.add_argument("--nproc", type=int, default=2)
+    # ⚠ THESE WERE HARDCODED TO X-20260909's BAR, and this script is run on other corpora. Re-run on
+    # pilot-v2-constco2 it printed a v2 ceiling directly beneath "bar to pass = 0.225690", which is
+    # v1's bar against v1's nulls -- the exact shape of a wrong number a verdict then quotes. The
+    # defaults keep every earlier invocation byte-identical; a run on another corpus passes its own.
+    ap.add_argument("--bar", type=float, default=0.225690, help="the pass bar to test reachability against")
+    ap.add_argument("--best-null", type=float, default=0.145690, help="the best null the bar was built on")
+    ap.add_argument(
+        "--bar-source",
+        default="X-20260909-pilot-warming-response, pilot-v1",
+        help="which pre-registration --bar/--best-null come from; printed so the pair cannot be read as this corpus's own",
+    )
     args = ap.parse_args()
 
     out = Path(args.out)
@@ -205,8 +216,9 @@ def main() -> int:
         "n_cells": len(cells),
         "n_levels": len(points),
         "quantities": list(quantities),
-        "bar_from_prereg": 0.225690,
-        "best_null_from_prereg": 0.145690,
+        "bar_from_prereg": args.bar,
+        "best_null_from_prereg": args.best_null,
+        "bar_source": args.bar_source,
         "ceiling": ceiling(dtrue, sigma_sq, quantities),
         "control_agreement": control_agreement(pilot_control, s1, s2, quantities),
     }
@@ -216,8 +228,8 @@ def main() -> int:
     print(f"\nCEILING, rho=0 (conservative lower bound): {c0['mean']:+.6f}")
     for q, v in c0["per_quantity"].items():
         print(f"    {q:16s} {v:+10.4f}")
-    print("\nbar to pass = 0.225690; best null = 0.145690")
-    print(f"reachable at rho=0? {'YES' if c0['mean'] > 0.225690 else 'NO -- the bar exceeds it'}")
+    print(f"\nbar to pass = {args.bar:.6f}; best null = {args.best_null:.6f}  [{args.bar_source}]")
+    print(f"reachable at rho=0? {'YES' if c0['mean'] > args.bar else 'NO -- the bar exceeds it'}")
     print(f"\nwrote {out / 'ceiling_pilot.json'}")
     return 0
 

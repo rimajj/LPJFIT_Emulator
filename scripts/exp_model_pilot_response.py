@@ -267,6 +267,15 @@ def main() -> int:
     ap.add_argument(
         "--also-degrees", type=float, default=5.0, help="reported alongside, never instead"
     )
+    # ⚠ THE ID USED TO BE HARDCODED to the v1 experiment, so a re-score on another corpus stamped
+    # the WRONG pre-registration into its own metrics and `append_result.py` would have filed the
+    # result under an experiment that did not govern it. The default keeps every existing
+    # invocation byte-identical; a re-score passes its own id.
+    ap.add_argument(
+        "--exp-id",
+        default="X-20260909-pilot-warming-response",
+        help="stamped into the output for append_result.py",
+    )
     args = ap.parse_args()
 
     out = Path(args.out)
@@ -295,7 +304,7 @@ def main() -> int:
     lat = scored_cells["lat"].to_numpy().astype(np.float64)
 
     report: dict[str, object] = {
-        "exp_id": "X-20260909-pilot-warming-response",
+        "exp_id": args.exp_id,
         "arm": "model",
         "version": args.version,
         "corpus": str(corpus),
