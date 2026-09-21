@@ -76,6 +76,15 @@ globs = [
   "docs/decisions/*.md",       # your own new record; accepted ones are immutable
   "docs/reference/*.md",
   ".claude/skills/**",
+  # ⚠ SHARED, NOT INTEGRATOR-OWNED, even though it sits beside the enforcement machinery. A
+  # SessionStart/Skill hook appends one line to it whenever ANY session invokes a skill, so a line
+  # session dirties it just by following CLAUDE.md's "check whether a skill covers it". Putting it
+  # in the integrator block would mean a line could neither commit its own work nor leave the tree
+  # clean -- the Stop hook then blocks, and the only way out is a guard skip. It is append-only by
+  # construction (one timestamped row per invocation) so `owner = "*"` costs nothing: any line may
+  # add a row, nobody rewrites it. Found 2026-09-21, when `unowned = "deny"` refused the first
+  # commit to carry an append -- the mechanism doing exactly what the comment below describes.
+  ".claude/skill-usage.log",
   "src/vegemu/**",             # the shared library surface not carved out above
   "tests/**",
   "tools/**",
