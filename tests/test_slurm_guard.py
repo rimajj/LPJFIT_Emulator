@@ -202,6 +202,35 @@ KNOWN_FALSE_DENIALS = [
     "find src/vegemu/corpus scripts -name '*.py'",
 ]
 
+# INSTANCE 12, measured 2026-09-21 while closing the ledger after the constant-CO2 re-score.
+#
+# `python3 tools/campaigns.py harvest --tag X-pilot-nulls-v2corpus-15deg --exit 0` is refused as
+# "heavy Python on the login node". It appends one JSON line to a ledger. It is denied because the
+# heavy-python block matches `.py` and then the keyword `corpus` -- which here is not a path and not
+# a script name, but a substring of the CAMPAIGN TAG the job was launched under.
+#
+# MEASURED, and this is why it is worth pinning rather than shrugging at. The identical command
+# with `--tag X-pilot-nulls-v2plan-15deg` is ALLOWED, as are `campaigns.py status` and
+# `campaigns.py dead --tag X-composition-constco2`. So the guard's decision about a bookkeeping
+# command turns entirely on what the user happened to name a campaign -- and naming a corpus
+# campaign after the corpus is the obvious thing to do. In this session it denied five harvests in
+# a row while allowing three `dead` rows, which reads as the ledger tool being broken.
+#
+# WHY IT IS NOT JUST WIDENED HERE. The narrow repair is real and small: `tools/*.py` are
+# bookkeeping and never compute, so they could skip the keyword block. The evidence that this is
+# the right shape is already in this file -- MUST_ALLOW_WITH_HATCH carries
+# `ALLOW_LOGIN_HEAVY=1 python3 tools/inbound.py --body "corpus/state.py"`, which is the SAME defect
+# for a different tool, accepted as needing the hatch. But it is still a WIDENING of a permission
+# hook, and the standing rule is that the owner approves those.
+#
+# ⚠ AND THE WIDENING MUST BE BY DIRECTORY, NOT BY TOOL NAME. `tools/` holds only bookkeeping and
+# checkers today; a future heavy tool placed there would inherit the exemption silently. Whoever
+# applies this should state which directory is exempt and why nothing in it can run a job.
+KNOWN_FALSE_DENIALS_LEDGER = [
+    "python3 tools/campaigns.py harvest --tag X-pilot-nulls-v2corpus-15deg --exit 0",
+    "python3 tools/campaigns.py harvest --tag X-corpus-v2-decode --exit 0",
+]
+
 # The overrides the guard's own messages advertise, in the only form a Bash tool call can use.
 MUST_ALLOW_WITH_HATCH = [
     "ALLOW_LOGIN_HEAVY=1 python3 scripts/corpus_build.py --tier pilot",
@@ -318,3 +347,35 @@ def test_find_over_a_corpus_path_is_wrongly_denied(command: str) -> None:
     described as open; this one forces whoever fixes it to move the case into MUST_ALLOW.
     """
     assert verdict(command) == "allow", f"the guard refused a command that runs nothing: {command}"
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "instance 12, measured 2026-09-21 and unfixed: the heavy-python block matches `.py` plus "
+        "the keyword `corpus`, and here `corpus` is neither a path nor a script name but a "
+        "substring of the CAMPAIGN TAG. So whether a ledger append is allowed depends on what the "
+        "user named a campaign. Fixing it widens a permission hook -- see the comment above "
+        "KNOWN_FALSE_DENIALS_LEDGER."
+    ),
+)
+@pytest.mark.parametrize("command", KNOWN_FALSE_DENIALS_LEDGER)
+def test_a_ledger_append_is_wrongly_denied_for_its_tag(command: str) -> None:
+    """Same `strict=True` contract as instance 11: a fixed defect must not keep reading as open."""
+    assert verdict(command) == "allow", f"the guard refused a ledger append: {command}"
+
+
+def test_the_ledger_denial_really_is_the_tag_and_not_the_tool() -> None:
+    """The control that makes instance 12 a finding rather than a guess.
+
+    Without this, "campaigns.py is denied" would be indistinguishable from "campaigns.py is denied
+    WHEN ITS TAG SAYS corpus", and the narrow repair (exempt the bookkeeping directory) would be
+    aimed at the wrong thing. These three must stay allowed whatever is done to the guard.
+    """
+    controls = [
+        "python3 tools/campaigns.py harvest --tag X-pilot-nulls-v2plan-15deg --exit 0",
+        "python3 tools/campaigns.py status --line X",
+        "python3 tools/campaigns.py dead --tag X-composition-constco2 --exit 1 --reason x",
+    ]
+    for command in controls:
+        assert verdict(command) == "allow", f"control case should be allowed: {command}"
