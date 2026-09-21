@@ -40,7 +40,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import repo_root
 
 SECTIONS = ("Added", "Changed", "Deprecated", "Removed", "Fixed", "Security")
-HEADING_RE = re.compile(r"^#{2,4}\s*(?P<name>[A-Za-z]+)\s*$")
+# ⚠ `[A-Za-z ]+`, NOT `[A-Za-z]+`, AND THE SPACE IS THE WHOLE POINT. With the single-word pattern a
+# heading of two words -- `### Known issues` is the one that bit, 2026-09-21 -- did not match here
+# at all, so it fell through to the body-text branch: the literal string "### Known issues" was
+# appended to the previous bullet, and that section's entries were silently filed under whichever
+# section came before it. A ONE-word unknown heading like `### Notes` was caught with a clear error,
+# so validation was strictest exactly where a mistake is least likely and absent where a human
+# naturally writes a real heading. Matching the space means every unknown heading now reaches the
+# `name not in SECTIONS` check and says so.
+HEADING_RE = re.compile(r"^#{2,4}\s*(?P<name>[A-Za-z][A-Za-z ]*?)\s*$")
 UNRELEASED_RE = re.compile(r"^##\s*\[?Unreleased\]?\s*$", re.IGNORECASE)
 
 
