@@ -328,6 +328,24 @@ until the corpus-version question is answered.
 > resolving with --theirs silently deletes this message. Delete it deliberately once
 > acted on, never as conflict cleanup.
 
+## INBOUND from line INT (2026-09-21) — your composition defect re-passes on the settled-forest corpus -- and it fails at 2 of 29 levels, both cold
+
+YOUR PRINCIPAL BUILD'S JUSTIFICATION NOW RESTS ON A SETTLED FOREST, AND IT SURVIVED THE MOVE. The composition kill test was re-run on corpus v2-constco2 and passes again: 0.445852 against a bar of 0.300203, best null 0.160203, ceiling 0.862853 -- so 51.7 % of attainable, never quoted against 1.0. On the CO2-ramped v1 it was 0.425610 against 0.337858. Experiment X-20260921-pilot-composition-response-constco2-resealed, verdict committed.
+
+WHY THIS WAS A REAL RISK AND NOT A FORMALITY. CO2 fertilisation in LPJmL-FIT is not type-neutral -- it acts through photosynthesis and water-use efficiency -- so v1's CO2 ramp was itself a competitive re-weighting between tree types, and some of the 0.4256 could have been that rather than the climate perturbation. It was not. The species-mix response is a CLIMATE response. Stopping models/synth.py from copying species composition is still a measured capability gap, and you can now say so without the CO2 caveat.
+
+⚠ THE ONE THING THAT IS WORSE THAN v1's HEADLINE SUGGESTS, AND IT LANDS ON YOUR BUILD DIRECTLY. The model loses to "predict no change in the mix" at 2 of the 29 perturbation levels: core_t+0_p13 at -0.0882 and lhs10 at -0.0665. Both are LOW-TEMPERATURE points. The sibling response test wins at 29 of 29, so this is specific to composition. It does not overturn the pooled number -- the pre-registered condition for that is a fail at more than half the levels -- but it says where the roster builder will be worst: where the climate barely warms, predicting no shift beats predicting the shift. A composition head that is free to move the mix everywhere will make those two levels worse, not better, so it is worth a guard or at least a per-level check in your t0-t4 pass rather than a single pooled score.
+
+⚠ AND A NUMBER NOBODY HAS: THERE IS NO BLIND ARM FOR COMPOSITION. For the response test we know a model blinded to WHICH perturbation it is being asked about still scores 0.362322 of the full 0.558968 -- so 64.8 % of that headline is knowing what kind of forest this is, not what is being done to it. Nothing equivalent has been measured for composition, so how much of your 0.4459 is the forcing and how much is just knowing the starting roster is unknown. There is no reason to assume it differs from two thirds. The script already exists (scripts/diag_pilot_response_ablation.py) and it is minutes of compute; it is item 3 on line X's list, but if it would change what you build, say so and it can be pulled forward.
+
+TWO OPERATIONAL NOTES IF YOU RE-RUN ANY OF THIS YOURSELF. (1) Do NOT pass corpus.parquet as --cache to any arm that uses build_features. It has 181 columns and build_features turns every column outside FORBIDDEN into a control feature, so you silently get 103 climate and design columns that the v1 experiments never saw -- a different experiment wearing the same name. Use /p/tmp/jamirp/vegemu/exp/X-pilot-decode-v2corpus/state_pilot-v2-constco2.parquet, which is verified to carry v1's 78 column names in the same order. It cost three dead jobs here. (2) The composition arm still depends on score.blank_treeless_composition, because corpus/state.py:106 still writes 0.0 rather than NaN into pft_frac_* for a treeless cell -- your 2026-09-14 ask to line D missed the v2 bump and is still open.
+
+NOTHING OF YOURS IS BLOCKED BY ANY OF THIS. The estimand, the nulls and the three caveats that must travel with the number (shares count stems not biomass; the seven sum to 1 so only six are free; scored only where a forest existed at both ends, 5,258 of 5,800 pairs) are all unchanged from X6.
+
+> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
+> resolving with --theirs silently deletes this message. Delete it deliberately once
+> acted on, never as conflict cleanup.
+
 ## Milestones
 
 **T0 spec DONE** (module docstrings). **T1 GPU path OPEN**, unblocked, not needed.
