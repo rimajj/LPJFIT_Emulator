@@ -372,15 +372,57 @@ def reproduce_x4(path: Path, scores: dict[str, dict[str, Any]]) -> dict[str, Any
 # ------------------------------------------------------------------------------------------------
 # The model arm: a table of states DECODED from the emitted restarts, scored beside every null.
 # ------------------------------------------------------------------------------------------------
-def load_model_arm(path: Path, basis: dict[str, Any], folds15: npt.NDArray[np.int64]) -> Array:
+def load_model_arm(
+    path: Path, basis: dict[str, Any], folds15: npt.NDArray[np.int64], *, prefix: str
+) -> tuple[Array, dict[str, Any]]:
+    """(cells, points, 22) decoded read-back states, and what the table actually covered.
+
+    Accepts the synthesiser's own table (`scripts/synth_pilot.py --stage synth` writes
+    `synth_<arm>.parquet` with `y0_<quantity>` columns, a `status` and a `fold`) or any table keyed
+    by (cell, point) with the 22 columns under `prefix`. ⚠ A target the harness failed on, or never
+    wrote, is NOT dropped: it is a missing prediction and scores e = inf, exactly as a missing
+    value does in `score.py`. Dropping it would score the model on an easier subset than its nulls.
+    """
     frame = pl.read_parquet(path)
     if "fold" in frame.columns:
         want = dict(zip(basis["cell_ids"], folds15.tolist(), strict=True))
-        got = dict(zip(frame["cell"].to_list(), frame["fold"].to_list(), strict=True))
-        bad = [c for c in basis["cell_ids"] if int(got[c]) != want[c]]
+        got = dict(zip(frame["cell"].to_list(), frame["fold"].to_list(), strict=False))
+        bad = [c for c in basis["cell_ids"] if c in got and int(got[c]) != want[c]]
         if bad:
             raise ValueError(f"model arm folds differ from the scorer's on {len(bad)} cells")
-    return on_grid(frame, basis["cell_ids"], basis["points"])
+    n_rows = frame.height
+    if "status" in frame.columns:
+        frame = frame.filter(pl.col("status") == "ok")
+    missing_cols = [q for q in QUANTITIES if f"{prefix}{q}" not in frame.columns]
+    if missing_cols:
+        raise ValueError(
+            f"{path.name} lacks {prefix}{missing_cols[0]} and {len(missing_cols) - 1} more"
+        )
+    frame = frame.select(
+        [pl.col("cell").cast(pl.Int64), pl.col("point").cast(pl.Utf8)]
+        + [pl.col(f"{prefix}{q}").cast(pl.Float64).alias(q) for q in QUANTITIES]
+    )
+    index = {
+        (int(c), str(p)): i
+        for i, (c, p) in enumerate(zip(frame["cell"], frame["point"], strict=True))
+    }
+    values = matrix(frame, QUANTITIES)
+    out = np.full((len(basis["cell_ids"]), len(basis["points"]), len(QUANTITIES)), np.nan)
+    covered = np.zeros(out.shape[:2], dtype=bool)
+    for i, c in enumerate(basis["cell_ids"]):
+        for j, p in enumerate(basis["points"]):
+            if (c, p) in index:
+                out[i, j] = values[index[(c, p)]]
+                covered[i, j] = True
+    coverage = {
+        "path": str(path),
+        "rows_in_table": n_rows,
+        "rows_ok": frame.height,
+        "targets_covered": int(covered.sum()),
+        "targets_missing_scored_as_never_credited": int((~covered).sum()),
+        "covered": covered,
+    }
+    return out, coverage
 
 
 def _parse_args() -> argparse.Namespace:
@@ -402,9 +444,11 @@ def _parse_args() -> argparse.Namespace:
     ap.add_argument("--n-boot", type=int, default=N_BOOT)
     ap.add_argument("--arm", choices=("nulls", "model"), default="nulls")
     ap.add_argument("--pred", default="", help="decoded read-back states, keyed by (cell, point)")
+    ap.add_argument("--pred-prefix", default="y0_", help="column prefix in --pred")
     ap.add_argument(
         "--pred-year1", default="", help="the same after a 1-year C run (reported only)"
     )
+    ap.add_argument("--pred-year1-prefix", default="y1_", help="column prefix in --pred-year1")
     ap.add_argument("--threshold", type=float, help="the SEALED pass margin (model arm only)")
     ap.add_argument("--exp-id", default="")
     ap.add_argument("--out", required=True)
@@ -418,12 +462,13 @@ def _parse_args() -> argparse.Namespace:
 
 def score_blockings(
     args: argparse.Namespace, basis: dict[str, Any], band: Array, model: Array | None
-) -> tuple[dict[str, Any], dict[str, dict[str, Any]], dict[str, Array]]:
-    """Every arm under both blockings; the per-target errors of the nulls at the primary one."""
+) -> tuple[dict[str, Any], dict[str, dict[str, Any]], dict[str, Array], dict[str, Array]]:
+    """Every arm under both blockings; the nulls' predictions and errors at the primary one."""
     truth, points = basis["truth"], basis["points"]
     by_blocking: dict[str, Any] = {}
     seps: dict[str, dict[str, Any]] = {}
     errors: dict[str, Array] = {}
+    primary_preds: dict[str, Array] = {}
     for degrees in (args.degrees, args.also_degrees):
         # Seed-1 states are the donors: every null is a REAL restart (or its training mean), never
         # the two-run mean, because an emitted restart is one realisation too.
@@ -447,8 +492,17 @@ def score_blockings(
         by_blocking[f"{degrees:g}deg"] = entry
         if primary:
             errors = {n: row_errors(preds[n], truth, band) for n in EXPECTED_ORDER}
+            primary_preds = {n: preds[n] for n in EXPECTED_ORDER}
         print_blocking(degrees, scores, sep)
-    return by_blocking, seps, errors
+    return by_blocking, seps, errors, primary_preds
+
+
+def score_subset(pred: Array, truth: Array, band: Array, mask: npt.NDArray[np.bool_]) -> Any:
+    """C1 on the targets under `mask` only -- for a model arm that covers part of the grid."""
+    v = VARYING_IDX
+    return score_worst_quantity(
+        pred[mask][:, v], truth[mask][:, v], band[mask][:, v], SCORED_VARYING
+    )
 
 
 def print_blocking(degrees: float, scores: dict[str, Any], sep: dict[str, Any]) -> None:
@@ -473,6 +527,8 @@ def decide_model(
     basis: dict[str, Any],
     band: Array,
     folds15: npt.NDArray[np.int64],
+    *,
+    null_preds: dict[str, Array],
 ) -> None:
     """The sealed rule, applied, and the result block `tools/append_result.py` reads."""
     primary = report["by_blocking"][f"{args.degrees:g}deg"]["arms"]
@@ -485,10 +541,20 @@ def decide_model(
         "verdict": "pass" if margin > args.threshold else "fail",
     }
     if args.pred_year1:
-        y1 = load_model_arm(Path(args.pred_year1), basis, folds15)
-        report["model_after_one_c_year_REPORTED_NOT_DECIDED"] = score_arm(
-            y1, basis["truth"], band, basis["points"]
+        # After one year of the real model, on whatever targets were run: the model AND every null
+        # on that same subset, against the same truth. Reported beside the decision, never in it.
+        y1, cov = load_model_arm(
+            Path(args.pred_year1), basis, folds15, prefix=args.pred_year1_prefix
         )
+        mask = cov.pop("covered")
+        truth = basis["truth"]
+        report["after_one_c_year_REPORTED_NOT_DECIDED"] = {
+            "coverage": cov,
+            "model": score_subset(y1, truth, band, mask),
+            "nulls_on_the_same_targets": {
+                n: score_subset(p, truth, band, mask) for n, p in null_preds.items()
+            },
+        }
     report.update(
         append_result_block(
             statistic=STATISTIC,
@@ -530,8 +596,13 @@ def main() -> int:
         "expected_order": list(EXPECTED_ORDER),
     }
     folds15 = blocked_spatial_folds(lon, lat, k=args.k, degrees=args.degrees, seed=42)
-    model = load_model_arm(Path(args.pred), basis, folds15) if args.arm == "model" else None
-    report["by_blocking"], seps, errors15 = score_blockings(args, basis, band, model)
+    model = None
+    if args.arm == "model":
+        model, cov = load_model_arm(Path(args.pred), basis, folds15, prefix=args.pred_prefix)
+        cov.pop("covered")
+        report["model_coverage"] = cov
+        print(f"model arm: {cov}", flush=True)
+    report["by_blocking"], seps, errors15, null_preds = score_blockings(args, basis, band, model)
 
     boot = tile_bootstrap(
         errors15, lon, lat, degrees=args.degrees, n_boot=args.n_boot, seed=BOOT_SEED
@@ -550,7 +621,7 @@ def main() -> int:
         print(f"ceiling {name}: {c[STATISTIC]:+.6f}, within band {c['share_within_band']:.6f}")
 
     if model is not None:
-        decide_model(args, report, basis, band, folds15)
+        decide_model(args, report, basis, band, folds15, null_preds=null_preds)
     name = "metrics.json" if model is not None else f"nulls_worst_{args.basis}.json"
     (out / name).write_text(json.dumps(report, indent=2, default=float), encoding="utf-8")
     print(f"\nwrote {out / name}")
