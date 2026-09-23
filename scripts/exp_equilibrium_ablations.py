@@ -38,9 +38,14 @@ and its nulls:
 placebo nulls before the seal, and writes ONLY their differences: the level of the no-soil recipe
 or of the 75 % curve, beside the already-known 0.607582, would be the answer itself.
 
-⚠ ONE THREAD PER FIT, SO THE SEALED NUMBER REPRODUCES. The sealed run fitted on one CPU. The fits
-here run in parallel processes, each with OMP_NUM_THREADS=1, and the sealed recipe's score must
-come back as 0.6075822354370696 at 15 deg: that is the apparatus check the model stage reports.
+⚠ ONE THREAD PER FIT, SO THE SEALED NUMBER REPRODUCES -- AND OMP_NUM_THREADS DOES NOT DO IT.
+The sealed run fitted on one CPU. LightGBM's scikit-learn wrapper turns `n_jobs=None` (what PARAMS
+leaves it at) into the number of physical cores in the process's CPU AFFINITY, ignoring
+OMP_NUM_THREADS. The first launch of this script trusted that variable: every worker ran 12
+threads on 12 shared cores, ~10x slower than one thread, and not the sealed arithmetic. So each
+worker is now PINNED to one CPU of the job's allocation, the thread count every fit saw is recorded
+in the output, and the sealed recipe's score must come back as 0.6075822354370696 at 15 deg: that
+is the apparatus check the model stage reports.
 """
 
 from __future__ import annotations
@@ -84,15 +89,21 @@ STATISTIC = {"soil": "skill_gain_soil_texture", "curve": "skill_gain_last_quarte
 _SHARED: dict[str, object] = {}
 
 
-def _init(x: Array, y: Array, folds: dict[str, npt.NDArray[np.int64]]) -> None:
+def _init(
+    x: Array, y: Array, folds: dict[str, npt.NDArray[np.int64]], slots: object = None
+) -> None:
+    """Share the arrays with a worker and, in a pool, pin it to ONE CPU (see the docstring)."""
+    if slots is not None:
+        os.sched_setaffinity(0, {slots.get()})  # type: ignore[attr-defined]
     _SHARED.update(x=x, y=y, folds=folds)
 
 
-def _fit(task: tuple[str, Recipe]) -> tuple[str, Recipe, Array]:
+def _fit(task: tuple[str, Recipe]) -> tuple[str, Recipe, Array, int]:
     radius, recipe = task
     x, y = _SHARED["x"], _SHARED["y"]
     folds: dict[str, npt.NDArray[np.int64]] = _SHARED["folds"]  # type: ignore[assignment]
-    return radius, recipe, model_predictions(x, y, folds[radius], recipe)  # type: ignore[arg-type]
+    pred = model_predictions(x, y, folds[radius], recipe)  # type: ignore[arg-type]
+    return radius, recipe, pred, len(os.sched_getaffinity(0))
 
 
 def recipes(study: str, stage: str) -> list[Recipe]:
@@ -112,21 +123,28 @@ def recipes(study: str, stage: str) -> list[Recipe]:
 
 def fit_all(
     x: Array, y: Array, folds: dict[str, npt.NDArray[np.int64]], todo: list[Recipe], nproc: int
-) -> dict[tuple[str, Recipe], Array]:
-    """Every (radius, recipe) prediction, in single-threaded worker processes."""
+) -> tuple[dict[tuple[str, Recipe], Array], list[int]]:
+    """Every (radius, recipe) prediction, each fitted on ONE CPU, and the CPU count each fit saw.
+
+    With `nproc <= 1` the fits run in this process, on however many CPUs it has -- which is one
+    only if the job was given one.
+    """
     tasks = [(r, rec) for r in folds for rec in todo]
+    cpus = sorted(os.sched_getaffinity(0))
+    nproc = min(nproc, len(cpus))
     print(f"{len(tasks)} fits on {nproc} processes", flush=True)
     if nproc <= 1:
         _init(x, y, folds)
         done = [_fit(t) for t in tasks]
     else:
         # Spawn, not fork: polars' thread pool is not fork-safe (see exp_derive_nulls_pilot.decode).
-        # The children inherit this environment, so each LightGBM fit is single-threaded.
-        os.environ["OMP_NUM_THREADS"] = "1"
         ctx = mp.get_context("spawn")
-        with ctx.Pool(nproc, initializer=_init, initargs=(x, y, folds)) as pool:
+        slots = ctx.Queue()
+        for c in cpus[:nproc]:
+            slots.put(c)
+        with ctx.Pool(nproc, initializer=_init, initargs=(x, y, folds, slots)) as pool:
             done = pool.map(_fit, tasks, chunksize=1)
-    return {(r, rec): p for r, rec, p in done}
+    return {(r, rec): p for r, rec, p, _ in done}, sorted({n for *_, n in done})
 
 
 def _diff(a: dict[str, object], b: dict[str, object]) -> dict[str, object]:
@@ -263,7 +281,7 @@ def main() -> int:
         for d in (args.degrees, args.also_degrees)
     }
     todo = recipes(args.study, args.stage)
-    preds = fit_all(x, y, folds, todo, args.nproc)
+    preds, cpus_per_fit = fit_all(x, y, folds, todo, args.nproc)
 
     report: dict[str, object] = {
         "exp_id": args.exp_id,
@@ -274,6 +292,7 @@ def main() -> int:
         "n_cells": int(y.shape[0]),
         "n_rows": int(y.shape[0] * y.shape[1]),
         "recipes": [asdict(r) for r in todo],
+        "cpus_visible_to_each_fit": cpus_per_fit,
         "by_blocking": {},
     }
     build = soil_report if args.study == "soil" else curve_report

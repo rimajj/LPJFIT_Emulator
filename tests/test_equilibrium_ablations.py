@@ -9,16 +9,19 @@ is what their verdicts rest on:
     shuffles whole soil vectors between cells while leaving every other column alone;
   * the subsamples are nested, never touch the held-out fold, and are fixed by their seed;
   * the placebo stage reports differences only -- never the level whose value would be the answer;
-  * the analytic nulls are computed as exactly 0.0.
+  * the analytic nulls are computed as exactly 0.0;
+  * every pooled worker is pinned to ONE CPU, because LightGBM takes its thread count from the CPU
+    affinity and the sealed run fitted on one.
 
 The learner is shrunk to a few trees so this is quick; nothing else about the path is replaced.
-That the job's single-threaded worker processes reproduce the sealed one-CPU fit is NOT tested here
-(a spawned worker does not inherit a monkeypatched learner): the model stage checks it on the real
-corpus, by requiring the sealed recipe to score 0.6075822354370696 again.
+That the pinned workers reproduce the sealed one-CPU fit NUMBER is not tested here (a spawned
+worker does not inherit a monkeypatched learner): the model stage checks it on the real corpus, by
+requiring the sealed recipe to score 0.6075822354370696 again.
 """
 
 from __future__ import annotations
 
+import os
 import sys
 from itertools import pairwise
 from pathlib import Path
@@ -29,7 +32,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 import exp_model_pilot_response
-from exp_equilibrium_ablations import curve_report, recipes, soil_report
+from exp_equilibrium_ablations import curve_report, fit_all, recipes, soil_report
 from exp_equilibrium_map import (
     FEATURES,
     QUANTITIES,
@@ -146,3 +149,13 @@ def test_the_model_stage_computes_the_analytic_nulls_as_exactly_zero() -> None:
     assert curve["arms"]["no_further_gain"] == 0.0  # type: ignore[index]
     assert set(curve["arms"]) == {"model", "no_further_gain", "subsample_noise"}  # type: ignore[arg-type]
     assert curve["arms"]["subsample_noise"] >= 0.0  # type: ignore[index]
+
+
+def test_every_pooled_fit_sees_exactly_one_cpu() -> None:
+    if len(os.sched_getaffinity(0)) < 2:
+        pytest.skip("needs two CPUs to run a pool")
+    x, y, folds = _case()
+    todo = [Recipe(drop_soil=True)]
+    preds, cpus = fit_all(x, y[:, :, :N_Q], {"15deg": folds}, todo, nproc=2)
+    assert cpus == [1]
+    assert set(preds) == {("15deg", Recipe(drop_soil=True))}
