@@ -14,7 +14,8 @@ WHAT IT WRITES, into --out:
                           leg whose 30-year climate table exists (corpus v0: historical 1970-1999,
                           ssp126 and ssp370 2071-2100), plus two per-cell extrapolation flags:
                             env_nn_dist    RMS distance, in pilot-standardised feature units, to
-                                           the nearest pilot training row
+                                           the nearest pilot training row, all 91 features
+                            env_nn_dist_analogue   the same over the eight analogue climate axes
                             env_n_outside  how many of the 91 features fall outside the pilot's
                                            training range
     envelope.json         where those predictions are extrapolations, per leg and latitude band
@@ -78,10 +79,12 @@ from vegemu.models.equilibrium import (
     transformed,
     treeless_threshold,
 )
+from vegemu.nulls import ANALOGUE_FEATURES
 from vegemu.paths import paths, repo_root
 from vegemu.score import blocked_spatial_folds, spatial_blocks
 
 Array = npt.NDArray[np.float64]
+IntArray = npt.NDArray[np.int64]
 
 SEALED_EXP = "X-20260923-equilibrium-from-climate"
 LAT_BANDS: tuple[float, ...] = (-60.0, -45.0, -30.0, -15.0, 0.0, 15.0, 30.0, 45.0, 60.0, 75.0, 90.0)
@@ -297,14 +300,25 @@ def oof_frame(
 # ------------------------------------------------------------------------------------------------
 # The envelope: where a prediction is an interpolation among the pilot's climates, and where not.
 # ------------------------------------------------------------------------------------------------
-def _standardiser(stats: dict[str, dict[str, float]]) -> tuple[Array, Array, npt.NDArray[np.bool_]]:
+def _spaces(stats: dict[str, dict[str, float]]) -> dict[str, tuple[Array, Array, IntArray]]:
+    """The two spaces distances are measured in, each as (mean, sd, column indices).
+
+    `all91` is every feature, so it sees soil and seasonality -- but one feature pushed far out is
+    diluted by ninety that are not. `analogue8` is the eight climate axes of `vegemu.nulls`, where a
+    warming or drying shows up undiluted. Features with no spread in the pilot are left out of both.
+    """
     mu = np.array([stats[f]["mean"] for f in FEATURES])
     sd = np.array([stats[f]["sd"] for f in FEATURES])
-    return mu, sd, np.isfinite(sd) & (sd > 0)
+    use = np.isfinite(sd) & (sd > 0)
+    analogue = np.array([FEATURES.index(f) for f in ANALOGUE_FEATURES])
+    return {
+        "all91": (mu, sd, np.flatnonzero(use)),
+        "analogue8": (mu, sd, analogue[use[analogue]]),
+    }
 
 
-def _z(x: Array, mu: Array, sd: Array, use: npt.NDArray[np.bool_]) -> Array:
-    z = (x[:, use] - mu[use]) / sd[use]
+def _z(x: Array, mu: Array, sd: Array, idx: IntArray) -> Array:
+    z = (x[:, idx] - mu[idx]) / sd[idx]
     # A missing feature (an unknown soil code) is placed AT the pilot mean, so it adds no distance
     # rather than an arbitrary one. The count of such rows is reported beside the distances.
     return np.where(np.isfinite(z), z, 0.0)
@@ -338,20 +352,20 @@ def oof_reference(
 
     On the final map's scale (all-pilot mean and sd), so the legs' distances compare directly.
     """
-    mu, sd, use = _standardiser(em.stats)
     x = pilot["x"]
-    dist = np.empty(x.shape[0])
+    dist = {name: np.empty(x.shape[0]) for name in _spaces(em.stats)}
     n_out = np.empty(x.shape[0], dtype=np.int64)
     for f in np.unique(row_folds):
         te = row_folds == f
-        dist[te] = nn_rms(_z(x[te], mu, sd, use), _z(x[~te], mu, sd, use))
+        for name, (mu, sd, idx) in _spaces(em.stats).items():
+            dist[name][te] = nn_rms(_z(x[te], mu, sd, idx), _z(x[~te], mu, sd, idx))
         lo, hi = np.nanmin(x[~te], axis=0), np.nanmax(x[~te], axis=0)
         n_out[te] = outside(x[te], lo, hi).sum(axis=1)
     return {
         "dist": dist,
         "summary": {
             "basis": "each pilot row to the nearest row of the OTHER four sealed 15-degree folds",
-            "nn_dist": _q(dist),
+            "nn_dist": {name: _q(v) for name, v in dist.items()},
             "share_rows_any_feature_outside_training_folds": float((n_out > 0).mean()),
         },
     }
@@ -363,17 +377,19 @@ def leg_envelope(
     lat: Array,
     treed: npt.NDArray[np.bool_],
     em: EquilibriumMap,
-    ref: Array,
+    ref: dict[str, Array],
     pilot_x: Array,
     pilot_lat: Array,
-) -> tuple[Array, npt.NDArray[np.int64], dict[str, Any]]:
-    mu, sd, use = _standardiser(em.stats)
-    dist = nn_rms(_z(x, mu, sd, use), _z(pilot_x, mu, sd, use))
+) -> tuple[dict[str, Array], npt.NDArray[np.int64], dict[str, Any]]:
+    dist = {
+        name: nn_rms(_z(x, mu, sd, idx), _z(pilot_x, mu, sd, idx))
+        for name, (mu, sd, idx) in _spaces(em.stats).items()
+    }
     lo = np.array([em.stats[f]["min"] for f in FEATURES])
     hi = np.array([em.stats[f]["max"] for f in FEATURES])
     out = outside(x, lo, hi)
     n_out = out.sum(axis=1).astype(np.int64)
-    ref_q = _q(ref)
+    ref_q = {name: _q(v) for name, v in ref.items()}
     by_feature = {f: float(out[treed, j].mean()) for j, f in enumerate(FEATURES)}
     top = dict(sorted(by_feature.items(), key=lambda kv: -kv[1])[:12])
 
@@ -383,8 +399,11 @@ def leg_envelope(
         return {
             "cells": int(m.sum()),
             "share_any_feature_outside": float((n_out[m] > 0).mean()),
-            "nn_dist": _q(dist[m]),
-            **{f"share_nn_beyond_oof_{k}": float((dist[m] > v).mean()) for k, v in ref_q.items()},
+            "nn_dist": {name: _q(v[m]) for name, v in dist.items()},
+            "share_nn_beyond_oof": {
+                name: {k: float((dist[name][m] > q).mean()) for k, q in ref_q[name].items()}
+                for name in dist
+            },
         }
 
     bands = {}
@@ -536,7 +555,10 @@ def main() -> int:  # noqa: PLR0915 -- one linear build, every check reported in
         "soil": {"file": str(soil_bin), "adapter": "scripts/screen_d95max.py:soil_columns"},
         "recipe": f"the sealed recipe of {SEALED_EXP} for the 22 scored heads; extra heads dev",
         "code_commit": _git("rev-parse", "HEAD"),
-        "code_dirty": bool(_git("status", "--porcelain", "--untracked-files=no")),
+        # Code only: the launcher's own ledger row is always uncommitted while the job runs.
+        "code_dirty": bool(
+            _git("status", "--porcelain", "--untracked-files=no", "--", "src", "scripts", "config")
+        ),
         "prereg_sha256_stamped_by_launcher": os.environ.get("VEGEMU_PREREG_SHA256", ""),
         "built": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
@@ -591,7 +613,8 @@ def main() -> int:  # noqa: PLR0915 -- one linear build, every check reported in
                 "lat": clim["lat"],
                 "pred_treeless": treeless,
                 **{f"pred_{h}": pred[:, j] for j, h in enumerate(HEADS)},
-                "env_nn_dist": dist,
+                "env_nn_dist": dist["all91"],
+                "env_nn_dist_analogue": dist["analogue8"],
                 "env_n_outside": n_out,
             }
         )
@@ -605,8 +628,8 @@ def main() -> int:  # noqa: PLR0915 -- one linear build, every check reported in
             f"{leg}: {frame.height} cells, treeless {treeless.mean():.3f}, "
             "any feature outside (tree-bearing) "
             f"{env['tree_bearing']['share_any_feature_outside']:.3f}, "
-            f"nn p50 {env['tree_bearing']['nn_dist'].get('p50', float('nan')):.3f} vs oof p50 "
-            f"{ref['summary']['nn_dist']['p50']:.3f}",
+            f"analogue-space nn p50 {env['tree_bearing']['nn_dist']['analogue8']['p50']:.3f} "
+            f"vs oof {ref['summary']['nn_dist']['analogue8']['p50']:.3f}",
             flush=True,
         )
 

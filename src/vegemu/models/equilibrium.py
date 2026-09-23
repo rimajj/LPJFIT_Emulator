@@ -59,8 +59,8 @@ THE OUT-OF-FOLD INTERFACE. `scripts/fit_equilibrium_map.py` writes `oof_pilot.pa
                             are computed from these, not from pred_
 
 with `<head>` running over `HEADS`, in that order. The per-leg files `pred_<leg>.parquet` carry
-`cell, lon, lat, pred_treeless, pred_<head>...` plus two extrapolation flags, `env_nn_dist` and
-`env_n_outside`, documented in that script.
+`cell, lon, lat, pred_treeless, pred_<head>...` plus three extrapolation flags, `env_nn_dist`,
+`env_nn_dist_analogue` and `env_n_outside`, documented in that script.
 """
 
 from __future__ import annotations
