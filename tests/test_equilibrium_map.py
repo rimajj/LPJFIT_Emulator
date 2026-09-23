@@ -17,10 +17,12 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 from exp_equilibrium_map import (
+    CONSTANT_QUANTITIES,
     FEATURES,
     FORBIDDEN,
     NULLS,
     QUANTITIES,
+    assert_constant,
     null_predictions,
     skill,
 )
@@ -41,10 +43,22 @@ def _case() -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
 
 def test_skill_is_pinned_at_zero_for_the_mean_and_one_for_the_truth() -> None:
     _, y, _, _ = _case()
-    np.testing.assert_allclose(skill(y.copy(), y), 1.0)
+    varying = [q not in CONSTANT_QUANTITIES for q in QUANTITIES]
+    perfect = skill(y.copy(), y)
+    np.testing.assert_allclose(perfect[varying], 1.0)
     flat = y.reshape(-1, y.shape[-1])
     mean = np.broadcast_to(np.nanmean(flat, axis=0), y.shape).copy()
-    np.testing.assert_allclose(skill(mean, y), 0.0, atol=1e-12)
+    np.testing.assert_allclose(skill(mean, y)[varying], 0.0, atol=1e-12)
+    assert np.isnan(perfect[~np.array(varying)]).all()
+
+
+def test_an_excluded_quantity_that_varies_is_refused() -> None:
+    _, y, _, _ = _case()
+    with pytest.raises(AssertionError, match="cannot be excluded"):
+        assert_constant(y)
+    for q in CONSTANT_QUANTITIES:
+        y[:, :, QUANTITIES.index(q)] = 0.7
+    assert_constant(y)
 
 
 def test_skill_refuses_an_arm_that_skipped_a_scored_row() -> None:

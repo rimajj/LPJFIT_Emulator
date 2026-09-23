@@ -23,8 +23,9 @@ WHAT IS SCORED. The 22 quantities of `SCORED_CONJUNCTIVE`, as LEVELS. The four f
 quantities (stems per patch, agb, lai, soil carbon) on log1p, because they span four orders of
 magnitude and a raw sum of squares would be decided by the densest few cells; the eighteen trait
 quantiles as they are. Per quantity `1 - SSE / SS(truth about its pooled mean)` over every
-(cell, climate) row where the truth exists, the mean of the 22 is the statistic. Folds hold out
-WHOLE CELLS -- all 30 of a cell's climates together -- in whole 15-degree tiles.
+(cell, climate) row where the truth exists; the mean over the 19 that vary is the statistic (see
+CONSTANT_QUANTITIES). Folds hold out WHOLE CELLS -- all 30 of a cell's climates together -- in
+whole 15-degree tiles.
 
 Reported beside it, never instead of it, because the owner's criterion is a 10 % band: the
 fraction of tree-bearing rows inside +-10 % of the truth, per quantity and on all 22 at once, and
@@ -73,6 +74,13 @@ FEATURES: tuple[str, ...] = (*CLIMATE_FEATURES, *SOIL_FEATURES)
 NULLS: tuple[str, ...] = ("training_mean", "nearest_analogue", "nearest_geographic", "shuffled")
 BAND = 0.10
 SHUFFLE_SEED = 20260923
+
+# ⚠ FINE-ROOT CONDUCTIVITY IS ONE VALUE IN EVERY TREE-BEARING RUN OF pilot-v2-constco2 (5,620 of
+# 5,620, spread ~1e-18), so "variance explained" is 0/0 for its three quantiles: it is not a trait
+# that varies in this configuration, and there is nothing to predict. Excluded from the skill mean,
+# which is therefore over 19 quantities; KEPT in the band rates, where every arm passes it for free
+# and that is disclosed. `assert_constant` refuses the run if a future corpus makes it vary.
+CONSTANT_QUANTITIES: tuple[str, ...] = ("k_root_p10", "k_root_p50", "k_root_p90")
 
 # Never features. Asserted, not trusted: any of these would hand the model the place, the forest
 # it is meant to predict, or the perturbation it is meant to infer from the climate itself.
@@ -148,9 +156,20 @@ def skill(pred: Array, y: Array) -> Array:
     for j in range(t.shape[1]):
         m = np.isfinite(t[:, j])
         assert np.isfinite(p[m, j]).all(), f"arm left {QUANTITIES[j]} unpredicted on scored rows"
+        if QUANTITIES[j] in CONSTANT_QUANTITIES:
+            continue
         ss = float(((t[m, j] - t[m, j].mean()) ** 2).sum())
         out[j] = 1.0 - float(((p[m, j] - t[m, j]) ** 2).sum()) / ss
     return out
+
+
+def assert_constant(y: Array) -> None:
+    """Refuse, rather than silently drop, if an excluded quantity turns out to vary."""
+    t = y.reshape(-1, y.shape[-1])
+    for q in CONSTANT_QUANTITIES:
+        v = t[np.isfinite(t[:, QUANTITIES.index(q)]), QUANTITIES.index(q)]
+        spread = float(v.max() - v.min()) if v.size else 0.0
+        assert spread <= 1e-9 * max(abs(float(v.mean())), 1.0), f"{q} varies; it cannot be excluded"
 
 
 def band_stats(pred: Array, raw: Array, treed: npt.NDArray[np.bool_]) -> dict[str, object]:
@@ -233,6 +252,8 @@ def ceiling(soil_bin: Path, base: Path, replicate: Path, y_scored: Array) -> dic
     both = np.isfinite(t1) & np.isfinite(t2)
     per_q = {}
     for j, q in enumerate(QUANTITIES):
+        if q in CONSTANT_QUANTITIES:
+            continue
         m = both[:, j]
         noise = 0.5 * float(((t1[m, j] - t2[m, j]) ** 2).mean())
         scored = ys[np.isfinite(ys[:, j]), j]
@@ -252,7 +273,8 @@ def score_arm(pred: Array, y: Array, raw: Array, points: list[str]) -> dict[str,
     treed = np.isfinite(raw[:, :, QUANTITIES.index("wooddens_p50")])
     per_level = {p: float(np.nanmean(skill(pred[:, [j]], y[:, [j]]))) for j, p in enumerate(points)}
     return {
-        "pooled": float(np.mean(per_q)),
+        "pooled": float(np.nanmean(per_q)),
+        "n_quantities_in_mean": int(np.isfinite(per_q).sum()),
         "per_quantity": {q: float(v) for q, v in zip(QUANTITIES, per_q, strict=True)},
         "per_level": per_level,
         "band": band_stats(pred, raw, treed),
@@ -285,6 +307,7 @@ def main() -> int:
     soil_bin = Path(str(paths()["inputs"]["soil"]))
     table = root / args.version / "corpus.parquet"
     _, x, y, raw, points, lon, lat = load(pl.read_parquet(table), soil_bin)
+    assert_constant(y)
     print(f"x {x.shape}, y {y.shape}, {len(points)} climates per cell", flush=True)
 
     report: dict[str, object] = {
