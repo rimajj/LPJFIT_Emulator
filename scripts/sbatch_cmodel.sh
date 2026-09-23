@@ -7,6 +7,18 @@
 # Env knobs: NTASKS=1 TIME=00:30:00 PARTITION=priority QOS= ACCOUNT=waldspektrum
 #            LPJ_DEFINES="-DFROM_RESTART"   preprocessor flags; set to "" for a SPIN-UP run
 #            LPJ_MODULES="..."              the module set the job loads; default is pinned below
+#            HARVEST_BY=<ISO date>          when the ledger calls the campaign overdue
+#            EST_CORE_HOURS=<h>             the member-based CPU estimate for the ledger row;
+#                                           without it the row carries the bound NTASKS x TIME
+#
+# ─── PACKING: NTASKS SMALLER THAN THE MANIFEST (added 2026-09-23) ─────────────────────────────
+# With a manifest, NTASKS defaults to its length: every member holds its own CPU for the whole
+# job, so the allocation is charged at the LONGEST member's wall time. Measured on the 6,000-member
+# pilot `v2-constco2`: 686.6 core-hours allocated for 361.2 of CPU, 1.90x, because a treeless
+# member finishes in under a minute and a dense forest one takes up to nine. Set NTASKS below the
+# manifest length and the farm keeps exactly NTASKS members in flight, starting the next one as
+# each finishes, so the allocation tracks the CPU actually used. TIME must then cover
+# (the manifest's CPU / NTASKS) + its longest member.
 #
 # ─── WHY A WRAPPER ─────────────────────────────────────────────────────────────────────────────
 # A PreToolUse hook denies calling `bin/lpjml` from a session: it needs its module environment, it
@@ -43,6 +55,10 @@
 #    returned 1 on a job that died in zero seconds with exit 127 -- a failed run wearing a pass.
 #    Both halves are fixed: the recorded harvest commands are anchored, AND the advice text no
 #    longer contains the phrase, so even a careless grep cannot match a decoy.
+#    ⚠ AND THE LINE STARTS WITH THE BINARY'S OWN FILE NAME, not with "lpjml" (measured 2026-09-23):
+#    the Feb-05 build is `lpjml.pre_dgrass.bak` and prints `lpjml.pre_dgrass.bak successfully
+#    terminated`, so a fixed `^lpjml successfully` pattern fails every run of it. The pattern is
+#    built from the basename of whichever binary LPJ_BINARY_KEY resolved to.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -161,6 +177,14 @@ fi
 NRUNS=1
 if [[ -n "$MANIFEST" ]]; then NRUNS=$(grep -c . "$MANIFEST"); fi
 NTASKS="${NTASKS:-$NRUNS}"
+if (( NTASKS > NRUNS )); then
+  echo "sbatch_cmodel: NTASKS=$NTASKS exceeds the $NRUNS runs; allocating $NRUNS (the rest would idle)." >&2
+  NTASKS=$NRUNS
+fi
+if (( NTASKS < NRUNS )); then
+  echo "sbatch_cmodel: PACKED farm -- $NRUNS members through $NTASKS CPUs, at most $NTASKS in flight."
+  echo "  TIME must cover the manifest's CPU / $NTASKS plus its longest member, or members are lost."
+fi
 TIME="${TIME:-00:30:00}"
 PARTITION="${PARTITION:-priority}"
 ACCOUNT="${ACCOUNT:-waldspektrum}"
@@ -171,6 +195,35 @@ if [[ "$PARTITION" == "priority" ]] && (( NTASKS > 64 )); then
   exit 2
 fi
 LOGDIR="$REPO/logs"; mkdir -p "$LOGDIR"
+
+# ─── what the ledger row must carry to reproduce and to cost this job ─────────────────────────
+# LPJ_IND_* are the binary's opt-in output switches (config/paths.yaml, `lpjml`): inert unless set,
+# but when set they change what every member WRITES, and --export=ALL hands the job whatever the
+# submitting shell happened to have. So both values go into the job log and into the ledger row's
+# command line, set or not -- an empty value recorded is a fact, an absent one is a guess.
+IND_ENV="LPJ_IND_ALL_HEIGHTS='${LPJ_IND_ALL_HEIGHTS-}' LPJ_IND_TRUE_GPP='${LPJ_IND_TRUE_GPP-}'"
+# SLURM's TIME forms: MM, MM:SS, HH:MM:SS, D-HH, D-HH:MM, D-HH:MM:SS.
+time_to_hours() {
+  local t="$1" d=0 a b c
+  if [[ "$t" == *-* ]]; then
+    d="${t%%-*}"; t="${t#*-}"
+    IFS=: read -r a b c <<< "$t"
+    awk -v d="$d" -v h="${a:-0}" -v m="${b:-0}" -v s="${c:-0}" 'BEGIN{printf "%.4f", d*24+h+m/60+s/3600}'
+    return
+  fi
+  IFS=: read -r a b c <<< "$t"
+  if [[ -z "${b-}" ]]; then awk -v m="$a" 'BEGIN{printf "%.4f", m/60}'
+  elif [[ -z "${c-}" ]]; then awk -v m="$a" -v s="$b" 'BEGIN{printf "%.4f", m/60+s/3600}'
+  else awk -v h="$a" -v m="$b" -v s="$c" 'BEGIN{printf "%.4f", h+m/60+s/3600}'
+  fi
+}
+if [[ -n "${EST_CORE_HOURS-}" ]]; then
+  EST="$EST_CORE_HOURS"; EST_BASIS="caller's member-based estimate"
+else
+  EST="$(awk -v n="$NTASKS" -v h="$(time_to_hours "$TIME")" 'BEGIN{printf "%.2f", n*h}')"
+  EST_BASIS="allocation bound NTASKS x TIME, not an estimate of use"
+fi
+echo "sbatch_cmodel: est core-hours $EST ($EST_BASIS); $IND_ENV"
 
 # ─── the batch body ────────────────────────────────────────────────────────────────────────────
 # A MANIFEST run is a task farm: one single-cell spin-up per task, all inside ONE allocation and
@@ -191,7 +244,12 @@ if [[ -n "$MANIFEST" ]]; then
   cat > "$RUNNER" <<'RUNNEREOF'
 #!/usr/bin/env bash
 # Task farm for one manifest: <name>\t<config>\t<run-dir> per line, one SLURM task each.
-# Inputs, all exported by the job script: LPJBIN LPJ_DEFS MANIFEST
+# Inputs, all exported by the job script: LPJBIN LPJ_DEFS MANIFEST MAXPAR
+#
+# ⚠ AT MOST MAXPAR MEMBERS ARE IN FLIGHT (= the job's NTASKS); the next starts only when one ends
+# (`wait -n`). That is what lets a manifest be LONGER than its allocation. Not left to `srun
+# --exclusive` queueing alone: that works too, but it parks every not-yet-runnable member as a
+# blocked srun process on the batch node, each of them polling the controller.
 #
 # ⚠ TWO BUGS THIS FILE IS SHAPED AROUND, BOTH MEASURED HERE, BOTH SILENT.
 #
@@ -204,9 +262,11 @@ if [[ -n "$MANIFEST" ]]; then
 #    starved. `want` is read straight off the file, so an under-launch is loud.
 set -uo pipefail
 want=$(grep -c . "$MANIFEST")
+maxpar="${MAXPAR:-$want}"
 n=0
 while IFS=$'\t' read -r name cfg rdir; do
   [ -z "${name// }" ] && continue
+  while [ "$(jobs -rp | wc -l)" -ge "$maxpar" ]; do wait -n; done
   mkdir -p "$rdir/output" "$rdir/restart"
   (
     cd "$rdir" || exit 1
@@ -217,17 +277,19 @@ while IFS=$'\t' read -r name cfg rdir; do
   ) &
   n=$((n+1))
 done < "$MANIFEST"
-echo "=== launched $n of $want members; waiting ==="
+echo "=== launched $n of $want members, at most $maxpar at a time; waiting ==="
 if [ "$n" -ne "$want" ]; then
   echo "LAUNCH SHORTFALL: the manifest has $want lines but only $n started." >&2
 fi
 wait
 
-# The verdict is the model's own line in each member's own log, never the exit codes above.
+# The verdict is the model's own line in each member's own log, never the exit codes above. It
+# begins with the binary's own file name, dots escaped so the pattern stays literal.
+donepat="^$(basename "$LPJBIN" | sed 's/\./\\./g') successfully terminated"
 ok=0
 while IFS=$'\t' read -r name cfg rdir; do
   [ -z "${name// }" ] && continue
-  if grep -q '^lpjml successfully terminated' "$rdir/lpjml.$name.log" 2>/dev/null; then
+  if grep -q "$donepat" "$rdir/lpjml.$name.log" 2>/dev/null; then
     ok=$((ok+1))
   else
     echo "MEMBER FAILED (no completion line): $name  -> $rdir/lpjml.$name.log"
@@ -243,6 +305,7 @@ RUNNEREOF
       "export LPJBIN=\"$LPJBIN\"" \
       "export LPJ_DEFS=\"$DEFINES\"" \
       "export MANIFEST=\"$MANIFEST\"" \
+      "export MAXPAR=\"$NTASKS\"" \
       "bash \"$RUNNER\"" \
       'rc=$?'
   )
@@ -271,6 +334,7 @@ JOBID=$(sbatch --parsable \
 set -uo pipefail
 export LPJROOT="$LPJROOT"
 echo "=== JOB START tag=$TAG host=\$(hostname) ntasks=$NTASKS runs=$NRUNS defines='$DEFINES' ==="
+echo "=== binary key=$LPJ_BINARY_KEY  $IND_ENV ==="
 
 # Trap 5: load the PINNED set, so this job's libraries do not depend on the submitting shell.
 if [[ -f /usr/share/lmod/lmod/init/bash ]]; then
@@ -304,25 +368,39 @@ echo "submitted $TAG as job $JOBID  (log: logs/$TAG.$JOBID.out)"
 echo "run dir: $RUN_DIR   runs: $NRUNS"
 echo
 echo "JUDGE IT BY THE MODEL'S OWN LINE, not by the exit code:"
+DONEPAT="^$(basename "$LPJBIN" | sed 's/\./\\./g') successfully terminated"
 if [[ -n "$MANIFEST" ]]; then
   # Each member logs to its own run directory, so the job log alone cannot prove all of them
   # finished. The harvest command counts the members that printed the model's own line, and the
   # answer must be $NRUNS -- anything less is a partial campaign wearing a green exit code.
-  HARVEST="grep -l '^lpjml successfully terminated' \$(awk -F'\t' 'NF{print \$3\"/lpjml.\"\$1\".log\"}' $MANIFEST) | wc -l   # must be $NRUNS"
-  CMDLINE="LPJ_BINARY_KEY='$LPJ_BINARY_KEY' LPJ_DEFINES='$DEFINES' scripts/sbatch_cmodel.sh --manifest $MANIFEST $TAG"
+  HARVEST="grep -l '$DONEPAT' \$(awk -F'\t' 'NF{print \$3\"/lpjml.\"\$1\".log\"}' $MANIFEST) | wc -l   # must be $NRUNS"
+  CMDLINE="LPJ_BINARY_KEY='$LPJ_BINARY_KEY' LPJ_DEFINES='$DEFINES' $IND_ENV PARTITION=$PARTITION NTASKS=$NTASKS TIME=$TIME scripts/sbatch_cmodel.sh --manifest $MANIFEST $TAG"
 else
-  HARVEST="grep '^lpjml successfully terminated' logs/$TAG.$JOBID.out"
-  CMDLINE="LPJ_BINARY_KEY='$LPJ_BINARY_KEY' LPJ_DEFINES='$DEFINES' scripts/sbatch_cmodel.sh $TAG $CONFIG $RUN_DIR"
+  HARVEST="grep '$DONEPAT' logs/$TAG.$JOBID.out"
+  CMDLINE="LPJ_BINARY_KEY='$LPJ_BINARY_KEY' LPJ_DEFINES='$DEFINES' $IND_ENV PARTITION=$PARTITION NTASKS=$NTASKS TIME=$TIME scripts/sbatch_cmodel.sh $TAG $CONFIG $RUN_DIR"
 fi
 # ⚠ THE BINARY IS PART OF THE RUN'S IDENTITY, exactly as LPJ_DEFINES is: the same config under a
 # different build is a different simulation, and that is the whole point of the key existing. A
 # ledger row that did not name it could not reproduce its own run.
 echo "  $HARVEST"
 
-python3 "$REPO/tools/campaigns.py" launch \
-  --line "$LINE" --tag "$TAG" --job "$JOBID" \
-  --partition "$PARTITION" --cpus "$NTASKS" \
-  --log-glob "logs/$TAG.$JOBID.out" \
-  --cmd "$CMDLINE" \
-  --harvest-cmd "$HARVEST" \
-  ${EXPECT:+--expect $EXPECT}
+# ⚠ UNDER THE CLUSTER INTERPRETER, NOT BARE `python3` -- the trap `sbatch_py.sh` documents: the
+# login node's system python3 is 3.9, `tools/campaigns.py` needs 3.11 (`tomllib`), and a ledger
+# write that dies AFTER the job is queued leaves a running job nobody will come back for.
+PY_BIN="$(python3 "$REPO/tools/_paths.py" cluster.python)" || PY_BIN=""
+[[ -x "$PY_BIN" ]] || PY_BIN="python3"
+LEDGER_ARGS=(
+  launch --line "$LINE" --tag "$TAG" --job "$JOBID"
+  --partition "$PARTITION" --cpus "$NTASKS"
+  --log-glob "logs/$TAG.$JOBID.out"
+  --cmd "$CMDLINE"
+  --harvest-cmd "$HARVEST"
+  --est-core-hours "$EST"
+)
+if [[ -n "${HARVEST_BY-}" ]]; then LEDGER_ARGS+=(--harvest-by "$HARVEST_BY"); fi
+if [[ -n "${EXPECT-}" ]]; then LEDGER_ARGS+=(--expect "$EXPECT"); fi
+if ! "$PY_BIN" "$REPO/tools/campaigns.py" "${LEDGER_ARGS[@]}"; then
+  echo "sbatch_cmodel: ⚠ JOB $JOBID IS QUEUED BUT NOT IN THE LEDGER. Write the row by hand or" >&2
+  echo "  cancel it -- an unrecorded job is one nobody replays at session start: scancel $JOBID" >&2
+  exit 1
+fi
