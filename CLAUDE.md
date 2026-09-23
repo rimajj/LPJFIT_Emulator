@@ -139,8 +139,9 @@ recorded in `campaigns/<L>/ledger.jsonl` by the wrapper itself, and every sessio
 open ones. A campaign stays open until it is harvested, declared dead, or abandoned **with a reason**;
 an overdue one blocks the merge.
 
-⚠ **Judge a silent job by `sacct` CPU time, never by its log** — Python block-buffers stdout to a
-file, so a healthy job's log is empty until it exits. Cluster facts: `docs/reference/cluster.md`.
+⚠ **Judge a silent job by CPU time, never by its log** — `sstat -j <id>.batch` (AveCPU) while it
+runs, `sacct` TotalCPU once it has ended: `sacct` reads 0 for a running step. Python block-buffers
+stdout, so a healthy job's log is empty until it exits. Cluster facts: `docs/reference/cluster.md`.
 
 ---
 

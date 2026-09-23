@@ -51,10 +51,14 @@ nulls, different bars.
 **What is still unknown.** 200 of 54,020 cells, so this is not a fidelity claim and the acceptance
 criterion is untouched. It licenses nothing about composition under a SCENARIO leg: this ensemble
 identifies the response by construction and the scenario legs do not identify it at all
-(`X-20260908-heldout-forcing-leg`, outcome (c)). And no blind arm has been run for the composition
-estimand, so the share of this 0.4459 attributable to the FORCING rather than to knowing the
-starting roster is unmeasured — the response test's blind arm puts that share near two thirds for
-its own estimand, and there is no reason to assume composition differs.
+(`X-20260908-heldout-forcing-leg`, outcome (c)).
+
+⚠ **Corrected 2026-09-23 — the blind arm has now run** (`X-20260923-pilot-composition-blind-arm`;
+this paragraph said none had). A model that knows the starting forest but NOT which climate change
+it is asked about scores **0.307940**, clearing this experiment's bar of 0.300203 by itself (it
+fails under the 5-degree blocking, 0.296620 against 0.305348). So this pass is not by itself
+evidence that the mix's response to CLIMATE is learnable: only about **+0.138** of the 0.4459 is
+attributable to the forcing (blind = 69 %, against 64.8 % on the response test).
 
 ## Metrics
 
