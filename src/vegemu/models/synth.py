@@ -53,12 +53,27 @@ the matching size rank, and the height/density match happens only among donors o
 template is a real state of that cell, so its set of types is climatically admissible by
 construction. `inadmissible_placed` is reported per cell and must be zero.
 
-WHAT THIS DOES NOT DO YET, part two. Copying the type composition from the template means the
-synthesiser **cannot change species composition**. That is a real limit on the warmed-climate
-product, where a shift in composition is a large part of the response, and it is a limit of the
-SYNTHESISER, not of the idea: `corpus/state.py` already computes `pft_frac_*` per cell, so the
-composition becomes predictable as soon as those columns are added to the scored set. Until then
-a warmed-climate restart carries present-day composition, and that must be disclosed with it.
+WHAT THE DEFAULT PATH STILL DOES NOT DO, and the options that now do it. Copying the type
+composition from the template means the default path **cannot change species composition**, and
+the default path is kept exactly as it was because the deliverable `synth-v5` is defined by it (a
+real-data test re-emits it record for record). Four options, all off by default, replace COPIED
+fields for a cell synthesised under a climate it was never run under:
+
+    type_shares     the species mix becomes an INPUT (`_composition_roster`): per-type counts by
+                    largest remainder, each type's stems read off its own height ladder, the
+                    recalibration knots taken from the template ladder reweighted to the new mix
+    allowed_types   "the template holds it" becomes "the TARGET climate admits it", from the
+                    model's own survive()/establish() limits (`vegemu.models.climbuf`) -- which
+                    also closes the treeless-template hole, where the old rule switched itself off
+    climbuf         the climate buffer is DERIVED from the target forcing, bit-exact on all 6,000
+                    pilot runs for every field the forcing determines
+    rescale_litter  the litter follows the soil-carbon rescale (measured to beat copying it)
+
+`scripts/synth_pilot.py` drives them on the pilot, with donors chosen by climate analogue outside
+the target's spatial fold (`choose_analogue_runs`). ⚠ Measured there, and not yet solved: with a
+PERFECT prediction, established stems still die in the first model year at about twice the rate
+the model's own equilibrium stems do (11.2 % against 5.5 %, 120 targets) -- the roster is right
+and still not wholly at home.
 
 ⚠ THE ROSTER IS DRAWN AT CELL-LEVEL RANKS, AND IT USED TO BE DRAWN AT PER-PATCH ONES. That was a
 bug, and it cost the whole upper tail of the size distribution. The predicted quantiles are CELL
