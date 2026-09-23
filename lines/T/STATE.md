@@ -98,9 +98,10 @@ on carbon at year one and fails conjunctively. t5 (end-to-end transient) not sta
 * **An ORACLE arm is the cheapest attribution there is** — it has seen the answer, so never quote it
   as skill. **Fit ONE model and apply it to both climates** when scoring a response.
 * `k_root` is exactly CONSTANT — the conjunctive test is over **19** quantities, not 22. Say so.
-* **No known prose-in-a-command case still trips the login-node guard** (flags, paths, heredoc
-  bodies and quoted assignments all fixed by 2026-09-16); if one does, it is a bug to report, not a
-  thing to work around. `ALLOW_LOGIN_HEAVY=1` is for a genuinely quick REAL check only.
+* **Prose in flags, heredocs and quoted assignments no longer trips the login-node guard.** ⚠ One
+  read still does (2026-09-23): a command naming a `scripts/sbatch_*.sh` file plus train/eval/score/
+  fit/sweep/response/rung and no `--exp` is refused as a submission, even a `grep` — split it and
+  report it. `ALLOW_LOGIN_HEAVY=1` is for a genuinely quick REAL check only.
 * **A decision record is immutable the moment it says `accepted`**, including one written five
   minutes ago and never committed. Write `draft`, or expect to delete and rewrite.
 * **`git rev-list --left-right --count origin/main...HEAD` prints BEHIND first, then AHEAD.** Re-read

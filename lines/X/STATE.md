@@ -32,7 +32,7 @@ own corpus and estimand.
 1. **Blind arms.** Response: 64.8 % blind skill, forcing-attributable +0.196646. Composition
    (`X-20260923-pilot-composition-blind-arm`): the blind model CLEARS the 0.300203 bar by itself at
    15° (fails at 5°, 0.296620 vs 0.305348), so only ~+0.138 reads the forcing (blind 69 %). Its
-   apparatus check missed its 1e-6 tolerance by 1.5e-6 — disclosed in that verdict.
+   apparatus re-fit was off by 1.5e-6 against a 1e-6 tolerance — disclosed in that verdict.
 2. **Composition loses to no-change at 2 of 29 levels**, both cold (`core_t+0_p13` −0.0882,
    `lhs10` −0.0665); the response arm wins 29 of 29.
 3. **Every ceiling borrows its noise from the two TRANSIENT-CO₂ ground-truth spin-ups.** The
