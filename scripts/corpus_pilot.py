@@ -1019,8 +1019,15 @@ def stage_build(  # noqa: PLR0912 -- the plan-versus-CLI refusals, then one pass
 # ------------------------------------------------------------------------------------------------
 
 
-def _check_co2(runs: pl.DataFrame, co2: Co2, version: str, tier: str) -> list[str]:
+def _check_co2(
+    runs: pl.DataFrame, co2: Co2, version: str, tier: str
+) -> tuple[set[str], list[str], list[str]]:
     """Every run's input list names the plan's CO2 file, and that file is what the plan says.
+
+    Returns `(runs with a problem, per-run problems, problems with the CO2 file itself)`. Kept
+    apart because a missing, short or wrong-level FILE is not a problem with any one run, and
+    counting it as one used to make "co2 inputs as planned" read 5,999/6,000 when no run could
+    start.
 
     ⚠ THIS IS THE CHECK WHOSE ABSENCE HID A CO2 RAMP FOR A WEEK. The old verify stage looked for
     configs and forcing and never opened the CO2 entry, so a transient-CO2 build under a plan that
@@ -1033,30 +1040,35 @@ def _check_co2(runs: pl.DataFrame, co2: Co2, version: str, tier: str) -> list[st
         saved = path("ground_truth.historical_seed1") / cfgmod.SAVED_INPUT
         expected = cfgmod.read_co2_input(saved)
     problems: list[str] = []
+    file_problems: list[str] = []
+    bad_runs: set[str] = set()
     for name, config in zip(runs["name"].to_list(), runs["config"].to_list(), strict=True):
         input_js = Path(config).with_name(f"input_{name}.js")
         if not input_js.is_file():
             problems.append(f"{name}: no input list {input_js.name}")
+            bad_runs.add(name)
             continue
         got = cfgmod.read_co2_input(input_js)
         if got != expected:
             problems.append(f"{name}: co2 input {got}, the plan says {expected}")
+            bad_runs.add(name)
         text = Path(config).read_text(encoding="utf-8") if Path(config).is_file() else ""
         if text.count(f'#include "{input_js}"') != 2:
             problems.append(f"{name}: the config does not include its own input list twice")
+            bad_runs.add(name)
     if not Path(expected).is_file():
-        return [*problems, f"the CO2 file {expected} does not exist"]
+        return bad_runs, problems, [f"the CO2 file {expected} does not exist"]
     span = range(cfgmod.SPINUP_FIRST_MODEL_YEAR, cfgmod.SPINUP_LAST_MODEL_YEAR + 1)
     seen = cfgmod.co2_seen_by_model(Path(expected), span)
     if any(np.isnan(v) for v in seen.values()):
-        problems.append(f"{expected} ends before model year {span[-1]}: the run would die there")
+        file_problems.append(f"{expected} ends before model year {span[-1]}: runs would die there")
     if co2.constant and any(v != co2.ppm for v in seen.values()):
         bad = sorted(y for y, v in seen.items() if v != co2.ppm)
-        problems.append(
+        file_problems.append(
             f"the model would see a CO2 other than {co2.ppm} ppm in {len(bad)} spin-up years "
             f"({bad[0]}-{bad[-1]}): the file starts too late for the clamp to agree"
         )
-    return problems
+    return bad_runs, problems, file_problems
 
 
 def stage_verify(version: str, seed: int = SEED, tier: str = "pilot") -> int:
@@ -1080,7 +1092,8 @@ def stage_verify(version: str, seed: int = SEED, tier: str = "pilot") -> int:
             else:
                 size = f.stat().st_size
                 sizes[size] = sizes.get(size, 0) + 1
-    co2_problems = _check_co2(runs, co2, version, tier)
+    co2_bad_runs, co2_run_problems, co2_file_problems = _check_co2(runs, co2, version, tier)
+    co2_problems = [*co2_file_problems, *co2_run_problems]
 
     total = runs.height
     print(f"{tier} corpus {version} seed {seed}: {total} runs promised by the manifests")
@@ -1088,9 +1101,9 @@ def stage_verify(version: str, seed: int = SEED, tier: str = "pilot") -> int:
     print(f"  forcing files present  {sum(sizes.values())}/{total * 5}")
     print(f"  distinct forcing sizes {sorted(sizes.items(), reverse=True)[:4]}")
     print(f"  co2 (plan)             {prov['co2']}")
-    print(
-        f"  co2 inputs as planned  {total - len({p.split(':')[0] for p in co2_problems})}/{total}"
-    )
+    print(f"  co2 inputs as planned  {total - len(co2_bad_runs)}/{total}")
+    if co2_file_problems:
+        print(f"  ⚠ the CO2 FILE itself fails its check, so NO run is ready: {co2_file_problems}")
     if len(sizes) > 1:
         print(
             "  ⚠ forcing files are NOT all the same size. A `.clm` size mismatch means the "

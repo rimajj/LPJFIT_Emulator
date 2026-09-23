@@ -425,6 +425,50 @@ def test_an_existing_co2_file_at_another_level_is_refused(
         m._write_co2_if_constant("v9", "pilot", m.Co2(True, 276.59))
     assert dest.read_text() == "1700  300.00\n"
     assert sorted(p.name for p in tmp_path.iterdir()) == ["co2_constant.txt"], "no leftovers"
+
+
+def _co2_runs(tmp_path: Path, co2_file: Path, names: list[str]) -> pl.DataFrame:
+    """Two runs as the build writes them: an input list naming `co2_file`, included twice."""
+    configs = []
+    for name in names:
+        rdir = tmp_path / "runs" / name
+        rdir.mkdir(parents=True)
+        input_js = rdir / f"input_{name}.js"
+        input_js.write_text(f'  "co2" :          {{ "fmt" : "txt",  "name" : "{co2_file}"}},\n')
+        config = rdir / f"lpjml_spinup_{name}.js"
+        config.write_text(f'  #include "{input_js}"\n' * 2)
+        configs.append(str(config))
+    return pl.DataFrame({"name": names, "config": configs})
+
+
+def test_verify_counts_co2_file_problems_apart_from_run_problems(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A CO2 file that is wrong fails EVERY run; it used to be counted as one bad run."""
+    m = _script("corpus_pilot")
+    co2_file = tmp_path / "co2_constant.txt"
+    monkeypatch.setattr(m, "constant_co2_path", lambda *a, **k: co2_file)
+    runs = _co2_runs(tmp_path, co2_file, ["r1", "r2"])
+
+    bad, per_run, per_file = m._check_co2(runs, m.Co2(True, 276.59), "v9", "pilot")
+    assert (bad, per_run) == (set(), [])
+    assert per_file == [f"the CO2 file {co2_file} does not exist"]
+
+    co2_file.write_text("".join(f"{y}  350.00\n" for y in range(1700, 2101)))
+    bad, per_run, per_file = m._check_co2(runs, m.Co2(True, 350.0), "v9", "pilot")
+    assert (bad, per_run) == (set(), [])
+    assert len(per_file) == 1 and "700 spin-up years (1000-1699)" in per_file[0]
+
+    co2_file.write_text("".join(f"{y}  350.00\n" for y in range(1000, 2101)))
+    assert m._check_co2(runs, m.Co2(True, 350.0), "v9", "pilot") == (set(), [], [])
+
+    (tmp_path / "runs" / "r2" / "input_r2.js").write_text(
+        '  "co2" :          { "fmt" : "txt",  "name" : "/elsewhere.txt"},\n'
+    )
+    bad, per_run, per_file = m._check_co2(runs, m.Co2(True, 350.0), "v9", "pilot")
+    assert bad == {"r2"} and len(per_run) == 1 and per_file == []
+
+
 # ------------------------------------------------------------------------------------------------
 # Real files
 # ------------------------------------------------------------------------------------------------
