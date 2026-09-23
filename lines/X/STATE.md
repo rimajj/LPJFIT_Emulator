@@ -50,8 +50,8 @@ own bar** — the raw numbers are not interchangeable and neither are the bars.
 2. **Move the forcing-attributable +0.196646.** With the corpus question settled, the BLIND ARM at
    0.362322 is the competitor that matters, not the nulls. Making blindness the DECISION competitor
    needs its own exp_id — it would force the bar to ~0.56, a harder question, not a re-run.
-3. **A blind arm for COMPOSITION has never been run**, so how much of the 0.4459 comes from the
-   forcing rather than from knowing the starting roster is unmeasured. The ablation script exists.
+3. ✅ **Composition blind arm RAN 2026-09-23: 0.3079, CLEARS the 0.3002 bar by itself** (fails at
+   5 deg). Only ~+0.138 of 0.4459 reads the forcing (blind 69 %). `X-20260923-pilot-composition-blind-arm`.
 
 ✅ **FIXED 2026-09-23, BOTH IDS CLOSED — do not re-open.** A sealed experiment is now abandoned with
 `tools/abandon_experiment.py <id> --reason '<why>'`, which appends to `experiments/registry.jsonl`

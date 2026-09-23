@@ -43,7 +43,7 @@ Each rung is a pre-registered experiment. Status is updated here when a verdict 
 | **5** | Does the response survive a **held-out forcing leg**? | the warming claim | **FAILED 2026-09-14 at pre-named outcome (c), 0.0054 vs persistence 0.0337** — the scenario legs cannot train a response. Not a contradiction of rung 1; see below |
 | **6** | Product B, and stage-2 output reconstruction. | product B only | not started |
 | **7** | All 54,020 tree-bearing cells, both scenarios, at acceptance-grade patch count. | acceptance | not started |
-| **8** | **Can the species mix shift, and can that be learned?** | the synthesiser copying composition | **PASSED, AND RE-PASSED WITH CO₂ PINNED 2026-09-21: 0.4459 vs a bar of 0.3002, 52 % of the attainable 0.8629** (on v1: 0.4256 vs 0.3379). Copying composition is a measured defect, not a free simplification, and not a CO₂ artefact. ⚠ fails 2 of 29 levels, both cold |
+| **8** | **Can the species mix shift, and can that be learned?** | the synthesiser copying composition | **PASSED, AND RE-PASSED WITH CO₂ PINNED 2026-09-21: 0.4459 vs a bar of 0.3002, 52 % of the attainable 0.8629** (on v1: 0.4256 vs 0.3379). Copying composition is a measured defect, not a free simplification, and not a CO₂ artefact. ⚠ fails 2 of 29 levels, both cold. ⚠ **A model BLIND to the climate change scores 0.3079 and clears that bar by itself** (2026-09-23): only ~+0.138 of the 0.4459 reads the forcing |
 
 ### Rung 0 — format round-trip (line D). PASSED.
 100 real cells, 360,183 B → 3,546,287 B, byte-identical, plus both `.clm` inputs. `binfmt.md`.
@@ -128,7 +128,7 @@ who the item belongs to, not who must do it. Record `20260917-INT-*`.
 
 | open, in value order | owner | blocked on |
 |---|---|---|
-| **move the forcing-attributable +0.1967** — the blind arm, not the nulls, is the competitor now; and composition has NO blind arm at all, so how much of its 0.4459 is forcing is unmeasured | **X** | nothing |
+| **move the forcing-attributable part** — +0.1967 on the response test, +0.138 on composition (blind 69 %, `X-20260923-pilot-composition-blind-arm`); the blind arm, not the nulls, is the competitor | **X** | nothing |
 | **stop `models/synth.py` copying species composition**; it needs its own t0–t4 pass, not just a score | **T** | nothing |
 | a NEW estimand for the emitted restart, replacing X4 | **X** | nothing |
 | one cell, one year, two binaries, byte-compared — the only unproven rung-5 claim | **D** | nothing |
