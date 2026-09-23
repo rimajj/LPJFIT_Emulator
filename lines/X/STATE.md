@@ -43,6 +43,9 @@ own bar** — the raw numbers are not interchangeable and neither are the bars.
    it needs a v2 second seed, which does not exist and was not requested.
 4. 200 of 54,020 cells: no fidelity claim, acceptance criterion untouched, nothing about a leg.
 
+✅ **PRODUCT A FROM CLIMATE + SOIL ALONE PASSES (2026-09-23)**: 0.607582 vs bar 0.222666, analogue
+0.097666, ceiling 0.950; 0.0 % inside a flat 10 % on all 22. `X-20260923-equilibrium-from-climate`.
+
 **THIS LINE'S NEXT ACTIONS, in order:**
 
 1. **A new estimand to replace X4** — still the only open DESIGN question here, unblocked, needs no
@@ -53,13 +56,9 @@ own bar** — the raw numbers are not interchangeable and neither are the bars.
 3. ✅ **Composition blind arm RAN 2026-09-23: 0.3079, CLEARS the 0.3002 bar by itself** (fails at
    5 deg). Only ~+0.138 of 0.4459 reads the forcing (blind 69 %). `X-20260923-pilot-composition-blind-arm`.
 
-✅ **FIXED 2026-09-23, BOTH IDS CLOSED — do not re-open.** A sealed experiment is now abandoned with
-`tools/abandon_experiment.py <id> --reason '<why>'`, which appends to `experiments/registry.jsonl`
-and never touches the sealed bytes, so E03 stays green through it. E13 reads both homes (`abandoned:`
-in a DRAFT's yaml, the registry row once sealed), and so does the session-start hook — without that
-it would have listed these two forever. `X-20260921-pilot-{warming,composition}-response-constco2`
-(no `-resealed`) are abandoned with the `corpus.parquet` reason now machine-readable, the 2026-10-21
-deadline discharged, the E03 carve-out refused. `docs/decisions/20260923-INT-the-abandonment-*`.
+✅ **CLOSED 2026-09-23, do not re-open:** a sealed experiment is abandoned with
+`tools/abandon_experiment.py` (a registry row, never an edit); both un-resealed `-constco2` ids are
+abandoned that way. `docs/decisions/20260923-INT-the-abandonment-*`.
 
 **WHY THEY WERE SUPERSEDED — a trap worth knowing.** Their leakage checks named `corpus.parquet`
 as the model arm's `--cache`. It has 181 columns and `build_features` turns EVERY column outside

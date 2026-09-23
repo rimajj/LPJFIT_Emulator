@@ -36,6 +36,8 @@ this line has already had twice, and both times every mean the synthesiser print
 (3) It is scored **only where a forest existed at both ends** — 5,258 of 5,800 pairs — which tilts
 what remains toward the milder perturbations. All three are in the verdict; keep them together.
 
+✅ **2026-09-23: Product A from climate + soil ALONE passes** — 0.608 of variance vs a 0.098 lookup
+(ceiling 0.950); traits 0.29–0.60 and 0 % within 10 % on all 22 are the gap. `scripts/exp_equilibrium_map.py`.
 ⚠ **2026-09-23: a model BLIND to the climate change scores 0.3079 on composition and clears the
 bar alone** — justify the head by the ~+0.138 forcing part, not the 0.4459. `X-20260923-*-blind-arm`.
 

@@ -37,7 +37,7 @@ Each rung is a pre-registered experiment. Status is updated here when a verdict 
 |---|---|---|---|
 | **0** | Does our reader/writer round-trip a real restart file byte-identically? | the restart deliverable entirely | **PASSED 2026-09-08** |
 | **1** | **THE KILL TEST.** Given a cell's climate shifted by +4 K, can a model beat "predict this cell as it is today"? | the whole project, in ~week 3 for ~670 core-hours | **PASSED, AND RE-PASSED WITH CO₂ PINNED 2026-09-21: 0.5590 vs a bar of 0.2577, = 66 % of the attainable 0.8485** (on the CO₂-ramped v1 it was 0.5453 vs 0.2257). (Failed −0.727 on the existing data, as expected there.) Never quote it without the blind-arm caveat below |
-| **2** | Does the map meet `max(10 %, two-seed spread)` conjunctively per cell? | the science, not the engineering | **FAILED: 0.036 against a best null of 0.021, gate 0.071** |
+| **2** | Does the map meet `max(10 %, two-seed spread)` conjunctively per cell? | the science, not the engineering | **FAILED: 0.036 against a best null of 0.021, gate 0.071** (existing runs, one climate per place). **On the settled-forest corpus, climate + soil only (owner's Product A, 2026-09-23): PASSED, 0.608 variance explained vs 0.098 analogue lookup, bar 0.223, = 64 % of the attainable 0.950 — but 0.0 % within a flat 10 % on all 22 (one real run: 4.9 %)** |
 | **3** | Is a synthesised restart file valid and stable in the real model? | the restart deliverable | **valid; carbon starts 6.7 % HIGH (never halved) and sheds to −1.6 % inside the band by yr 20; still fails conjunctively, 5 % against a 25 % ceiling** |
 | **4** | **End-to-end.** Emulated restart → real transient vs real restart → real transient. | the deliverable as a whole | blocked on rung 3's state fidelity |
 | **5** | Does the response survive a **held-out forcing leg**? | the warming claim | **FAILED 2026-09-14 at pre-named outcome (c), 0.0054 vs persistence 0.0337** — the scenario legs cannot train a response. Not a contradiction of rung 1; see below |
@@ -120,15 +120,15 @@ was legitimate all along, so nothing scored to date needs recomputing; the 2.7 %
 is a **real bias** owed an attribution. `MEMORY.md:perturbed-spread-is-flat`, `abs-floor-measured`,
 `x4-wrong-instrument`, `soilc-offset-is-real`.
 
-**The species-mix kill test passed** (rung 8): the synthesiser's copying of composition is a measured
-defect, not a simplification — now line T's principal build.
-
+**Product A is learnable from climate + soil alone** (`X-20260923-equilibrium-from-climate`): the
+open question is no longer whether, but the trait gap (rooting depth, wood density) and the 10 % band.
 ⚠ **The integrator may now do any line's work directly** (owner, 2026-09-17), so "owner" below is
 who the item belongs to, not who must do it. Record `20260917-INT-*`.
 
 | open, in value order | owner | blocked on |
 |---|---|---|
 | **move the forcing-attributable part** — +0.1967 on the response test, +0.138 on composition (blind 69 %, `X-20260923-pilot-composition-blind-arm`); the blind arm, not the nulls, is the competitor | **X** | nothing |
+| **close the climate-only map's gap**: traits at 0.29–0.60 vs ceilings ~0.9, and 0 % inside 10 % on all 22; a soil ablation is owed | **T** | nothing |
 | **stop `models/synth.py` copying species composition**; it needs its own t0–t4 pass, not just a score | **T** | nothing |
 | a NEW estimand for the emitted restart, replacing X4 | **X** | nothing |
 | one cell, one year, two binaries, byte-compared — the only unproven rung-5 claim | **D** | nothing |
