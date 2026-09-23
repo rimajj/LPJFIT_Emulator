@@ -97,6 +97,19 @@ def _mean(d: dict[str, float], keys: tuple[str, ...]) -> float:
     return float(np.mean(v)) if v else float("nan")
 
 
+def fitted_scale(raw: Array) -> Array:
+    """Raw head outputs back onto the scale they were fitted on, EXACTLY: log1p with no clip.
+
+    `transformed` clips at zero first, which is right for a truth and wrong here -- a head that
+    predicted log1p(stems) = -0.02 would be scored as if it had said 0, and 115 rows of the pilot
+    did. That clip is post-processing step 1, and is measured as such, not folded into the check.
+    """
+    return np.stack(
+        [np.log1p(raw[:, j]) if h in LOG1P_HEADS else raw[:, j] for j, h in enumerate(HEADS)],
+        axis=1,
+    )
+
+
 def load(oof_path: Path, state_path: Path, corpus_path: Path) -> dict[str, Any]:
     oof = pl.read_parquet(oof_path).sort(["cell", "point"])
     state = pl.read_parquet(state_path).sort(["cell", "point"])
@@ -113,7 +126,7 @@ def load(oof_path: Path, state_path: Path, corpus_path: Path) -> dict[str, Any]:
         "raw": raw,
         "pred": pred,
         "zt": transformed(HEADS, y),
-        "zr": transformed(HEADS, raw),
+        "zr": fitted_scale(raw),
         "treed": state["stems_total"].to_numpy() > 0,
         "analogue": corpus.select(list(ANALOGUE_FEATURES)).to_numpy().astype(np.float64),
         "cell": oof["cell"].to_numpy(),
@@ -167,7 +180,7 @@ def within_between(d: dict[str, Any]) -> dict[str, Any]:
     for j, h in enumerate(HEADS):
         t, p = d["zt"][:, j], d["zr"][:, j]
         m = np.isfinite(t)
-        if not m.any():
+        if not varies(t[m]):
             continue
         cells = d["cell"][m]
         e, tt = p[m] - t[m], t[m]
@@ -207,7 +220,7 @@ def implied_response(d: dict[str, Any]) -> dict[str, Any]:
         dp = (d["zr"][:, j] - d["zr"][idx, j])[arm]
         m = np.isfinite(dt)
         den = float((dt[m] ** 2).sum())
-        if den <= 1e-12:
+        if den <= 1e-12 or not varies(d["zt"][:, j]):
             continue
         out[h] = {"skill": 1.0 - float(((dp[m] - dt[m]) ** 2).sum()) / den, "pairs": int(m.sum())}
     return out

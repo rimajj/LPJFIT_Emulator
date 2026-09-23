@@ -16,11 +16,14 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 import pytest
+from scipy.spatial import cKDTree
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
+import diag_equilibrium_map as diag
 import exp_equilibrium_map as sealed
 from exp_model_pilot_response import PARAMS as SEALED_PARAMS
+from fit_equilibrium_map import nn_rms, outside
 from vegemu.models.equilibrium import (
     FEATURES,
     HEADS,
@@ -158,3 +161,29 @@ def test_spreading_fits_across_processes_changes_nothing() -> None:
     one = fit_out_of_fold(x, y, folds, heads=SUBSET[:3], params=SMALL, workers=1)
     two = fit_out_of_fold(x, y, folds, heads=SUBSET[:3], params=SMALL, workers=2)
     np.testing.assert_array_equal(one, two)
+
+
+def test_the_envelope_distance_is_the_nearest_neighbour_distance() -> None:
+    rng = np.random.default_rng(11)
+    ref, query = rng.normal(size=(300, 9)), rng.normal(size=(50, 9)) * 2
+    want, _ = cKDTree(ref).query(query, k=1)
+    np.testing.assert_allclose(nn_rms(query, ref, chunk=7), want / np.sqrt(9), rtol=1e-9)
+    lo, hi = ref.min(axis=0), ref.max(axis=0)
+    flags = outside(np.array([[np.nan, *lo[1:]], [*hi[:-1], hi[-1] + 1]]), lo, hi)
+    assert flags.sum(axis=1).tolist() == [0, 1]  # a missing value is not an extrapolation
+
+
+def test_the_within_cell_split_adds_up_to_the_whole_error() -> None:
+    rng = np.random.default_rng(2)
+    cells = np.repeat(np.arange(20), 6)
+    t = rng.normal(size=cells.size) + cells * 0.3
+    p = t + rng.normal(size=cells.size) * 0.5 + (cells % 3) * 0.2
+    zt = np.full((cells.size, len(HEADS)), np.nan)
+    zr = np.zeros_like(zt)
+    zt[:, 0], zr[:, 0] = t, p
+    wb = diag.within_between({"zt": zt, "zr": zr, "cell": cells})["stems_per_patch"]
+    whole, _ = diag.var_explained(p, t)
+    share = wb["truth_share_between_cells"]
+    parts = share * wb["skill_between_cells"] + (1 - share) * wb["skill_within_cell"]
+    assert parts == pytest.approx(whole)
+    assert 0.0 < wb["error_share_between_cells"] < 1.0
