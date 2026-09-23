@@ -72,7 +72,7 @@ import time
 import traceback
 from collections.abc import Iterable, Sequence
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from itertools import pairwise
 from pathlib import Path
 from types import ModuleType
@@ -624,7 +624,9 @@ def stage_plan(
 
     mdir_root = scratch("runs", _vdir(version), "manifests")
     manifests: list[dict[str, Any]] = []
-    harvest_by = (datetime.now(UTC) + timedelta(days=harvest_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # Evaluated by the shell AT LAUNCH, not now: the plan is made days before an owner approves the
+    # compute, and a deadline stamped at plan time would make every row overdue on arrival.
+    harvest_by = f"$(date -u -d '+{harvest_days} days' +%Y-%m-%dT%H:%M:%SZ)"
     for seed in seeds:
         rows = [
             {
