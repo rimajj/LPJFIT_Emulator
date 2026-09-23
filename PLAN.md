@@ -120,15 +120,15 @@ was legitimate all along, so nothing scored to date needs recomputing; the 2.7 %
 is a **real bias** owed an attribution. `MEMORY.md:perturbed-spread-is-flat`, `abs-floor-measured`,
 `x4-wrong-instrument`, `soilc-offset-is-real`.
 
-**And the species-mix kill test passed** (rung 8), turning the synthesiser's copying of species
-composition from a disclosed simplification into a measured defect — now line T's principal build.
+**The species-mix kill test passed** (rung 8): the synthesiser's copying of composition is a measured
+defect, not a simplification — now line T's principal build.
 
 ⚠ **The integrator may now do any line's work directly** (owner, 2026-09-17), so "owner" below is
 who the item belongs to, not who must do it. Record `20260917-INT-*`.
 
 | open, in value order | owner | blocked on |
 |---|---|---|
-| **move the forcing-attributable +0.1967** — the blind arm, not the nulls, is the competitor now | **X** | nothing |
+| **move the forcing-attributable +0.1967** — the blind arm, not the nulls, is the competitor now; and composition has NO blind arm at all, so how much of its 0.4459 is forcing is unmeasured | **X** | nothing |
 | **stop `models/synth.py` copying species composition**; it needs its own t0–t4 pass, not just a score | **T** | nothing |
 | a NEW estimand for the emitted restart, replacing X4 | **X** | nothing |
 | one cell, one year, two binaries, byte-compared — the only unproven rung-5 claim | **D** | nothing |
@@ -139,10 +139,10 @@ composition 0.4459 (bar 0.3002); all fourteen nulls returned their values exactl
 re-derived from v2's own nulls, so scores and bars compare only within a corpus. ⚠ Blind arm
 unchanged at 64.8 % of the headline; composition loses to no-change at 2 of 29 (cold) levels.
 
-**Closed 2026-09-17.** The additive band floor is in the shared scorer at 0.0384 with no default,
-so a stem-share floor cannot leak onto soil carbon. The five verdicts carrying the wrong "constant
-CO₂" basis or the withdrawn "spin-up is not converged" now carry a correction beside the wrong
-sentence, with the seals untouched. All 40 open ledger rows are closed, verified from the runs.
+**Closed 2026-09-17/23** (detail in the records): the additive band floor sits in the shared scorer
+at 0.0384 with no default; five verdicts carrying a withdrawn basis were corrected with the seals
+untouched; all 40 ledger rows closed; a sealed experiment can now be abandoned by an appended
+registry row instead of an edit, so the two integrity gates stop contradicting each other.
 
 **Full acceptance (rung 7) has no defensible date**: the conjunctive pass rate is 0.0351 against an
 attainable ceiling of **0.5585, not 1.0**, what closes that gap is unknown, and it needs the mid or

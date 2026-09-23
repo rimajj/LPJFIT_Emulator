@@ -40,6 +40,7 @@ TOOLS = (
     "expected_gates.py",
     "wait_gates.py",
     "campaigns.py",
+    "abandon_experiment.py",
 )
 
 

@@ -13,14 +13,41 @@ LINE=""; [[ "$BRANCH" == line/* ]] && LINE="${BRANCH#line/}"
 OUT=""
 
 # Experiments: sealed with no results / results with no verdict / stale generated block.
+#
+# ⚠ An ABANDONED experiment is a CLOSED loop, and this hook has to know that or it reports the same
+# two ids at every session start forever -- the chore-that-rots shape it exists to prevent, turned
+# on itself. The reason lives in an appended `abandoned` row in experiments/registry.jsonl, because
+# writing it into a SEALED pre-registration changes the bytes and trips E03
+# (docs/decisions/20260921-INT-a-sealed-experiment-cannot-be-marked-abandoned-*.md). If this cannot
+# be computed the set is empty, which OVER-reports: a closed loop shown as open is a wasted glance,
+# an open loop hidden is the failure.
+ABANDONED="$(python3 -c '
+import json, pathlib
+p = pathlib.Path("experiments/registry.jsonl")
+if p.exists():
+    for raw in p.read_text(encoding="utf-8").splitlines():
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            r = json.loads(raw)
+        except ValueError:
+            continue
+        if r.get("event") == "abandoned":
+            print(r.get("exp_id", ""))
+' 2>/dev/null || true)"
+
 if [[ -d experiments ]]; then
   for d in experiments/*/; do
     id="$(basename "$d")"; [[ "$id" == _* ]] && continue
     [[ -f "$d/preregistration.yaml" ]] || continue
     grep -q '^status: sealed' "$d/preregistration.yaml" 2>/dev/null || continue
+    grep -qx "$id" <<<"$ABANDONED" && continue
+    grep -q '^abandoned:' "$d/preregistration.yaml" 2>/dev/null && continue
     if [[ ! -s "$d/result.jsonl" ]]; then
       OUT="$OUT
-  exp $id: sealed, no results yet -> launch it, or add 'abandoned: <reason>'"
+  exp $id: sealed, no results yet -> launch it, or record why not with
+    tools/abandon_experiment.py $id --reason '<why>'"
     elif [[ ! -f "$d/verdict.md" ]]; then
       OUT="$OUT
   exp $id: has results but NO VERDICT -> tools/render_verdict.py $id"

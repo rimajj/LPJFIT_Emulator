@@ -53,13 +53,13 @@ own bar** — the raw numbers are not interchangeable and neither are the bars.
 3. **A blind arm for COMPOSITION has never been run**, so how much of the 0.4459 comes from the
    forcing rather than from knowing the starting roster is unmeasured. The ablation script exists.
 
-⚠ **TWO SEALED EXPERIMENTS TRIP E13 ON 2026-10-21 AND NOTHING CAN BE DONE UNDER TODAY'S RULES.**
-`X-20260921-pilot-{warming,composition}-response-constco2` (no `-resealed`) were sealed then
-superseded within the hour, before any job ran. They cannot be marked `abandoned:`: E13 says add
-that key to the pre-registration, E03 rejects any edit to a sealed file by hash — measured both
-ways today. Finding and the two candidate repairs:
-`docs/decisions/20260921-INT-a-sealed-experiment-cannot-be-marked-abandoned-*.md`. **Recommended
-repair is an append-only `abandoned` row in the registry, NOT an E03 carve-out.**
+✅ **FIXED 2026-09-23, BOTH IDS CLOSED — do not re-open.** A sealed experiment is now abandoned with
+`tools/abandon_experiment.py <id> --reason '<why>'`, which appends to `experiments/registry.jsonl`
+and never touches the sealed bytes, so E03 stays green through it. E13 reads both homes (`abandoned:`
+in a DRAFT's yaml, the registry row once sealed), and so does the session-start hook — without that
+it would have listed these two forever. `X-20260921-pilot-{warming,composition}-response-constco2`
+(no `-resealed`) are abandoned with the `corpus.parquet` reason now machine-readable, the 2026-10-21
+deadline discharged, the E03 carve-out refused. `docs/decisions/20260923-INT-the-abandonment-*`.
 
 **WHY THEY WERE SUPERSEDED — a trap worth knowing.** Their leakage checks named `corpus.parquet`
 as the model arm's `--cache`. It has 181 columns and `build_features` turns EVERY column outside

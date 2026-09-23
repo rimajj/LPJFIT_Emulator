@@ -42,7 +42,33 @@ the result row carries it back. That is what makes "pre-registered" a fact rathe
 |---|---|---|
 | **E03** | has results but is not sealed; or sealed but absent from `registry.jsonl`; or the live file's hash ≠ the sealed hash | seal *before* you run. Seal via `tools/seal_experiment.py`, which appends the ledger row — never flip `status:` by hand. If the live hash moved, you edited a sealed file: restore it, and raise a new `exp_id` with `supersedes:` |
 | **E04** | a result row's `prereg_sha256` ≠ the sealed hash | **the pre-registration was edited after the run.** The job stamped the hash it actually ran under, and the two no longer agree. The result stands; the file moved under it. Restore the sealed bytes |
-| **E13** | sealed >30 days with no results and no `abandoned:` | harvest it, or add `abandoned: <reason>` to the pre-registration. An unfinished experiment with no reason is the shape of a chore that rots — this is the gate that refuses to let it |
+| **E13** | sealed >30 days with no results and no recorded abandonment; **or** abandoned and then produced results anyway | harvest it, or run `tools/abandon_experiment.py <id> --reason '<why>'`. An unfinished experiment with no reason is the shape of a chore that rots — this is the gate that refuses to let it. ⚠ **Do NOT write `abandoned:` into a sealed file** — see below |
+
+#### Where an abandonment is recorded, and why it is not in the pre-registration
+
+**A sealed experiment is abandoned by appending to the registry, never by editing the file:**
+
+```bash
+tools/abandon_experiment.py <exp_id> --reason "superseded by <new id>; nothing ran"
+```
+
+E13's remedy used to be "add `abandoned: <reason>`" to the pre-registration. **That could not be
+done**: E03 hashes the sealed bytes, so adding the key trips E03, and the remedy was available only
+for a *draft* — the one state in which E13 can never fire, because E13 keys off `sealed_at`. The
+remedy and the condition were disjoint by construction, and a gate whose remedy is impossible is a
+gate people learn to route around.
+
+So the reason goes where every other correction here goes: an appended row on an append-only ledger,
+written by a tool. The sealed bytes stay genuinely immutable and E03 is untouched. The rejected
+alternative was to exempt an `abandoned:` block from the E03 hash — *"immutable except for one key"*
+is a rule with an exception parsed by the code that enforces the rule, which is what E03 exists to
+catch. Record: `docs/decisions/20260921-INT-a-sealed-experiment-cannot-be-marked-abandoned-*.md`.
+
+`abandoned:` **inside the pre-registration is still honoured**, and is still right for a draft, or
+for a file that carried the key before it was sealed. It is only unreachable *after* sealing.
+
+⚠ **Abandoning is not a way to close something that ran.** A finished experiment is closed with a
+verdict; the tool refuses, and E13 reports the contradiction if the rows appear later.
 
 ### Results and the verdict — E05 ... E10
 

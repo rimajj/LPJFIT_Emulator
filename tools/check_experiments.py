@@ -18,7 +18,8 @@
     E12  the SEALED PRE-REGISTRATION BYTES do not appear in history before the first result row --
          resolved by CONTENT (prereg_sha256), never by the recorded `seal_commit`, which a rebase
          rewrites
-    E13  a pre-registration has been sealed >30 days with no results and no `abandoned:` reason
+    E13  a pre-registration has been sealed >30 days with no results and no recorded
+         abandonment -- or was abandoned and then produced results anyway
     E14  estimand.reference_basis is empty, or data.leakage_checks is empty
 
 Together these mechanise a discipline the predecessor had to learn by losing five headline claims:
@@ -101,12 +102,42 @@ def seal_commit_by_content(prereg_rel: str, prereg_sha256: str) -> str | None:
 
 
 def registry_index() -> dict[str, dict]:
-    """exp_id -> the LAST seal row for it (a re-seal after a supersede is legitimate)."""
+    """exp_id -> the LAST SEAL row for it (a re-seal after a supersede is legitimate).
+
+    ⚠ A SEAL ROW IS ONE THAT CARRIES `prereg_sha256`. The registry is append-only and now carries
+    two kinds of row: seal rows written by `seal_experiment.py`, and EVENT rows written by
+    `abandon_experiment.py`. Folding both into one index by recency would let an abandonment -- a
+    row with no hash -- shadow the seal it refers to, and E03 would then report every abandoned
+    experiment as "sealed but absent from the registry". The kinds are separated by the field that
+    distinguishes them, not by position.
+    """
     rows = load_jsonl(repo_root() / "experiments" / "registry.jsonl")
     out: dict[str, dict] = {}
     for r in rows:
         eid = str(r.get("exp_id", ""))
-        if eid:
+        if eid and str(r.get("prereg_sha256", "")).strip():
+            out[eid] = r
+    return out
+
+
+def abandonment_index() -> dict[str, dict]:
+    """exp_id -> the LAST `abandoned` event row for it, or absent if it was never abandoned.
+
+    ⚠ WHY THE REASON LIVES HERE AND NOT IN THE PRE-REGISTRATION. E13's remedy used to be "add
+    `abandoned: <reason>`" to the pre-registration -- but adding it changes the sealed bytes, so it
+    changes the hash, so it trips E03. The two rules could not both be satisfied, and the remedy was
+    available only in the one state (draft) where E13 can never fire. So a sealed experiment is
+    abandoned the way every other correction in this repository is recorded: by appending a row to
+    an append-only ledger, leaving the sealed bytes genuinely untouched.
+
+    `abandoned:` in the YAML is still honoured, and is still the right home for a DRAFT that was
+    never sealed. See docs/decisions/20260921-INT-a-sealed-experiment-cannot-be-marked-abandoned-*.
+    """
+    rows = load_jsonl(repo_root() / "experiments" / "registry.jsonl")
+    out: dict[str, dict] = {}
+    for r in rows:
+        eid = str(r.get("exp_id", ""))
+        if eid and str(r.get("event", "")) == "abandoned":
             out[eid] = r
     return out
 
@@ -221,7 +252,7 @@ def check_schema(exp, rep: Report) -> None:
                 )
 
 
-def check_seal(exp, reg: dict[str, dict], rep: Report) -> None:
+def check_seal(exp, reg: dict[str, dict], aband: dict[str, dict], rep: Report) -> None:
     rel = str(exp.prereg_path.relative_to(repo_root()))
     status = str(exp.prereg.get("status", "draft"))
     row = reg.get(exp.exp_id)
@@ -277,7 +308,29 @@ def check_seal(exp, reg: dict[str, dict], rep: Report) -> None:
             )
 
     # E13 — a dead pre-registration becomes visible instead of silently rotting.
-    if not exp.results and not exp.prereg.get("abandoned"):
+    #
+    # The reason may live in EITHER home: `abandoned:` in the pre-registration (the right place for
+    # a draft, whose bytes are not yet frozen) or an appended `abandoned` event row in the registry
+    # (the only place available once the bytes ARE frozen, because editing them trips E03).
+    abandoned_row = aband.get(exp.exp_id)
+    abandoned = bool(exp.prereg.get("abandoned")) or abandoned_row is not None
+
+    # An abandonment is a statement that nothing will run. If something then did, the record now
+    # says two contradictory things, and the results are the half that is load-bearing.
+    if abandoned_row is not None and exp.results:
+        rep.add(
+            rel,
+            "E13",
+            f"abandoned in the registry on {str(abandoned_row.get('at', ''))[:10]}, "
+            f"but {len(exp.results)} result row(s) exist",
+            hint=(
+                "an abandoned experiment that ran anyway is a record that contradicts itself. "
+                "Either the results belong to a different exp_id, or the abandonment was wrong — "
+                "append a `resumed` row saying which"
+            ),
+        )
+
+    if not exp.results and not abandoned:
         sealed_at = str(row.get("sealed_at", ""))
         try:
             ts = time.mktime(time.strptime(sealed_at[:19], "%Y-%m-%dT%H:%M:%S"))
@@ -290,8 +343,10 @@ def check_seal(exp, reg: dict[str, dict], rep: Report) -> None:
                 "E13",
                 f"sealed {age:.0f} days ago with no results",
                 hint=(
-                    "harvest it, or add `abandoned: <reason>`. An unfinished experiment with no "
-                    "reason is the shape of a chore that rots"
+                    "harvest it, or record the abandonment with "
+                    "`tools/abandon_experiment.py <exp_id> --reason '<why>'`, which appends to the "
+                    "registry and leaves the sealed bytes untouched. An unfinished experiment with "
+                    "no reason is the shape of a chore that rots"
                 ),
             )
 
@@ -536,6 +591,7 @@ def main(argv: list[str] | None = None) -> int:
     root = repo_root()
     rep = Report("check_experiments")
     reg = registry_index()
+    aband = abandonment_index()
 
     dirs = experiment_dirs(root)
     if args.exp:
@@ -551,7 +607,7 @@ def main(argv: list[str] | None = None) -> int:
             rep.add(f"experiments/{d.name}/preregistration.yaml", "E01", f"cannot load: {exc}")
             continue
         check_schema(exp, rep)
-        check_seal(exp, reg, rep)
+        check_seal(exp, reg, aband, rep)
         check_results(exp, rep)
         check_verdict(exp, rep)
 
