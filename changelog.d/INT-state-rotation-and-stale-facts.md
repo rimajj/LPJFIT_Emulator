@@ -4,9 +4,9 @@
   work line keeps a short status file with a 120-line limit. Messages one line sends another are
   exempt from that limit for 14 days, and then count. All three status files had piled up weeks of
   messages — line D's was 439 lines, 338 of them messages — so as the exemptions lapsed the size
-  check would have failed every documentation change from 2026-09-25 (line D), then 2026-09-30
-  (lines T and X). Checked by running the size check with its clock set to those dates: before,
-  it fails on each; after, it passes on each, through 2026-10-15.
+  check would have failed every documentation change from 2026-09-25 (line D), then 2026-09-29
+  (line T) and 2026-09-30 (line X). Checked by running the size check with its clock set to those
+  dates: before, it fails on each; after, it passes on each, through 2026-10-15.
 
   Every one of the 35 messages was read and checked against the repository, given a one-line note
   saying whether it had been acted on, and moved with its full text into that line's journal,
