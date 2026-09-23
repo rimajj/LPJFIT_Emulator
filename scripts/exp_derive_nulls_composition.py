@@ -73,8 +73,10 @@ from exp_derive_nulls_pilot import (
     _per_level_and_pooled,
     build_deltas,
     build_null_predictions,
+    centred_nulls,
     separation,
 )
+from vegemu.centred import centred_ceiling
 from vegemu.paths import paths
 from vegemu.score import (
     COMPOSITION_QUANTITIES,
@@ -198,7 +200,75 @@ def treeless_bookkeeping(
     }
 
 
-def main() -> int:
+def _uncentred(
+    pred: npt.NDArray[np.float64],
+    dtrue: npt.NDArray[np.float64],
+    points: list[str],
+    q: tuple[str, ...],
+) -> dict[str, object]:
+    """The sealed kill test's scoring, unchanged: no-change imputation, then the uncentred ratio."""
+    return _per_level_and_pooled(impute_no_change(pred, dtrue)[0], dtrue, points, q)
+
+
+def main_centred(
+    args: argparse.Namespace,
+    dtrue: npt.NDArray[np.float64],
+    control: npt.NDArray[np.float64],
+    *,
+    cell_ids: list[int],
+    points: list[str],
+    scored_cells: pl.DataFrame,
+) -> int:
+    """`--centred`: the seven null predictions plus the per-cell-mean oracle, scored by the
+    within-cell centred statistic, and the centred ceiling from the same two ground-truth seeds,
+    masked exactly as the uncentred ceiling masks them. Nothing is fitted.
+
+    ⚠ The centred score fills a missing prediction with the cell's own mean prediction (the neutral
+    value under centring), NOT with no change; `vegemu.centred` applies that rule, and the count is
+    reported per arm. The uncentred scores beside them keep the sealed no-change rule and must
+    reproduce the sealed values.
+    """
+    quantities = COMPOSITION_QUANTITIES
+    report: dict[str, object] = {
+        "statistic": "skill_composition_centred_mean",
+        "version": args.version,
+        "cache": str(args.cache),
+        "quantities": list(quantities),
+        "n_cells": len(cell_ids),
+        "n_points": len(points),
+        "n_pairs": int(dtrue.shape[0] * dtrue.shape[1]),
+        "by_blocking": centred_nulls(
+            dtrue,
+            control,
+            scored_cells,
+            points,
+            quantities=quantities,
+            k=args.k,
+            radii=(args.degrees, args.also_degrees),
+            uncentred=_uncentred,
+        ),
+    }
+    if not args.skip_ceiling:
+        print("\nreading both ground-truth seeds by seek for the ceiling...", flush=True)
+        f1, f2 = ground_truth_pair(cell_ids, args.nproc)
+        if f1["cell"].to_list() != cell_ids:
+            raise ValueError("ground truth returned a different cell set than the pilot")
+        s1 = matrix(blank_treeless_composition(f1), quantities)
+        s2 = matrix(blank_treeless_composition(f2), quantities)
+        sigma_sq = (s1 - s2) ** 2 / 2.0
+        report["ceiling_centred"] = centred_ceiling(dtrue, sigma_sq, quantities)
+        report["ceiling_uncentred_reproduction"] = ceiling(dtrue, sigma_sq, quantities)
+        c0 = report["ceiling_centred"]["rho0_independent"]  # type: ignore[index]
+        print(f"\nCENTRED CEILING, rho=0 (conservative lower bound): {c0['mean']:+.6f}")
+    (Path(args.out) / "nulls_composition_centred.json").write_text(
+        json.dumps(report, indent=2), encoding="utf-8"
+    )
+    print(f"wrote {Path(args.out) / 'nulls_composition_centred.json'}")
+    return 0
+
+
+def _parse_args() -> argparse.Namespace:
+    """Split out of `main` so the option list can grow without pushing it over PLR0915."""
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--version", default="pilot-v1")
     ap.add_argument("--out", required=True)
@@ -208,7 +278,17 @@ def main() -> int:
     ap.add_argument("--also-degrees", type=float, default=5.0)
     ap.add_argument("--nproc", type=int, default=2, help="ground-truth seed reads")
     ap.add_argument("--skip-ceiling", action="store_true", help="smoke runs only")
-    args = ap.parse_args()
+    # An addition only; without it this is exactly the derivation the sealed experiments cite.
+    ap.add_argument(
+        "--centred",
+        action="store_true",
+        help="derive the nulls of the WITHIN-CELL CENTRED share change instead (vegemu.centred)",
+    )
+    return ap.parse_args()
+
+
+def main() -> int:
+    args = _parse_args()
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -222,6 +302,10 @@ def main() -> int:
     dtrue, control, cell_ids, points = build_deltas(state, cells, quantities)
     scored_cells = cells.filter(pl.col("cell").is_in(cell_ids)).sort("cell")
     print(f"{len(cell_ids)} cells x {len(points)} points, {len(quantities)} composition columns")
+    if args.centred:
+        return main_centred(
+            args, dtrue, control, cell_ids=cell_ids, points=points, scored_cells=scored_cells
+        )
 
     report: dict[str, object] = {
         "estimand": "skill_response_mean over the seven tree-type stem shares",
