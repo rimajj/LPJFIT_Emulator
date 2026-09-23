@@ -33,6 +33,8 @@ import numpy.typing as npt
 import polars as pl
 
 from vegemu.binfmt.clm import ClmReader, read_grid
+from vegemu.corpus import schema as schema_mod
+from vegemu.corpus.soil import SOIL_FEATURES, soil_columns
 from vegemu.paths import paths
 
 NDAYYEAR = 365  # noleap
@@ -101,10 +103,21 @@ def _feature_names() -> tuple[str, ...]:
     return tuple(names)
 
 
+# ⚠ FROZEN AT THESE 86 NAMES. Sealed pre-registrations name this tuple's columns and their leakage
+# assertions are written against it, so a new input is a NEW name below, never an append here.
 CLIMATE_FEATURES: tuple[str, ...] = _feature_names()
+
+# The corpus schema 3 inputs: the 86 above, then the five soil-texture columns
+# (`vegemu.corpus.soil`), which the spin-up also holds fixed per cell.
+CLIMATE_FEATURES_V3: tuple[str, ...] = (*CLIMATE_FEATURES, *SOIL_FEATURES)
 
 # Stored beside the features but NEVER given to a model: these are the nulls and the fold keys.
 NON_FEATURE_COLUMNS: tuple[str, ...] = ("cell", "lon", "lat", "leg", "state_year")
+
+
+def climate_features(schema: int) -> tuple[str, ...]:
+    """The feature columns a corpus table of `schema` carries (`vegemu.corpus.schema`)."""
+    return CLIMATE_FEATURES_V3 if schema_mod.check(schema) >= 3 else CLIMATE_FEATURES
 
 
 def _saturation_vapour_pressure(temp_c: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
@@ -150,14 +163,21 @@ def _static_inputs(
     return soil, read_grid(coord)
 
 
-def climate_columns(  # noqa: PLR0915 -- a flat sequence of independent feature definitions
+def climate_columns(  # noqa: PLR0912, PLR0915 -- a flat sequence of independent feature definitions
     window: Window,
     cells: Sequence[int] | None = None,
     files: dict[str, str] | None = None,
     soildepth: str | None = None,
     coord: str | None = None,
+    *,
+    with_soil: bool = False,
+    soil_bin: str | None = None,
 ) -> dict[str, npt.NDArray[Any]]:
     """Reduce one leg's 30-year window to one row per cell, as plain arrays.
+
+    `with_soil` adds the five `SOIL_FEATURES`, looked up at the same GLOBAL cell numbers and built
+    from this call's own `soildepth` column, so depth and texture cannot describe different cells.
+    Off by default: a schema-2 table does not carry them.
 
     Reads a whole year block per variable per year -- 150 sequential reads for the window -- and
     accumulates. That is the cheap direction: the file is laid out `value[year][cell][band]`, so a
@@ -296,6 +316,8 @@ def climate_columns(  # noqa: PLR0915 -- a flat sequence of independent feature 
 
     soil, grid = _static_inputs(soildepth, coord)
     cols["soildepth"] = soil[gsel]
+    if with_soil:
+        cols.update(soil_columns(gsel, cols["soildepth"], soil_bin))
 
     return {
         "cell": gsel.astype(np.int32),
@@ -313,10 +335,15 @@ def climate_table(
     files: dict[str, str] | None = None,
     soildepth: str | None = None,
     coord: str | None = None,
+    *,
+    with_soil: bool = False,
 ) -> pl.DataFrame:
     """`climate_columns` as a table, in the fixed column order. Call this in the PARENT only."""
-    cols = climate_columns(window, cells=cells, files=files, soildepth=soildepth, coord=coord)
-    return pl.DataFrame(cols).select([*NON_FEATURE_COLUMNS, *CLIMATE_FEATURES])
+    cols = climate_columns(
+        window, cells=cells, files=files, soildepth=soildepth, coord=coord, with_soil=with_soil
+    )
+    features = CLIMATE_FEATURES_V3 if with_soil else CLIMATE_FEATURES
+    return pl.DataFrame(cols).select([*NON_FEATURE_COLUMNS, *features])
 
 
 def basis(window: Window, files: dict[str, str] | None = None) -> dict[str, Any]:
