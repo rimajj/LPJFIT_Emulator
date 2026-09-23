@@ -24,6 +24,7 @@ import diag_equilibrium_map as diag
 import exp_equilibrium_map as sealed
 from exp_model_pilot_response import PARAMS as SEALED_PARAMS
 from fit_equilibrium_map import nn_rms, outside
+from vegemu.corpus.state import STATE_COLUMNS
 from vegemu.models.equilibrium import (
     FEATURES,
     HEADS,
@@ -80,6 +81,21 @@ def test_a_forbidden_or_state_feature_is_refused() -> None:
     assert feature_matrix(frame).shape == (1, len(FEATURES))  # extra columns are simply not read
     with pytest.raises(AssertionError):
         feature_matrix(frame, (*FEATURES, "lon"))
+
+
+@pytest.mark.parametrize(
+    "col",
+    sorted(
+        (set(STATE_COLUMNS) | {"truth_stems_total", "restart_year", "restart_bytes", "name"})
+        - set(FEATURES)
+    ),
+)
+def test_every_state_and_bookkeeping_column_is_refused(col: str) -> None:
+    """Not only the 42 heads: `stems_total`, `vegc`, the height bins and the age quantiles are the
+    forest itself, and a guard that listed only the heads let all of them through."""
+    with pytest.raises(AssertionError):
+        EquilibriumMap(features=(*FEATURES, col))
+    EquilibriumMap(features=FEATURES[:10])  # a subset of the climate and soil is still allowed
 
 
 def test_treeless_rows_have_no_traits_and_no_shares() -> None:

@@ -91,6 +91,8 @@ FORMAT = "vegemu-equilibrium-map/1"
 # The five soil columns the sealed experiment joined by cell id from the model's own soil input.
 SOIL_FEATURES: tuple[str, ...] = ("soil_code", "soil_awc", "soil_w_avail", "soil_sand", "soil_clay")
 FEATURES: tuple[str, ...] = (*CLIMATE_FEATURES, *SOIL_FEATURES)
+# Everything the map may ever be given. A subset is allowed (an ablation); anything else is not.
+ALLOWED_FEATURES: frozenset[str] = frozenset(FEATURES)
 
 # Never features. The sealed script's set, plus the corpus's own bookkeeping columns: any of these
 # would hand the model the place, the perturbation it is meant to infer from the climate, or a
@@ -134,12 +136,21 @@ MIN_TRAIN_ROWS = 50
 
 
 def check_features(features: Sequence[str]) -> None:
-    """Refuse a feature list that could leak the place, the design, the state or CO2."""
+    """Refuse a feature list that could leak the place, the design, the state or CO2.
+
+    ⚠ THE LAST CHECK IS AN ALLOWLIST, AND IT IS THE ONE THAT CARRIES THE WEIGHT. The named refusals
+    before it only give a clearer message: on their own they let through 36 of the corpus's state
+    and bookkeeping columns -- `stems_total`, `vegc`, `truth_stems_total`, the height bins, the age
+    quantiles -- none of which is a head, so none was in `FORBIDDEN | HEADS`. The map is defined on
+    the climate and the soil; a column that is neither is refused, whatever it is called.
+    """
     leaked = FORBIDDEN & set(features)
     assert not leaked, f"forbidden columns in the feature set: {sorted(leaked)}"
     state = set(HEADS) & set(features)
     assert not state, f"state columns in the feature set: {sorted(state)}"
     assert not any("co2" in f.lower() for f in features), "CO2 is never a feature (invariant 8)"
+    foreign = [f for f in features if f not in ALLOWED_FEATURES]
+    assert not foreign, f"not a climate or soil feature, so never an input: {foreign}"
 
 
 check_features(FEATURES)
