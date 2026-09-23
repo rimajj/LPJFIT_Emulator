@@ -1407,6 +1407,18 @@ def compare_tables(
         was, now = a[c].to_numpy()[diff], b[c].to_numpy()[diff]
         if (diff & ~treeless).any() or not (np.isnan(now).all() and (was == 0.0).all()):
             unexpected.append(f"{c}: differs outside 'treeless 0.0 -> NaN'")
+    # ...and the fix must have landed on EVERY treeless row, not only on the ones that differ: a
+    # schema-3 decode that left a treeless row's share at 0.0 differs from nothing and would pass
+    # the loop above, so "only treeless rows changed" would be reported with the fix half-applied.
+    if bump:
+        for c in PFT_FRAC_COLUMNS:
+            if c not in b.columns:
+                continue
+            kept = int((~np.isnan(b[c].to_numpy().astype(np.float64)[treeless])).sum())
+            if kept:
+                unexpected.append(
+                    f"{c}: {kept} treeless rows are not NaN under schema {new_schema}"
+                )
     return {
         "ok": not unexpected,
         "rows": b.height,
@@ -1548,6 +1560,8 @@ def stage_decode(  # noqa: PLR0912, PLR0915 -- decode, write, derive, compare, r
     src = meta_dir(version, seed, tier)
     src_prov = _read_plan(version, seed, tier)
     src_schema = schema_mod.of_provenance(src_prov)
+    full_stem = "corpus" if seed == SEED else f"replicate_s{seed}"
+    source_table = src / f"{full_stem}.parquet"
     if out_version is None:
         use = src_schema if schema is None else schema_mod.check(schema)
         if use != src_schema:
@@ -1560,6 +1574,18 @@ def stage_decode(  # noqa: PLR0912, PLR0915 -- decode, write, derive, compare, r
         if out_version == version:
             raise SystemExit("--out-version must differ from --version")
         use = schema_mod.CURRENT if schema is None else schema_mod.check(schema)
+        # ⚠ NO SOURCE TABLE, NO RE-DECODE. The column-by-column diff against the source's own table
+        # is the only evidence a derived version reproduces its source beyond the schema change; it
+        # used to be skipped with `ok: True` when the table was missing, so a re-decode run before
+        # the source's own decode came out "DECODED" having been compared with nothing. Checked
+        # here, before anything is decoded or any directory is claimed.
+        if not source_table.is_file():
+            raise SystemExit(
+                f"no {source_table}: a re-decode is diffed against its source's own table, and "
+                f"{src.name} has none. Decode it in place first (--stage decode"
+                f"{'' if tier == 'pilot' else f' --tier {tier}'} --version {version}"
+                f"{'' if seed == SEED else f' --seed {seed}'}), then re-run this."
+            )
         out = meta_dir(out_version, seed, tier)
         _claim_out_dir(out, src)
     runs = pl.read_csv(src / "runs.csv")
@@ -1613,7 +1639,7 @@ def stage_decode(  # noqa: PLR0912, PLR0915 -- decode, write, derive, compare, r
     # same cells and the same climates as the corpus, so a table called `corpus.parquet` holding
     # them is one path typo away from doubling the pilot with re-runs and calling it more evidence.
     # It is a second measurement of the same thing, which is a SPREAD, never extra rows.
-    full_stem = "corpus" if seed == SEED else f"replicate_s{seed}"
+    # (`full_stem` is fixed above, where a re-decode checks its source table exists.)
     stem = "corpus_smoke" if limit else full_stem
     dest = out / f"{stem}.parquet"
     frame.write_parquet(dest)
@@ -1623,7 +1649,6 @@ def stage_decode(  # noqa: PLR0912, PLR0915 -- decode, write, derive, compare, r
     derived: dict[str, Any] | None = None
     comparison: dict[str, Any] | None = None
     if out != src:
-        source_table = src / f"{full_stem}.parquet"
         derived = _write_derived(
             out,
             src,
@@ -1633,11 +1658,8 @@ def stage_decode(  # noqa: PLR0912, PLR0915 -- decode, write, derive, compare, r
             done=done,
             source_table=source_table,
         )
-        if source_table.is_file():
-            comparison = compare_tables(pl.read_parquet(source_table), frame, src_schema, use)
-            comparison["byte_identical"] = sha256_of(source_table) == sha256_of(dest)
-        else:
-            comparison = {"ok": True, "compared": False, "note": f"no {source_table} to diff"}
+        comparison = compare_tables(pl.read_parquet(source_table), frame, src_schema, use)
+        comparison["byte_identical"] = sha256_of(source_table) == sha256_of(dest)
 
     summary: dict[str, Any] = {
         "created_utc": datetime.now(UTC).isoformat(timespec="seconds"),
@@ -1679,14 +1701,13 @@ def stage_decode(  # noqa: PLR0912, PLR0915 -- decode, write, derive, compare, r
     report.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", "utf-8")
     _report_decode(frame, summary, dest)
     if comparison is not None:
-        if comparison.get("compared", True):
-            print(
-                f"  vs {src.name}: {comparison.get('identical_columns')} of "
-                f"{comparison.get('shared_columns')} shared columns identical over "
-                f"{comparison.get('rows')} rows; differing {comparison.get('differing_columns')}; "
-                f"added {comparison.get('added_columns')}; byte-identical "
-                f"{comparison.get('byte_identical')}"
-            )
+        print(
+            f"  vs {src.name}: {comparison.get('identical_columns')} of "
+            f"{comparison.get('shared_columns')} shared columns identical over "
+            f"{comparison.get('rows')} rows; differing {comparison.get('differing_columns')}; "
+            f"added {comparison.get('added_columns')}; byte-identical "
+            f"{comparison.get('byte_identical')}"
+        )
         for item in comparison.get("unexpected", []):
             print(f"  ⚠ UNEXPLAINED DIFFERENCE: {item}", file=sys.stderr)
     if failed:

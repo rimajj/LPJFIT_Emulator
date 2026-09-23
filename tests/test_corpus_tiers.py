@@ -319,6 +319,49 @@ def test_compare_tables_accepts_the_schema_change_and_nothing_else() -> None:
     assert not m.compare_tables(old, bad, 2, 3)["ok"]
     # the shares turning NaN WITHOUT a schema bump is a defect, not the fix
     assert not m.compare_tables(old, new.drop(list(m.SOIL_FEATURES)), 2, 2)["ok"]
+    # ...and the fix left undone on ONE treeless row (r2 keeps its 0.0) is refused too, although
+    # every row that does differ differs exactly as the schema says
+    half = new.with_columns(
+        pl.when(pl.col("name") == "r2")
+        .then(0.0)
+        .otherwise(pl.col("pft_frac_4"))
+        .alias("pft_frac_4")
+    )
+    res = m.compare_tables(old, half, 2, 3)
+    assert not res["ok"]
+    assert res["unexpected"] == ["pft_frac_4: 1 treeless rows are not NaN under schema 3"]
+
+
+def _two_versions(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, prov: dict[str, object]
+) -> ModuleType:
+    """`meta_dir`/`_meta_path` resolved per version under tmp_path, the source one planned."""
+    m = _script("corpus_pilot")
+
+    def where(version: str, seed: int = 1, tier: str = "pilot") -> Path:
+        d = tmp_path / m._vdir(version, seed, tier)
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    monkeypatch.setattr(m, "meta_dir", where)
+    monkeypatch.setattr(m, "_meta_path", where)
+    (where("v9") / "provenance.json").write_text(json.dumps(prov))
+    return m
+
+
+def test_a_re_decode_without_a_source_table_is_refused_before_decoding(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """It used to decode, skip the diff with `ok: True`, and print DECODED -- compared with nothing.
+    No runs.csv exists here, so reaching the decode at all would fail differently."""
+    m = _two_versions(monkeypatch, tmp_path, {"co2_constant": True, "plan_sha256": "x"})
+    with pytest.raises(SystemExit, match="Decode it in place first"):
+        m.stage_decode("v9", 1, None, out_version="v10")
+    (tmp_path / "pilot-v9-s2").mkdir()
+    (tmp_path / "pilot-v9-s2" / "provenance.json").write_text(json.dumps({"seed": 2}))
+    with pytest.raises(SystemExit, match=r"--seed 2\)"):
+        m.stage_decode("v9", 1, None, 2, out_version="v10")
+    assert not (tmp_path / "pilot-v10" / "provenance.json").exists(), "claimed nothing"
 
 
 # ------------------------------------------------------------------------------------------------
