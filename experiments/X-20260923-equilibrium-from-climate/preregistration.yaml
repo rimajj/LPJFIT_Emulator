@@ -1,0 +1,197 @@
+schema_version: 1
+
+exp_id: X-20260923-equilibrium-from-climate
+line: X
+
+status: sealed
+
+title: "FROM THE 30-YEAR CLIMATE AND THE SOIL ALONE, CAN A MODEL PREDICT THE FOREST THE SPIN-UP SETTLES INTO?"
+question: >
+  Product A as the owner stated it on 2026-09-23: the spin-up takes a 30-year climate, recycles it
+  for 1000 years, and the forest settles; the emulator should see ONLY that climate -- plus soil
+  depth and soil texture, which the spin-up also reads and which the owner named as inputs -- and
+  predict the settled forest. No present-day forest, no location, no statement of how the climate
+  was perturbed.
+
+  THE FALSIFIABLE CLAIM: at cells it has never seen, held out in whole 15-degree tiles, such a model
+  explains more of the variation in the settled forest than the best information-free competitor
+  -- copying the forest of the climatically most similar training run -- by more than 0.125 in the
+  mean variance-explained over the 19 scored quantities that vary.
+
+  WHY THIS IS NOT THE KILL TEST. Both kill tests give the model the cell's own present-day forest
+  and score the CHANGE; on the species mix, a model blind to the climate change already clears that
+  test's bar from the starting forest alone (`X-20260923-pilot-composition-blind-arm`). Here there
+  is no starting forest to lean on. WHY IT IS NOT A REPEAT OF `X-20260908-climate-state-map`: that
+  asked the question of the existing runs, one climate per place and a CO2-ramped non-equilibrium
+  target. Here every cell was spun up under 30 climates with CO2 constant.
+
+estimand:
+  name: skill_equilibrium_mean
+  definition: >
+    Rows are the 6,000 (cell, climate) spin-ups of pilot-v2-constco2: 200 cells x 30 climates (the
+    cell's control plus 29 perturbations). For each of the 22 quantities of SCORED_CONJUNCTIVE --
+    stems per patch, above-ground biomass, leaf area index, soil carbon, and the 10th/50th/90th
+    percentile of wood density, specific leaf area, fine-root conductivity, 95 % rooting depth, leaf
+    longevity and height -- the target is the LEVEL in the end-of-spin-up restart. The four
+    forest-scale quantities are scored on log1p (they span four orders of magnitude); the eighteen
+    trait quantiles as they are. A trait quantile is undefined in a treeless run (380 of 6,000) and
+    those rows are not scored for traits; the forest-scale four are scored on all 6,000.
+
+    Per quantity: 1 - SUM((pred - truth)^2) / SUM((truth - mean(truth))^2) over every row where the
+    truth exists, computed once on the ASSEMBLED out-of-fold prediction, the mean taken over the
+    pooled truth. The statistic is the unweighted mean over the 19 quantities that vary.
+
+    ⚠ FINE-ROOT CONDUCTIVITY IS EXCLUDED FROM THE MEAN BECAUSE IT DOES NOT VARY: its three quantiles
+    take one value in all 5,620 tree-bearing runs (spread ~1e-18), so variance explained is 0/0. It
+    stays in the band rates, where every arm passes it for free. `assert_constant` refuses the run
+    if it varies.
+
+    An arm that leaves a scored row unpredicted is an error, not a skipped row.
+
+    REPORTED BESIDE THE STATISTIC, NEVER DECIDED ON: per quantity and on all 22 at once, the share of
+    TREE-BEARING rows inside +-10 % of the truth on the raw scale, for every arm and for the ceiling.
+    ⚠ This is a FLAT 10 % band, STRICTER than the acceptance rule max(10 %, the model's own two-run
+    spread), because the second run exists for only 20 of the 200 cells.
+  reference_basis: >
+    LPJmL-FIT 5.6.004, binary built 2026-08-12, one binary for all 6,000 runs. Pilot corpus
+    v2-constco2: 200 cells x 30 climates x 1 seed, each a single-cell 1000-year spin-up, npatch=25,
+    tree PFTs only, base climate window 1970-1999, CO2 constant at 276.59 ppm. State from the
+    end-of-spin-up restart, which is uncensored. Inputs: the 86 CLIMATE_FEATURES of that run's own
+    (perturbed) climate -- which include soil depth -- and five soil-texture columns read from the
+    model's own soil input `soil_code_test.soil.bin` (code, available water capacity, available
+    fraction, sand, clay; per-code values from par/soil.js as transcribed in
+    scripts/screen_d95max.py). 200 of the 56,986 eligible cells, not the acceptance criterion's
+    54,020. Dimensionless; a ratio of sums of squares, i.e. a ratio and not a level.
+  units: dimensionless
+  kind: ratio
+
+data:
+  corpus: /p/tmp/jamirp/vegemu/corpus/pilot-v2-constco2
+  corpus_sha256: "9c117cb6c045fe90692fbee431dc3a33bf6ced1e4d5e7f4fb2350a1bce16903c"
+  plan_sha256: "bad787ade3fc609b25cf8ebc87dfd0978e4a869068d9408c73945ec3dc667f99"
+  n_rows: 6000
+
+  split:
+    kind: blocked_spatial
+    k: 5
+    seed: 42
+    block_degrees: [15, 5]
+
+  leakage_checks:
+    - "Folds are assigned per CELL by vegemu.score.blocked_spatial_folds (15-degree primary, 5-degree sensitivity, k=5, seed 42): all 30 climates of a held-out cell are held out together, so the model never sees the place it is scored on under any climate."
+    - "The feature set is exactly CLIMATE_FEATURES (86, including soildepth) plus five soil-texture columns = 91. The script asserts that none of cell, lon, lat, tile, point or the five design axes (dtemp_k, fprec, sprec, frad, fiav) is a feature, and a unit test asserts the same."
+    - "No state column is a feature: nothing from the control forest or any restart enters the input, which is the whole difference from the kill tests."
+    - "The analogue null standardises its eight features on the TRAINING rows of each fold only."
+    - "CO2 is never a feature and is constant on this corpus (invariant 8)."
+    - "The model arm reads the 181-column corpus.parquet deliberately and SELECTS its 91 columns by name; it does not use build_features, which would turn every non-forbidden column, state included, into a feature."
+    - "Soil texture is joined at read time by cell id from the model's own input file (one unsigned byte per cell in grid order, the same indexing screen_d95max.py uses); an unknown code becomes NaN, never zero."
+
+# Measured by scripts/exp_equilibrium_map.py --arm nulls, job 2280450, 2026-09-23, before this file
+# was written and before any model was fitted; output nulls.json sha256 d7dab47c0b2e37ce... Every
+# null is a deterministic function of the corpus and the folds, and the model arm recomputes all
+# four in the same job with the same code, so each must reproduce to the stated tolerance.
+nulls:
+  - id: training_mean
+    description: "Every held-out row gets the mean of the training rows: the average forest."
+    expected:
+      statistic: skill_equilibrium_mean
+      value: -0.006259
+      tolerance: 0.001
+      derivation: >
+        Measured, job 2280450: -0.006259 at 15 deg, -0.007914 at 5 deg. Slightly below zero because
+        the training mean is not the held-out mean.
+
+  - id: nearest_analogue
+    description: >
+      THE BEST NULL. Copy the forest of the climatically nearest TRAINING row, over the fixed
+      eight-feature analogue set of vegemu.nulls (tas_ann, pr_ann, tas_coldest_month,
+      tas_warmest_month, gdd5, pr_seasonality, vpd_ann, aridity), standardised on the training rows;
+      per quantity the nearest row where that quantity exists. A lookup, not a model: what
+      space-for-time substitution buys.
+    expected:
+      statistic: skill_equilibrium_mean
+      value: 0.097666
+      tolerance: 0.001
+      derivation: >
+        Measured, job 2280450: 0.097666 at 15 deg, 0.104112 at 5 deg. Strongest on the canopy
+        quantities (agb 0.440, lai 0.494, height_p90 0.465) and NEGATIVE on seven of the fifteen varying
+        trait quantiles.
+
+  - id: nearest_geographic
+    description: >
+      Copy the forest of the nearest TRAINING cell (great-circle, unit-sphere coordinates) under
+      the SAME design climate. It sees coordinates, which the model is denied: the address null.
+    expected:
+      statistic: skill_equilibrium_mean
+      value: -0.130669
+      tolerance: 0.001
+      derivation: >
+        Measured, job 2280450: -0.130669 at 15 deg, -0.138043 at 5 deg. Negative: with whole
+        15-degree tiles held out, the nearest training cell is far away and its forest is worse
+        than the average forest.
+
+  - id: shuffled
+    description: "The held-out truth permuted across the held-out rows, seed 20260923. The sanity null."
+    expected:
+      statistic: skill_equilibrium_mean
+      value: -0.937174
+      tolerance: 0.01
+      derivation: "Near -1 by construction. Measured, job 2280450: -0.937174 at 15 deg, -0.927463 at 5 deg."
+
+decision_rule:
+  statistic: skill_equilibrium_mean
+  comparator: model_minus_best_null
+  pass_if: "> 0.125"
+  arms: [model, training_mean, nearest_analogue, nearest_geographic, shuffled]
+  multiplicity: none
+  power_note: >
+    THE THRESHOLD FOLLOWS THE CONSTRUCTION BOTH KILL TESTS USED, SO IT IS NOT CHOSEN BY EYE. Under
+    model_minus_best_null each null is judged on the model's own comparator, so what constrains the
+    threshold is the gap between the best null and the runner-up: nearest_analogue beats
+    training_mean by 0.103925 at 15 deg and by 0.112026 at 5 deg. The kill tests set their threshold
+    at the larger gap plus 0.0118 of headroom; the same here gives 0.1238, rounded up to 0.125,
+    which clears the larger gap by 0.013 and which no null satisfies at either radius.
+
+    A pass therefore requires the model to reach 0.222666 at 15 deg.
+
+    If any null returns something other than its stated value the outcome is `invalid`, not fail.
+    If any null satisfies pass_if the estimand has no power and the outcome MUST be `invalid`.
+
+  ceiling_note: >
+    ⚠ READ AGAINST 0.950314, NEVER AGAINST 1.0. LPJmL-FIT is stochastic, so even a perfect emulator
+    leaves the model's own realisation noise. Measured, job 2280450: noise variance =
+    0.5 * mean((seed1 - seed2)^2) over the 20 cells x 30 climates that have a second run (pilot-v1
+    and pilot-v1-s2), divided by the variance of the scored v2 truth; ceiling 0.950 mean over the
+    19, from 0.854 (D95max_p10) to 0.9997 (soilc). ⚠ Those two runs used the TRANSIENT CO2 path; no
+    second run of v2 exists, so the ceiling is quoted as a bound with that caveat.
+
+    ⚠ THE FLAT-10 % BAND CEILING IS LOW, AND THAT IS A FINDING ABOUT THE CRITERION, NOT THE
+    EMULATOR: one real run predicting a second lands inside +-10 % on ALL 22 at once in only 4.9 %
+    of 555 tree-bearing rows; per quantity 0.49 (agb) to 0.96 (soil carbon). A flat 10 % conjunctive
+    band is therefore unreachable in most cells even for the original model, which is why the
+    acceptance rule widens it to the model's own two-run spread.
+
+  outcomes_note: >
+    THREE DISTINGUISHABLE RESULTS, ALL PRE-NAMED BEFORE THE RUN. Let M be the model's score.
+    (a) M > 0.222666 -- climate and soil alone carry learnable information about the settled forest
+    at unseen places, well beyond an analogue lookup. It licenses building Product A on these
+    inputs. It does NOT license a fidelity claim: quote M against the 0.950 ceiling, per quantity,
+    with the flat-10 % band rates and their 4.9 % ceiling beside it.
+    (b) nearest_analogue < M <= 0.222666 -- a real but small improvement on a lookup. At 200 cells
+    (~160 per training fold) this most likely says the design is too small, not that the map is
+    unlearnable; it argues for the mid corpus, not against Product A.
+    (c) M <= 0.097666 -- a learned model does no better than copying the nearest climate analogue.
+    Not evidence the map is unlearnable in principle; evidence that 200 cells and these features do
+    not identify it.
+    ⚠ NONE of the three is a fidelity claim (200 of 54,020 cells; acceptance untouched) and none
+    says anything about a scenario leg.
+
+compute:
+  launcher: scripts/sbatch_py.sh
+  tag: X-equilibrium-model
+  partition: priority
+  est_core_hours: 4
+
+outputs:
+  - path: /p/tmp/jamirp/vegemu/exp/X-20260923-equilibrium-from-climate/metrics.json
+    kind: metrics
