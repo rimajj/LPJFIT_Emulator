@@ -383,6 +383,48 @@ def test_a_replicate_plan_must_take_its_first_seeds_co2_and_design(
     # the matching replicate goes on to the selection (a pre-`co2_ppm` plan counts as 276.59)
     with pytest.raises(pytest.fail.Exception, match="got past the guard"):
         m.stage_plan("v9", 200, 30, 250, seed=2, co2=m.Co2(True, 276.59))
+
+
+def test_two_build_shards_racing_to_create_the_co2_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`--shard/--nshard` builds run concurrently. With one fixed candidate name, a second shard
+    that landed the file between the first's write and its compare made the first die on a
+    candidate that had been renamed away. Reproduced deterministically: the "other shard" (another
+    pid) runs to completion inside this one's write."""
+    m, cfg = _script("corpus_pilot"), _script("corpus_spinup_config")
+    dest = tmp_path / "forcing" / "pilot-v9" / "co2_constant.txt"
+    monkeypatch.setattr(m, "constant_co2_path", lambda *a, **k: dest)
+    real = cfg.write_constant_co2
+    other_ran: list[bool] = []
+
+    def write_then_let_the_other_shard_finish(target: Path, ppm: float) -> Path:
+        out = real(target, ppm=ppm)
+        if not other_ran:
+            other_ran.append(True)
+            with monkeypatch.context() as mp:
+                mp.setattr(m.os, "getpid", lambda: 999_999)
+                assert m._write_co2_if_constant("v9", "pilot", m.Co2(True, 276.59)) == str(dest)
+        return out
+
+    monkeypatch.setattr(cfg, "write_constant_co2", write_then_let_the_other_shard_finish)
+    assert m._write_co2_if_constant("v9", "pilot", m.Co2(True, 276.59)) == str(dest)
+    assert other_ran
+    assert dest.read_text() == "".join(f"{y}  276.59\n" for y in range(1700, 2101))
+    assert sorted(p.name for p in dest.parent.iterdir()) == ["co2_constant.txt"], "no leftovers"
+
+
+def test_an_existing_co2_file_at_another_level_is_refused(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    m = _script("corpus_pilot")
+    dest = tmp_path / "co2_constant.txt"
+    dest.write_text("1700  300.00\n")
+    monkeypatch.setattr(m, "constant_co2_path", lambda *a, **k: dest)
+    with pytest.raises(SystemExit, match="refusing to overwrite"):
+        m._write_co2_if_constant("v9", "pilot", m.Co2(True, 276.59))
+    assert dest.read_text() == "1700  300.00\n"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["co2_constant.txt"], "no leftovers"
 # ------------------------------------------------------------------------------------------------
 # Real files
 # ------------------------------------------------------------------------------------------------

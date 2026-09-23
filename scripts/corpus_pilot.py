@@ -96,6 +96,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -848,26 +849,35 @@ def _write_co2_if_constant(version: str, tier: str, co2: Co2) -> str:
     may still be reading this file, and a rewrite truncates it first -- a run opening it in that
     instant reads an empty CO2 input. Same bytes: left alone. Different bytes: refused, because the
     two seeds would then not share a CO2 path.
+
+    ⚠ THE CANDIDATE NAME IS UNIQUE PER CALL. `--shard/--nshard` builds run as concurrent jobs, and
+    with one fixed candidate name two shards wrote, compared, renamed and unlinked THE SAME file:
+    the second shard's read or unlink then found it gone and the shard died before building a cell.
+    Each call now writes its own temporary file and `os.replace`s it into place, which is atomic, so
+    two shards racing to create the file both land identical bytes and a reader never sees half.
     """
     if not co2.constant:
         return ""
     cfgmod = _cfg()
     dest = constant_co2_path(version, tier)
     assert co2.ppm is not None
-    fresh = dest.with_name(dest.name + ".candidate")
-    cfgmod.write_constant_co2(fresh, ppm=co2.ppm)
-    if dest.is_file():
-        same = dest.read_bytes() == fresh.read_bytes()
-        fresh.unlink()
-        if not same:
-            raise SystemExit(
-                f"{dest} exists and differs from a {co2.ppm} ppm file. This version's runs would "
-                "not share one CO2 path; refusing to overwrite it."
-            )
-        print(f"constant CO2 forcing: {dest}  ({co2.ppm} ppm) -- already present, identical")
-    else:
-        fresh.rename(dest)
-        print(f"constant CO2 forcing: {dest}  ({co2.ppm} ppm, every year the spin-up reads)")
+    # Host AND pid: shards run on different nodes, where pids repeat. Not `mkstemp`, whose 0600 mode
+    # would survive the rename and make the version's CO2 input unreadable to the group.
+    fresh = dest.with_name(f".{dest.name}.{socket.gethostname()}.{os.getpid()}.candidate")
+    try:
+        cfgmod.write_constant_co2(fresh, ppm=co2.ppm)
+        if dest.is_file():
+            if dest.read_bytes() != fresh.read_bytes():
+                raise SystemExit(
+                    f"{dest} exists and differs from a {co2.ppm} ppm file. This version's runs "
+                    "would not share one CO2 path; refusing to overwrite it."
+                )
+            print(f"constant CO2 forcing: {dest}  ({co2.ppm} ppm) -- already present, identical")
+        else:
+            os.replace(fresh, dest)
+            print(f"constant CO2 forcing: {dest}  ({co2.ppm} ppm, every year the spin-up reads)")
+    finally:
+        fresh.unlink(missing_ok=True)
     return str(dest)
 
 
