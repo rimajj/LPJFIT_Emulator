@@ -33,6 +33,7 @@ from exp_derive_nulls_pilot import (
     build_null_predictions,
     derive_nulls,
 )
+from exp_model_pilot_composition import FORCING_FEATURES, forcing_index, scramble_forcing
 from vegemu.score import (
     COMPOSITION_QUANTITIES,
     RESPONSE_QUANTITIES,
@@ -146,3 +147,28 @@ def test_the_sealed_response_tuple_is_untouched() -> None:
     )
     assert not set(COMPOSITION_QUANTITIES) & set(RESPONSE_QUANTITIES)
     assert len(COMPOSITION_QUANTITIES) == 7
+
+
+def test_the_blind_arm_removes_exactly_the_eleven_forcing_columns() -> None:
+    """The composition blind arm must be the SAME ablation as the response test's, or the two blind
+    numbers are not comparable; and it must refuse, not no-op, if a forcing column is absent."""
+    assert len(FORCING_FEATURES) == 11
+    names = ["ctl_agb", *FORCING_FEATURES, "tas_ann"]
+    assert forcing_index(names) == list(range(1, 12))
+    with pytest.raises(SystemExit, match="absent"):
+        forcing_index(["ctl_agb", "dtemp_k"])
+
+
+def test_the_scramble_is_drawn_per_cell_and_touches_only_the_forcing() -> None:
+    """A permutation shared by every cell is a relabelling the model learns under new names."""
+    rng = np.random.default_rng(3)
+    # every cell carries the SAME 29 design points, as the real corpus does
+    design = rng.normal(size=(29, 2))
+    x = np.concatenate(
+        [np.broadcast_to(design, (N_CELLS, 29, 2)), rng.normal(size=(N_CELLS, 29, 1))], axis=2
+    )
+    out = scramble_forcing(x, [0, 1], seed=20260914)
+    np.testing.assert_array_equal(out[:, :, 2], x[:, :, 2])
+    for i in range(N_CELLS):  # a row permutation of the design, pairing kept within the row
+        assert sorted(map(tuple, out[i, :, :2])) == sorted(map(tuple, x[i, :, :2]))
+    assert len({tuple(out[i, :, 0]) for i in range(N_CELLS)}) > 1

@@ -57,9 +57,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import numpy as np
 import polars as pl
 
+from diag_pilot_response_ablation import DERIVED
 from exp_derive_nulls_composition import impute_no_change
 from exp_derive_nulls_pilot import _per_level_and_pooled, build_deltas, build_null_predictions
 from exp_model_pilot_response import (
+    DESIGN_AXES,
     assert_no_leakage,
     build_features,
     decide,
@@ -74,6 +76,70 @@ from vegemu.score import (
 )
 
 STATISTIC = "skill_composition_mean"
+
+# The eleven columns that say WHICH perturbation a row is: the five design axes and the six forcing
+# deltas derived from them. `--blind` removes exactly these, the same set the response test's blind
+# arm removed, so the two blind numbers are the same ablation applied to two estimands.
+FORCING_FEATURES: tuple[str, ...] = (*DESIGN_AXES, *DERIVED)
+
+
+def forcing_index(names: list[str]) -> list[int]:
+    """Column positions of FORCING_FEATURES. Refuses if any is absent -- a blind arm that removed
+    nothing would score as the full model and read as "the skill is not forcing", silently."""
+    missing = [n for n in FORCING_FEATURES if n not in names]
+    if missing:
+        raise SystemExit(f"forcing features absent from the feature set: {missing}")
+    return [names.index(n) for n in FORCING_FEATURES]
+
+
+def scramble_forcing(x: np.ndarray, idx: list[int], seed: int) -> np.ndarray:
+    """Re-pair the forcing columns with an INDEPENDENT permutation per cell.
+
+    ⚠ Per cell, never shared: the 29 design points are identical at every cell, so one permutation
+    applied everywhere is a relabelling the model simply learns under new names
+    (`diag_pilot_response_ablation.py` documents the broken first version).
+    """
+    rng = np.random.default_rng(seed)
+    out = x.copy()
+    for i in range(x.shape[0]):
+        perm = rng.permutation(x.shape[1])
+        for k in idx:
+            out[i, :, k] = x[i, perm, k]
+    return out
+
+
+def blind_diagnostics(
+    x_full: np.ndarray,
+    names_full: list[str],
+    dtrue: np.ndarray,
+    folds: np.ndarray,
+    points: list[str],
+    *,
+    blind: float,
+    degrees: float,
+) -> dict[str, object]:
+    """The full and scrambled models beside a blind `model` arm. DIAGNOSTICS, never arms.
+
+    They are not in the result block, so the checker cannot rank them against the nulls. The full
+    model is RE-FITTED rather than read from the earlier run, so its agreement with that run's
+    number is a check on the whole apparatus inside this job.
+    """
+    q = COMPOSITION_QUANTITIES
+    diag: dict[str, object] = {"blocking_degrees": degrees}
+    for label, xx in (
+        ("full_model", x_full),
+        ("scrambled", scramble_forcing(x_full, forcing_index(names_full), 20260914)),
+    ):
+        print(f"\n=== diagnostic: {label} ===", flush=True)
+        dpred, _ = impute_no_change(fit_predict_oof(xx, dtrue, folds, q), dtrue)
+        scored = _per_level_and_pooled(dpred, dtrue, points, q)
+        diag[label] = scored
+        print(f"  pooled            {scored['pooled']:+.6f}")
+    full = float(diag["full_model"]["pooled"])  # type: ignore[index]
+    diag["forcing_attributable"] = full - blind
+    diag["blind_share_of_full"] = blind / full if full else float("nan")
+    print(f"\n  forcing-attributable  {full - blind:+.6f}  (blind = {blind / full:.1%} of full)")
+    return diag
 
 
 def scorable_pairs(dtrue: np.ndarray) -> dict[str, object]:
@@ -147,7 +213,8 @@ def dry_run(
     return 0
 
 
-def main() -> int:
+def _parse_args() -> argparse.Namespace:
+    """Split out of `main` so the option list can grow without pushing it over PLR0915."""
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--version", default="pilot-v1")
     ap.add_argument("--out", required=True)
@@ -155,20 +222,36 @@ def main() -> int:
     ap.add_argument("--k", type=int, default=5)
     ap.add_argument("--degrees", type=float, default=15.0, help="primary blocking radius")
     ap.add_argument("--also-degrees", type=float, default=5.0)
+    # ⚠ REQUIRED, no default. It used to default to X6's 0.080, and the constant-CO2 re-score was
+    # launched without it, so its metrics.json says "needs > 0.240" against a sealed bar of 0.300.
+    # The checker recomputes the verdict from the sealed rule, so no outcome was wrong -- but a
+    # printed bar that disagrees with the sealed one is a wrong number waiting to be quoted.
     ap.add_argument(
         "--threshold",
         type=float,
-        default=0.080,
+        required=True,
         help="the pre-registered pass margin. MUST match the sealed decision rule.",
     )
     ap.add_argument("--exp-id", default="", help="stamped into the output for append_result.py")
+    ap.add_argument(
+        "--blind",
+        action="store_true",
+        help=(
+            "score a model BLINDED to which perturbation it is asked about (FORCING_FEATURES "
+            "removed) as the `model` arm; the full and scrambled models are reported beside it "
+            "as diagnostics, never as arms"
+        ),
+    )
     ap.add_argument(
         "--dry-run",
         action="store_true",
         help="check the plumbing and STOP before fitting. Safe to run before the seal.",
     )
-    args = ap.parse_args()
+    return ap.parse_args()
 
+
+def main() -> int:
+    args = _parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     corpus = Path(str(paths()["scratch"]["corpus"])) / args.version
@@ -181,6 +264,12 @@ def main() -> int:
     dtrue, control, cell_ids, points = build_deltas(state, cells, quantities)
     scored_cells = cells.filter(pl.col("cell").is_in(cell_ids)).sort("cell")
     x, names = build_features(state, scored_cells, design, cell_ids, points)
+    x_full, names_full = x, names
+    if args.blind:
+        drop = set(forcing_index(names))
+        keep = [i for i in range(len(names)) if i not in drop]
+        x, names = x[:, :, keep], [names[i] for i in keep]
+        assert not set(FORCING_FEATURES) & set(names)
     print(f"features: {len(names)} over {len(cell_ids)} cells x {len(points)} points", flush=True)
 
     lon = scored_cells["lon"].to_numpy().astype(np.float64)
@@ -189,6 +278,8 @@ def main() -> int:
     report: dict[str, object] = {
         "exp_id": args.exp_id,
         "arm": "model",
+        "model_is_blind": bool(args.blind),
+        "features_removed": list(FORCING_FEATURES) if args.blind else [],
         "statistic": STATISTIC,
         "version": args.version,
         "corpus": str(corpus),
@@ -255,6 +346,18 @@ def main() -> int:
 
     primary = report["by_blocking"][f"{args.degrees:g}deg"]  # type: ignore[index]
     report["decision"] = primary["decision"]
+
+    if args.blind:
+        folds = blocked_spatial_folds(lon, lat, k=args.k, degrees=args.degrees, seed=42)
+        report["diagnostics"] = blind_diagnostics(
+            x_full,
+            names_full,
+            dtrue,
+            folds,
+            points,
+            blind=float(primary["model"]["pooled"]),
+            degrees=args.degrees,
+        )
     # The flat block `tools/append_result.py` reads, from the PRIMARY blocking only: the 5-degree
     # arm is a pre-declared sensitivity check, reported beside it and never as the number of record.
     report.update(
