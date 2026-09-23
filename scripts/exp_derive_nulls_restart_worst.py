@@ -372,6 +372,19 @@ def reproduce_x4(path: Path, scores: dict[str, dict[str, Any]]) -> dict[str, Any
 # ------------------------------------------------------------------------------------------------
 # The model arm: a table of states DECODED from the emitted restarts, scored beside every null.
 # ------------------------------------------------------------------------------------------------
+def check_folds(
+    frame: pl.DataFrame, basis: dict[str, Any], folds15: npt.NDArray[np.int64], *, what: str
+) -> None:
+    """Refuse a table whose per-cell `fold` is not the scorer's: its out-of-fold claim is void."""
+    want = dict(zip(basis["cell_ids"], folds15.tolist(), strict=True))
+    got: dict[int, set[int]] = {}
+    for c, f in zip(frame["cell"].to_list(), frame["fold"].to_list(), strict=True):
+        got.setdefault(int(c), set()).add(int(f))
+    bad = [c for c in basis["cell_ids"] if c in got and got[c] != {want[c]}]
+    if bad:
+        raise ValueError(f"{what}: folds differ from the scorer's on {len(bad)} cells")
+
+
 def load_model_arm(
     path: Path, basis: dict[str, Any], folds15: npt.NDArray[np.int64], *, prefix: str
 ) -> tuple[Array, dict[str, Any]]:
@@ -389,11 +402,7 @@ def load_model_arm(
     """
     frame = pl.read_parquet(path)
     if "fold" in frame.columns:
-        want = dict(zip(basis["cell_ids"], folds15.tolist(), strict=True))
-        got = dict(zip(frame["cell"].to_list(), frame["fold"].to_list(), strict=False))
-        bad = [c for c in basis["cell_ids"] if c in got and int(got[c]) != want[c]]
-        if bad:
-            raise ValueError(f"model arm folds differ from the scorer's on {len(bad)} cells")
+        check_folds(frame, basis, folds15, what=path.name)
     n_rows = frame.height
     if "status" in frame.columns:
         frame = frame.filter(pl.col("status") == "ok")
@@ -462,6 +471,11 @@ def _parse_args() -> argparse.Namespace:
         metavar="NAME=PATH",
         help="an extra arm scored beside the decision and never in it, e.g. the synthesiser's "
         "oracle arm (true state in, restart out): what the synthesis alone loses",
+    )
+    ap.add_argument(
+        "--map-oof",
+        default="",
+        help="the map's out-of-fold table the synthesiser consumed; its folds are verified",
     )
     ap.add_argument("--threshold", type=float, help="the SEALED pass margin (model arm only)")
     ap.add_argument("--exp-id", default="")
@@ -615,6 +629,10 @@ def main() -> int:
         model, cov = load_model_arm(Path(args.pred), basis, folds15, prefix=args.pred_prefix)
         cov.pop("covered")
         report["model_coverage"] = cov
+        if args.map_oof:
+            oof = pl.read_parquet(args.map_oof, columns=["cell", "fold"])
+            check_folds(oof, basis, folds15, what=Path(args.map_oof).name)
+            report["map_oof_folds_verified"] = args.map_oof
         print(f"model arm: {cov}", flush=True)
     report["by_blocking"], seps, errors15, null_preds = score_blockings(args, basis, band, model)
 
