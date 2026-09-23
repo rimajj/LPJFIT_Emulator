@@ -364,6 +364,25 @@ def test_a_re_decode_without_a_source_table_is_refused_before_decoding(
     assert not (tmp_path / "pilot-v10" / "provenance.json").exists(), "claimed nothing"
 
 
+def test_a_replicate_plan_must_take_its_first_seeds_co2_and_design(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Seed 2 planned without `--const-co2` under a constant seed 1 used to be accepted, and the
+    build -- which reads CO2 from the plan -- then built a transient-CO2 "replicate"."""
+    first = {"co2_constant": True, "co2": "CONSTANT 276.59", "npoint": 30, "plan_sha256": "x"}
+    m = _two_versions(monkeypatch, tmp_path, first)
+    monkeypatch.setattr(m, "pilot_cells", lambda *a, **k: pytest.fail("got past the guard"))
+    for co2, npoint, kind in (
+        (m.Co2(False, None), 30, "pilot"),
+        (m.Co2(True, 350.0), 30, "pilot"),
+        (m.Co2(True, 276.59), 100, "nested"),
+    ):
+        with pytest.raises(SystemExit, match="must replicate seed 1"):
+            m.stage_plan("v9", 200, npoint, 250, seed=2, co2=co2, design_kind=kind)
+    assert not (tmp_path / "pilot-v9-s2" / "provenance.json").exists()
+    # the matching replicate goes on to the selection (a pre-`co2_ppm` plan counts as 276.59)
+    with pytest.raises(pytest.fail.Exception, match="got past the guard"):
+        m.stage_plan("v9", 200, 30, 250, seed=2, co2=m.Co2(True, 276.59))
 # ------------------------------------------------------------------------------------------------
 # Real files
 # ------------------------------------------------------------------------------------------------

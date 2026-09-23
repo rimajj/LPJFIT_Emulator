@@ -436,6 +436,23 @@ def stage_plan(  # noqa: PLR0912, PLR0915 -- one flat pass: choose, write, recor
         existing = d / "provenance.json"
         if existing.is_file() and json.loads(existing.read_text()).get("derived_from"):
             raise SystemExit(f"{d.name} is a re-decode of another version; plan the source instead")
+    # ⚠ A REPLICATE TAKES ITS FIRST SEED'S CO2 AND CLIMATES, OR IT IS NOT A REPLICATE. The build now
+    # reads the CO2 mode from THIS plan, so a seed-2 plan made without `--const-co2` under a
+    # constant-CO2 seed 1 builds transient-CO2 configs, verify passes them against their own plan,
+    # and the "two-seed spread" then mixes the seed with a CO2 ramp. Refused here, before any file
+    # is written, for the same reason `_plan_schema` makes a replicate inherit seed 1's schema.
+    first = _meta_path(version, SEED, tier) / "provenance.json"
+    if seed != SEED and first.is_file():
+        first_prov = json.loads(first.read_text())
+        first_co2 = Co2.of_provenance(first_prov)
+        first_kind, first_npoint = str(first_prov.get("design_kind", "pilot")), first_prov["npoint"]
+        if co2 != first_co2 or (design_kind, npoint) != (first_kind, first_npoint):
+            raise SystemExit(
+                f"seed {seed} of {version} must replicate seed {SEED}, which was planned with "
+                f"{first_co2} and a {first_npoint}-point {first_kind} design; this plan asks for "
+                f"{co2} and a {npoint}-point {design_kind} design. Give the same CO2 flags "
+                f"(seed {SEED}: {first_prov.get('co2')})."
+            )
     schema = _plan_schema(version, seed, tier)
     nest_cells, nest_dir = _nesting(nest_in)
     sel = pilot_cells(ncell, include=nest_cells, max_per_tile=max_per_tile)
