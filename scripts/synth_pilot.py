@@ -86,6 +86,10 @@ FORCING_FILES: dict[str, str] = {
     "lwnet": "lwnet_pert.clm",
 }
 ARMS: tuple[str, ...] = ("oracle", "map")
+# Diagnostic ablations, synthesised for the t2 sample only. `oracle-cbcopy` is the oracle with the
+# TEMPLATE's climate buffer copied instead of derived -- what the buffer derivation is worth.
+ABLATIONS: tuple[str, ...] = ("oracle-cbcopy",)
+T2_ARMS: tuple[str, ...] = ("truth", "null", *ARMS, *ABLATIONS)
 MAP_OOF = ("equimap-v1", "oof_pilot.parquet")
 
 # The quantities the synthesiser consumes; everything else in a prediction is only scored.
@@ -474,7 +478,7 @@ def _bank_rows(cell: int) -> npt.NDArray[np.uint8]:
 
 def load_predictions(arm: str) -> pl.DataFrame | None:
     """(cell, point, <quantity>...) on the natural scale, or None if the arm's source is absent."""
-    if arm == "oracle":
+    if arm.split("-", maxsplit=1)[0] == "oracle":
         return state_table()
     p = _scratch("models").joinpath(*MAP_OOF)
     if not p.exists():
@@ -664,7 +668,7 @@ def _synth_cell(args: tuple[str, int, float, int, list[str]]) -> list[dict[str, 
                 seed=20260923 + cell * 100 + points.index(point),
                 type_shares=shares,
                 allowed_types=allowed,
-                climbuf=buf,
+                climbuf=None if arm.endswith("-cbcopy") else buf,
                 rescale_litter=lit is not None,
             )
             dest = synth_restart_path(arm, cell, point)
@@ -763,9 +767,12 @@ def stage_synth(arm: str, workers: int, limit_cells: int | None) -> int:
         print(f"arm {arm}: prediction source absent ({'/'.join(MAP_OOF)}); nothing to do")
         return 3
     cells = cell_table().sort("cell")
+    points = [p for p in points_of() if p != CONTROL]
+    if arm in ABLATIONS:
+        cells = cells.filter(pl.col("cell").is_in([c for c, _ in _t2_sample()]))
+        points = list(T2_POINTS)
     if limit_cells:
         cells = cells.head(limit_cells)
-    points = [p for p in points_of() if p != CONTROL]
     jobs = [
         (arm, int(c), float(la), int(fo), points)
         for c, la, fo in zip(cells["cell"], cells["lat"], cells["fold"], strict=True)
@@ -915,6 +922,7 @@ def _prep(
     years: tuple[int, int],
     targets: list[tuple[int, str]],
     *,
+    arms: tuple[str, ...] = T2_ARMS,
     shard: int | None = None,
     link: bool = False,
 ) -> dict[str, Any]:
@@ -922,7 +930,7 @@ def _prep(
     because one manifest is one SLURM job with one task per member."""
     base = _scratch("runs") / f"synth-pilot-{kind}"
     manifests: dict[str, Any] = {}
-    for arm in ("truth", "null", *ARMS):
+    for arm in arms:
         lines: list[str] = []
         skipped = 0
         for cell, point in targets:
@@ -963,7 +971,14 @@ def stage_t2_prep() -> int:
 def stage_t3_prep(nyears: int) -> int:
     cells = cell_table().sort("cell")["cell"].to_list()
     targets = [(int(c), p) for c in cells for p in points_of() if p != CONTROL]
-    out = _prep("t3", (1970, 1970 + nyears - 1), targets, shard=T3_SHARD, link=True)
+    out = _prep(
+        "t3",
+        (1970, 1970 + nyears - 1),
+        targets,
+        arms=("truth", "null", *ARMS),
+        shard=T3_SHARD,
+        link=True,
+    )
     t2 = out_dir() / "t2_timing.json"
     one_year = json.loads(t2.read_text())["median_seconds_per_run"] if t2.exists() else None
     # The pilot spin-ups' own per-year cost, read off their logs: the marginal year.
@@ -1046,7 +1061,7 @@ def _decode_one(args: tuple[str, int, str]) -> dict[str, Any]:
 
 
 def stage_t2_decode(workers: int) -> int:
-    jobs = [(arm, c, p) for arm in ("truth", "null", *ARMS) for c, p in _t2_sample()]
+    jobs = [(arm, c, p) for arm in T2_ARMS for c, p in _t2_sample()]
     with mp.get_context("spawn").Pool(workers) as pool:
         rows = list(pool.imap_unordered(_decode_one, jobs))
     frame = pl.DataFrame(rows, infer_schema_length=None)
@@ -1067,7 +1082,7 @@ def stage_t2_decode(workers: int) -> int:
     secs = [s for s in frame["log_seconds"].to_list() if s is not None]
     timing = {"median_seconds_per_run": float(np.median(secs)) if secs else None, "n": len(secs)}
     (out_dir() / "t2_timing.json").write_text(json.dumps(timing, indent=2))
-    for arm in ("truth", "null", *ARMS):
+    for arm in T2_ARMS:
         a = frame.filter(pl.col("arm") == arm)
         if a.height == 0:
             continue
@@ -1103,7 +1118,7 @@ def main() -> int:
         required=True,
         choices=("bank", "synth", "synth-summary", "t2-prep", "t2-decode", "t3-prep"),
     )
-    ap.add_argument("--arm", choices=ARMS, default="oracle")
+    ap.add_argument("--arm", choices=(*ARMS, *ABLATIONS), default="oracle")
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--limit-cells", type=int, default=None, help="synth: first N cells only")
     ap.add_argument("--t3-years", type=int, default=30)
