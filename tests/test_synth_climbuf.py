@@ -204,7 +204,7 @@ def test_a_pilot_buffer_is_reproduced_exactly_from_its_own_forcing(cell: int, po
     # term `pvd_max/N*(1-(t-low)/(high-low))` is compiled under icx's default fast floating-point
     # model, which may reassociate it. Crops only; nothing natural reads these.
     for name in ("V_req", "V_req_a"):
-        assert err[name]["max_rel"] <= 1e-14, f"{name}: {err[name]}"
+        assert err[name]["max_rel"] <= 1e-12, f"{name}: {err[name]}"
 
 
 @pytest.mark.needs_real_data

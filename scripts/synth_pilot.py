@@ -119,13 +119,13 @@ DIAG_QUANTITIES: tuple[str, ...] = (
     "longevity_p50",
 )
 
-# ⚠ THE TYPE RULE, CHOSEN ON THE BANK STAGE'S EVIDENCE (see `rule_evidence`): survive() on the
-# target buffer AND establishment possible in at least one of the 30 climate years AND mean
-# temperature-stress mortality at most this. Both thresholds are the loosest that keep every true
-# stem of all 6,000 pilot runs admissible; the evidence file states what each looser or tighter
-# alternative would have cost.
-ADMIT_MIN_ESTABLISH_FRAC = 1.0 / 30.0
-ADMIT_MAX_MORT_TEMP = 0.5
+# ⚠ THE TYPE RULE, CHOSEN ON THE BANK STAGE'S EVIDENCE (`evidence.json`, `rule_evidence`): survive()
+# on the target's end-of-spin-up buffer AND establish() possible in at least one year of the
+# replayed spin-up. No temperature-stress cut: types ARE present in true end states at a mean
+# stress mortality of 1.0 (recruits that die the next year, replaced every year), so a cut there
+# deletes real stems.
+ADMIT_MIN_ESTABLISH_FRAC = 1e-9  # "in at least one year"
+ADMIT_MAX_MORT_TEMP = 1.0
 
 # ⚠ THE LITTER RULE, CHOSEN ON THE BANK STAGE'S EVIDENCE (see `litter_evidence`).
 LITTER_RULE = "soilc"
@@ -254,6 +254,7 @@ def _bank_cell(args: tuple[int, float, list[str]]) -> list[dict[str, Any]]:
             f, albedo=alb_ctrl, aetp_mean=aetp_ctrl, stand_frac=frac
         )
         verdict = cb.bioclimatic_verdict(f, trace)
+        recent = {w: cb.bioclimatic_verdict(f, trace, window=w) for w in (30, 200)}
         stems = _tree_rows(rec)
         raws.append(stems)
         ids = stems[:, 0].astype(np.int64) if stems.size else np.zeros(0, dtype=np.int64)
@@ -272,6 +273,8 @@ def _bank_cell(args: tuple[int, float, list[str]]) -> list[dict[str, Any]]:
             row[f"n_type_{t}"] = int(np.count_nonzero(ids == t))
             row[f"surv_{t}"] = bool(verdict.survive_final[t])
             row[f"est_{t}"] = float(verdict.establish_window_frac[t])
+            for w, v in recent.items():
+                row[f"est{w}_{t}"] = float(v.establish_window_frac[t])
             row[f"mort_{t}"] = float(verdict.mort_temp_mean[t])
         rows.append(row)
         start += int(stems.shape[0])
@@ -346,14 +349,20 @@ def rule_evidence(runs: pl.DataFrame) -> dict[str, Any]:
             "mean_types_present": float(has.sum(axis=1).mean()),
         }
 
+    est30 = runs.select([f"est30_{t}" for t in range(NTREE_TYPES)]).to_numpy()
+    est200 = runs.select([f"est200_{t}" for t in range(NTREE_TYPES)]).to_numpy()
+    data = _data_rule(runs)
+    chosen = surv & (est >= ADMIT_MIN_ESTABLISH_FRAC) & (mort <= ADMIT_MAX_MORT_TEMP)
     rules: dict[str, npt.NDArray[np.bool_]] = {
         "template_free_everything": np.ones_like(has),
         "survive_only": surv,
-        "survive_and_establish": surv & (est >= ADMIT_MIN_ESTABLISH_FRAC),
-        "chosen": surv & (est >= ADMIT_MIN_ESTABLISH_FRAC) & (mort <= ADMIT_MAX_MORT_TEMP),
-        "chosen_but_mort_le_0.2": surv & (est >= ADMIT_MIN_ESTABLISH_FRAC) & (mort <= 0.2),
-        "chosen_but_establish_half": surv & (est >= 0.5) & (mort <= ADMIT_MAX_MORT_TEMP),
-        "data_rule_10_nearest_training_runs": _data_rule(runs),
+        "survive_and_establish_last_30y": surv & (est30 > 0),
+        "survive_and_establish_last_200y": surv & (est200 > 0),
+        "survive_and_establish_spinup": surv & (est > 0),
+        "survive_and_establish_spinup_and_mort_le_0.5": surv & (est > 0) & (mort <= 0.5),
+        "chosen": chosen,
+        "data_rule_10_nearest_training_runs": data,
+        "chosen_or_data_rule": chosen | data,
     }
     per_type = {}
     for t in range(NTREE_TYPES):
@@ -361,6 +370,9 @@ def rule_evidence(runs: pl.DataFrame) -> dict[str, Any]:
         per_type[str(t)] = {
             "runs_holding": int(m.sum()),
             "min_establish_frac_where_present": float(est[m, t].min()) if m.any() else None,
+            "stems_where_never_establishes": int(present[m & (est[:, t] <= 0), t].sum()),
+            "stems_where_survive_fails": int(present[m & ~surv[:, t], t].sum()),
+            "stems_total": int(present[:, t].sum()),
             "max_mort_temp_where_present": float(mort[m, t].max()) if m.any() else None,
             "survive_false_where_present": int((m & ~surv[:, t]).sum()),
         }

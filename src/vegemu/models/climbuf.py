@@ -582,16 +582,24 @@ def stress_days(forcing: Forcing, low: float, high: float) -> Array:
 
 
 def bioclimatic_verdict(
-    forcing: Forcing, trace: ClimbufTrace, *, window: int = 30
+    forcing: Forcing, trace: ClimbufTrace, *, window: int | None = None
 ) -> BioclimVerdict:
     """Apply the model's own climate limits (`survive.c`, `establish.c`, `mortality_tree_ind.c`).
 
     Establishment in simulated year n reads that year's degree-days and precipitation and the ring
     buffers AFTER that year's annual update -- `update_annual` runs `annual_climbuf` before
     `annual_stand` -- which is exactly what `trace` records.
+
+    ⚠ THE WINDOW IS THE WHOLE SPIN-UP BY DEFAULT, AND THAT WAS MEASURED, NOT CHOSEN. Over only the
+    last 30 years -- the forcing years read in order -- types that ARE in the true end state come
+    out as never able to establish, because a marginal type's 20-year coldest-month mean sits near
+    its limit and the shuffled centuries before 1970 contained windows the ordered one does not. A
+    type that could establish at any point of the replayed spin-up can hold long-lived stems now.
     """
     agg = year_aggregates(forcing)
-    tail = slice(trace.climate_index.size - window, trace.climate_index.size)
+    n = trace.climate_index.size
+    w = n if window is None else min(window, n)
+    tail = slice(n - w, n)
     cy = trace.climate_index[tail]
     tmin, tmax = trace.temp_min20[tail], trace.temp_max20[tail]
     surv_final = np.zeros(NTREE, dtype=bool)
