@@ -121,13 +121,24 @@ DIAG_QUANTITIES: tuple[str, ...] = (
 
 # ⚠ THE TYPE RULE, CHOSEN ON THE BANK STAGE'S EVIDENCE (`evidence.json`, `rule_evidence`): survive()
 # on the target's end-of-spin-up buffer AND establish() possible in at least one year of the
-# replayed spin-up. No temperature-stress cut: types ARE present in true end states at a mean
-# stress mortality of 1.0 (recruits that die the next year, replaced every year), so a cut there
-# deletes real stems.
+# replayed spin-up. Over all 6,000 pilot runs against their own true rosters it keeps 99.78 % of
+# true stems and 97.6 % of true (run, type) pairs while admitting 4.0 % of the absent ones; the
+# data alternative (any of the 10 climatically nearest training runs holds the type) keeps 99.93 %
+# of stems but admits 24 % of absent types. Every stem it drops (6,345 of 2.92 M) is of a type
+# whose survive() FAILS on that run's own buffer -- recruits the model kills in the next annual
+# step (6,336 boreal needleleaved summergreen, whose 30 K warmest-minus-coldest range is not met).
+# No temperature-stress cut: types ARE present at a mean stress mortality of 1.0 (recruits that
+# die the next year, replaced every year), and a cut at 0.5 drops the type recall to 91.5 %.
 ADMIT_MIN_ESTABLISH_FRAC = 1e-9  # "in at least one year"
 ADMIT_MAX_MORT_TEMP = 1.0
 
-# ⚠ THE LITTER RULE, CHOSEN ON THE BANK STAGE'S EVIDENCE (see `litter_evidence`).
+# ⚠ THE LITTER RULE, CHOSEN ON THE BANK STAGE'S EVIDENCE (`evidence.json`, `litter_evidence`): scale
+# the template's litter by predicted / template SOIL carbon. With the true ratio, over 5,362
+# perturbed pilot runs with litter, it gives a median |relative error| of 0.217 and 27.6 % within
+# 10 %, against 0.289 and 21.2 % for copying the litter unchanged. Scaling by vegetation carbon,
+# above-ground biomass or leaf area is WORSE than copying (0.40, 0.41, 0.31), although litter
+# correlates with each across the pilot (log-log r 0.85, 0.85; soil 0.83): across climates at one
+# cell, litter follows the soil, not the standing forest. A modest gain, and it is disclosed so.
 LITTER_RULE = "soilc"
 
 # The t2 sample. Points by design value: the hottest and coldest perturbations, and pure +4 K.
@@ -468,7 +479,22 @@ def load_predictions(arm: str) -> pl.DataFrame | None:
     if not p.exists():
         return None
     frame = pl.read_parquet(p).with_columns(pl.col("cell").cast(pl.Int64))
-    return frame.rename({c: c[len("pred_") :] for c in frame.columns if c.startswith("pred_")})
+    if "fold" in frame.columns:
+        mine = cell_table().select(["cell", pl.col("fold").alias("fold_here")])
+        check = frame.select(["cell", "fold"]).unique().join(mine, on="cell")
+        if (check["fold"] != check["fold_here"]).any():
+            raise AssertionError("the map's out-of-fold folds differ from the donor folds")
+    frame = frame.rename({c: c[len("pred_") :] for c in frame.columns if c.startswith("pred_")})
+    if "treeless" in frame.columns:
+        # The map's own treeless call: below its threshold it writes NaN traits and shares, so
+        # the forest it predicts there is no forest.
+        frame = frame.with_columns(
+            pl.when(pl.col("treeless") > 0.5)
+            .then(0.0)
+            .otherwise(pl.col("stems_per_patch"))
+            .alias("stems_per_patch")
+        )
+    return frame
 
 
 def prediction_row(frame: pl.DataFrame, cell: int, point: str) -> dict[str, float]:
