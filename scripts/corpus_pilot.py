@@ -992,25 +992,6 @@ def stage_build(  # noqa: PLR0912 -- the plan-versus-CLI refusals, then one pass
 # ------------------------------------------------------------------------------------------------
 
 
-def co2_seen_by_model(co2_file: Path, years: range) -> dict[int, float]:
-    """The CO2 LPJmL uses in each model year, reading `co2_file` exactly as `getco2.c` does.
-
-    Before the file's first year the model substitutes `param.co2_p` (getco2.c:47); past its last
-    year it refuses to run, which is returned here as NaN so the caller can refuse first.
-    """
-    rows = [ln.split() for ln in co2_file.read_text(encoding="utf-8").splitlines() if ln.strip()]
-    first = int(rows[0][0])
-    data = [float(r[1]) for r in rows]
-    if [int(r[0]) for r in rows] != list(range(first, first + len(rows))):
-        raise AssertionError(f"{co2_file}: years are not consecutive (readco2.c ERROR157)")
-    clamp = _cfg().CO2_PREINDUSTRIAL_PPM
-    out: dict[int, float] = {}
-    for y in years:
-        i = y - first
-        out[y] = clamp if i < 0 else (data[i] if i < len(data) else float("nan"))
-    return out
-
-
 def _check_co2(runs: pl.DataFrame, co2: Co2, version: str, tier: str) -> list[str]:
     """Every run's input list names the plan's CO2 file, and that file is what the plan says.
 
@@ -1039,7 +1020,7 @@ def _check_co2(runs: pl.DataFrame, co2: Co2, version: str, tier: str) -> list[st
     if not Path(expected).is_file():
         return [*problems, f"the CO2 file {expected} does not exist"]
     span = range(cfgmod.SPINUP_FIRST_MODEL_YEAR, cfgmod.SPINUP_LAST_MODEL_YEAR + 1)
-    seen = co2_seen_by_model(Path(expected), span)
+    seen = cfgmod.co2_seen_by_model(Path(expected), span)
     if any(np.isnan(v) for v in seen.values()):
         problems.append(f"{expected} ends before model year {span[-1]}: the run would die there")
     if co2.constant and any(v != co2.ppm for v in seen.values()):

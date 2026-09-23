@@ -145,6 +145,27 @@ def read_co2_input(input_js: Path) -> str:
     return str(found[0])
 
 
+def co2_seen_by_model(
+    co2_file: Path, years: range, clamp: float = CO2_PREINDUSTRIAL_PPM
+) -> dict[int, float]:
+    """The CO2 LPJmL uses in each model year, reading `co2_file` exactly as `getco2.c` does.
+
+    Before the file's first year the model substitutes `param.co2_p` (getco2.c:47); past its last
+    year it refuses to run, which is returned here as NaN so the caller can refuse first. Only the
+    first two columns of a line are read, as `readco2.c` does.
+    """
+    rows = [ln.split() for ln in co2_file.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    first = int(rows[0][0])
+    data = [float(r[1]) for r in rows]
+    if [int(r[0]) for r in rows] != list(range(first, first + len(rows))):
+        raise AssertionError(f"{co2_file}: years are not consecutive (readco2.c ERROR157)")
+    out: dict[int, float] = {}
+    for y in years:
+        i = y - first
+        out[y] = clamp if i < 0 else (data[i] if i < len(data) else float("nan"))
+    return out
+
+
 def build_input_js(forcing: Path, run_dir: Path, tag: str, *, co2_file: Path | None = None) -> Path:
     """Rewrite the ground truth's input list so the five climate inputs are the perturbed files."""
     saved = path("ground_truth.historical_seed1") / SAVED_INPUT

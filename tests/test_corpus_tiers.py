@@ -61,19 +61,19 @@ def test_the_existing_call_is_byte_identical(tmp_path: Path) -> None:
 
 def test_a_non_default_co2_file_starts_by_model_year_1000(tmp_path: Path) -> None:
     cfg = _script("corpus_spinup_config")
-    pilot = _script("corpus_pilot")
+
     f = cfg.write_constant_co2(tmp_path / "co2.txt", ppm=350.0)
     assert f.read_text().splitlines()[0] == "1000  350.00"
-    seen = pilot.co2_seen_by_model(f, range(1000, 2000))
+    seen = cfg.co2_seen_by_model(f, range(1000, 2000))
     assert set(seen.values()) == {350.0}, "some spin-up year fell back to the 276.59 clamp"
 
 
 def test_the_clamp_really_bites_on_a_late_file(tmp_path: Path) -> None:
     """The failure the rule prevents, reproduced: what the model would see from a 1700 file."""
-    pilot = _script("corpus_pilot")
+    cfg = _script("corpus_spinup_config")
     f = tmp_path / "late.txt"
     f.write_text("".join(f"{y}  350.00\n" for y in range(1700, 2101)))
-    seen = pilot.co2_seen_by_model(f, range(1000, 2000))
+    seen = cfg.co2_seen_by_model(f, range(1000, 2000))
     assert seen[1000] == 276.59 and seen[1699] == 276.59 and seen[1700] == 350.0
 
 
@@ -350,3 +350,34 @@ def test_the_constant_co2_file_on_disk_is_what_the_default_writes(tmp_path: Path
         hashlib.sha256(p.read_bytes()).hexdigest() for p in (mine, on_disk / "co2_constant.txt")
     ]
     assert digest[0] == digest[1]
+
+
+# ------------------------------------------------------------------------------------------------
+# corpus_convergence: the trend window inside constant CO2
+# ------------------------------------------------------------------------------------------------
+
+
+def test_a_constant_run_keeps_the_last_200_year_window() -> None:
+    conv = _script("corpus_convergence")
+    first, last, years = conv.constant_co2_rows([276.59] * 1000)
+    assert (first, last, years) == (771, 970, 1000)  # rows 771..970 = smooth[-200:]
+
+
+def test_the_ground_truths_ramp_moves_the_window_before_it(tmp_path: Path) -> None:
+    """The ground truth's file: 276.59 from 1700 (and clamped before), rising from 1701."""
+    cfg, conv = _script("corpus_spinup_config"), _script("corpus_convergence")
+    f = tmp_path / "co2.txt"
+    f.write_text(
+        "1700  276.59\n"
+        + "".join(f"{y}  {276.59 + (y - 1700) * 0.3:.2f}\n" for y in range(1701, 2023))
+    )
+    seen = cfg.co2_seen_by_model(f, range(1000, 2000))
+    first, last, years = conv.constant_co2_rows([seen[y] for y in sorted(seen)])
+    assert years == 701  # model years 1000-1700
+    assert last + 30 == 701 and last - first + 1 == 200
+
+
+def test_too_short_a_constant_stretch_is_refused() -> None:
+    conv = _script("corpus_convergence")
+    with pytest.raises(ValueError, match="constant for only 100"):
+        conv.constant_co2_rows([1.0] * 100 + [2.0] * 900)
