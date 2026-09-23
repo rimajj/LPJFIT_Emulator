@@ -105,6 +105,7 @@ import numpy.typing as npt
 from vegemu.binfmt.restart import (
     PFT_GRASS_BYTES,
     PFT_TREE_BYTES,
+    TREE_DTYPE,
     Layout,
     RestartReader,
     _Cursor,
@@ -283,12 +284,33 @@ def quantile_function(
     return clipped
 
 
+def weighted_percentile(
+    sample: npt.NDArray[np.float64], weights: npt.NDArray[np.float64], q: npt.ArrayLike
+) -> npt.NDArray[np.float64]:
+    """Percentiles of a weighted sample, by linear interpolation of the mid-point weighted CDF.
+
+    Used only by the composition path, whose ladder is a REWEIGHTED template: each stem stands for
+    `share_wanted / share_in_template` of a stem, so its percentiles are weighted ones. With equal
+    weights this is the Hazen definition, not numpy's default -- deliberately not relied on to match
+    `np.percentile`, and never used on the unweighted path, which keeps `np.percentile`.
+    """
+    order = np.argsort(sample, kind="stable")
+    x = np.asarray(sample, dtype=np.float64)[order]
+    w = np.asarray(weights, dtype=np.float64)[order]
+    cw = np.cumsum(w)
+    mid = (cw - 0.5 * w) / cw[-1]
+    out: npt.NDArray[np.float64] = np.interp(np.asarray(q, dtype=np.float64) / 100.0, mid, x)
+    return out
+
+
 def recalibrate(
     values: npt.NDArray[np.float64],
     sample: npt.NDArray[np.float64],
     p10: float,
     p50: float,
     p90: float,
+    *,
+    weights: npt.NDArray[np.float64] | None = None,
 ) -> npt.NDArray[np.float64] | None:
     """Move a REAL distribution's values onto three predicted knots, monotonically.
 
@@ -315,9 +337,17 @@ def recalibrate(
     percentiles), which is the caller's signal to fall back to `quantile_function`. Returning None
     rather than silently degrading matters: the fallback draws a measurably too-short tail, and a
     cell that took it must be visible as having taken it.
+
+    `weights`, when given, makes the template's knots WEIGHTED percentiles -- the composition path's
+    reweighted ladder. None keeps the unweighted `np.percentile` the default path has always used.
     """
     lo, mid, hi = sorted((float(p10), float(p50), float(p90)))
-    t10, t50, t90 = (float(v) for v in np.percentile(sample, [10.0, 50.0, 90.0]))
+    knots = (
+        np.percentile(sample, [10.0, 50.0, 90.0])
+        if weights is None
+        else weighted_percentile(sample, weights, [10.0, 50.0, 90.0])
+    )
+    t10, t50, t90 = (float(v) for v in knots)
     if not (0.0 < t10 < t50 < t90):
         return None
     out = np.where(
@@ -371,6 +401,18 @@ class SynthReport:
     # corpus does not contain, which is a finding, not something to absorb silently.
     imposed: dict[str, str] = field(default_factory=dict)
     imposed_clamped: int = 0
+    # The composition path (`type_shares` / `allowed_types`). "template" on the default path, where
+    # every field below keeps its default. `share_mass_removed` is the part of the requested share
+    # that sat on a type the TARGET climate does not admit -- dropped and renormalised, and reported
+    # because a large value means the composition prediction and the climate disagree.
+    composition: str = "template"
+    shares_source: str = ""
+    shares_used: dict[int, float] = field(default_factory=dict)
+    share_mass_removed: float = 0.0
+    ladder_source: dict[int, str] = field(default_factory=dict)
+    types_unplaceable: tuple[int, ...] = ()
+    climbuf_source: str = "template"
+    litter_target: float = 0.0
 
 
 def template_ladder(template: dict[str, Any]) -> Any:
@@ -541,7 +583,280 @@ def _choose_donors(
     return np.asarray(np.argmin(cost, axis=1), dtype=np.int64), fallbacks
 
 
-def synthesise_cell(  # noqa: PLR0915 -- one pass over the patches; splitting it would scatter
+# --------------------------------------------------------------------------------------------
+# PREDICTED COMPOSITION. The default path copies the template's species mix; this path takes the
+# mix as an input. What it must preserve is the one thing the copy got right for free: which types
+# are tall and which are understorey, because the donor match then asks each type for a stem at a
+# height that type actually reaches. So each type draws its stems from ITS OWN ladder -- the
+# template's stems of that type, or, for a type the template lacks, the donors' -- and the
+# cell-level shape used by the recalibration is the template ladder REWEIGHTED by wanted / template
+# share.
+# --------------------------------------------------------------------------------------------
+NTREE_TYPES = 7
+
+
+def largest_remainder(shares: npt.ArrayLike, total: int) -> npt.NDArray[np.int64]:
+    """Integer counts summing exactly to `total`, proportional to `shares` (Hamilton's method).
+
+    Ties in the remainder go to the lower type id, so the result is deterministic. Negative or
+    non-finite shares count as zero; an all-zero share vector yields all-zero counts.
+    """
+    s = np.asarray(shares, dtype=np.float64)
+    s = np.where(np.isfinite(s) & (s > 0), s, 0.0)
+    if total <= 0 or s.sum() <= 0:
+        return np.zeros(s.size, dtype=np.int64)
+    quota = s / s.sum() * total
+    base = np.floor(quota).astype(np.int64)
+    short = int(total - base.sum())
+    order = np.lexsort((np.arange(s.size), -(quota - base)))
+    base[order[:short]] += 1
+    out: npt.NDArray[np.int64] = base.astype(np.int64)
+    return out
+
+
+def _type_shares_of(ids: npt.NDArray[np.int64]) -> npt.NDArray[np.float64]:
+    counts = np.bincount(ids, minlength=NTREE_TYPES)[:NTREE_TYPES].astype(np.float64)
+    out: npt.NDArray[np.float64] = counts / counts.sum() if counts.sum() else counts
+    return out
+
+
+def _restrict(shares: npt.NDArray[np.float64], allowed: tuple[int, ...]) -> tuple[Any, float]:
+    """Zero the shares of types outside `allowed`; return the renormalised vector and the cut."""
+    keep = np.zeros(NTREE_TYPES, dtype=bool)
+    keep[list(allowed)] = True
+    s = np.where(np.isfinite(shares) & (shares > 0), shares, 0.0)[:NTREE_TYPES]
+    total = float(s.sum())
+    cut = float(s[~keep].sum()) / total if total > 0 else 0.0
+    s = np.where(keep, s, 0.0)
+    return (s / s.sum() if s.sum() > 0 else s), cut
+
+
+def _type_ladders(
+    rungs: Any, pool: DonorPool, shares: npt.NDArray[np.float64], report: SynthReport
+) -> dict[int, Any]:
+    """Each wanted type's own height-sorted ladder: the template's stems of it, else the pool's."""
+    template_ids = (
+        np.asarray(rungs["id"], dtype=np.int64) if rungs.size else np.zeros(0, dtype=np.int64)
+    )
+    pool_ids = np.asarray(pool.fields["id"], dtype=np.int64)
+    ladders: dict[int, Any] = {}
+    for t in range(NTREE_TYPES):
+        if shares[t] <= 0:
+            continue
+        if np.any(template_ids == t):
+            ladders[t] = rungs[template_ids == t]
+            report.ladder_source[t] = "template"
+        elif np.any(pool_ids == t):
+            rows = pool.fields[pool_ids == t]
+            order = np.argsort(np.asarray(rows["height"], dtype=np.float64), kind="stable")
+            ladders[t] = rows[order]
+            report.ladder_source[t] = "donors"
+        else:
+            report.ladder_source[t] = "none"
+    return ladders
+
+
+def _composition_roster(
+    rungs: Any,
+    pool: DonorPool,
+    shares: npt.NDArray[np.float64],
+    n_cell: int,
+    *,
+    prediction: dict[str, float],
+    traits: tuple[str, ...],
+    report: SynthReport,
+) -> tuple[dict[str, npt.NDArray[np.float64]], npt.NDArray[np.int64], Any, dict[str, str]]:
+    """The roster's per-stem targets and types, in height-rank order, for a GIVEN species mix.
+
+    1. Per-type counts by largest remainder, so the written mix is the requested one to the stem.
+    2. Each type's own height ladder: the template's stems of that type, else the pool's (a type the
+       template lacks, or a treeless template). A type with neither is unplaceable; its count goes
+       to the others by largest remainder and the type is reported.
+    3. Within a type, stems are read at ranks (j + 0.5) / count, so the type keeps its own size
+       distribution -- the type-size association the copy path carried implicitly.
+    4. The recalibration knots come from the REWEIGHTED ladder: every template (or donor) stem of
+       type t weighs share_t / n_t, so the shape is the stand the new mix would have.
+
+    Returns (targets by trait, types, the picked ladder rows, shape source by trait).
+    """
+    ladders = _type_ladders(rungs, pool, shares, report)
+    unplaceable = tuple(t for t in range(NTREE_TYPES) if shares[t] > 0 and t not in ladders)
+    report.types_unplaceable = unplaceable
+    placeable = np.array([shares[t] if t in ladders else 0.0 for t in range(NTREE_TYPES)])
+    counts = largest_remainder(placeable, n_cell)
+    report.type_requested = {t: int(c) for t, c in enumerate(counts) if c}
+
+    picked: list[Any] = []
+    kinds: list[npt.NDArray[np.int64]] = []
+    weights: list[npt.NDArray[np.float64]] = []
+    ladder_rows: list[Any] = []
+    for t, rows in ladders.items():
+        n_rows = rows.shape[0]
+        ladder_rows.append(rows)
+        weights.append(np.full(n_rows, placeable[t] / n_rows))
+        c = int(counts[t])
+        if c:
+            u = (np.arange(c) + 0.5) / c
+            picked.append(rows[_rank_index(n_rows, u)])
+            kinds.append(np.full(c, t, dtype=np.int64))
+    if not picked:
+        return {}, np.zeros(0, dtype=np.int64), np.zeros(0, dtype=rungs.dtype), {}
+    rows_all = np.concatenate(picked)
+    types_all = np.concatenate(kinds)
+    ladder = np.concatenate(ladder_rows)
+    w = np.concatenate(weights)
+
+    targets: dict[str, npt.NDArray[np.float64]] = {}
+    source: dict[str, str] = {}
+    u_cell = (np.arange(rows_all.shape[0]) + 0.5) / rows_all.shape[0]
+    for name in traits:
+        if f"{name}_p50" not in prediction:
+            continue
+        p10, p50, p90 = (float(prediction[f"{name}_p{q}"]) for q in (10, 50, 90))
+        values = np.asarray(rows_all[name], dtype=np.float64)
+        mapped = recalibrate(
+            values, np.asarray(ladder[name], dtype=np.float64), p10, p50, p90, weights=w
+        )
+        source[name] = "knots" if mapped is None else "reweighted"
+        if mapped is None:
+            # No shape to borrow: the knot function, laid onto the stems in their own rank order
+            # so a tall type still gets the tall end.
+            ranks = np.empty(values.size, dtype=np.int64)
+            ranks[np.argsort(values, kind="stable")] = np.arange(values.size)
+            mapped = quantile_function(p10, p50, p90, u_cell)[ranks]
+        targets[name] = mapped
+    key = targets.get("height", np.asarray(rows_all["height"], dtype=np.float64))
+    order = np.argsort(key, kind="stable")
+    return (
+        {k: v[order] for k, v in targets.items()},
+        types_all[order],
+        rows_all[order],
+        source,
+    )
+
+
+def _rescale_litter(patches: list[dict[str, Any]], target: float, report: SynthReport) -> float:
+    """Scale every litter pool so the cell-mean litter carbon is `target`; nitrogen with it.
+
+    The same C:N-preserving scaling `_rescale_soil` applies, plus the two litter properties the
+    model derives from the litter mass (`updatelitterproperties.c`): cover and water capacity from
+    the above-ground leaf litter's dry matter. Litter water above the new capacity goes to the top
+    soil layer's free water, as the C does, so no water is created or destroyed.
+    """
+    have = 0.0
+    for patch in patches:
+        items = patch["soil"]["litter"]["items"]
+        if items.size:
+            have += float(items[:, 0:20:2].sum() + items[:, 20].sum())
+    have /= len(patches)
+    if have <= 0 or target <= 0:
+        return 1.0
+    scale = float(target / have)
+    for patch in patches:
+        soil = dict(patch["soil"])
+        lit = dict(soil["litter"])
+        lit["items"] = np.asarray(lit["items"], dtype=np.float64) * scale
+        dm = max(float(lit["items"][:, 0].sum()) / 0.42, 0.0) if lit["items"].size else 0.0
+        agtop = np.array(lit["agtop"], dtype=np.float64, copy=True)  # wcap, moist, cover, temp
+        agtop[2] = 1.0 - np.exp(-6e-3 * dm)
+        agtop[0] = 2e-3 * dm
+        excess = float(agtop[1] - agtop[0])
+        if excess > 0:
+            soil["w_fw"] = np.array(soil["w_fw"], dtype=np.float64, copy=True)
+            soil["w_fw"][0] += excess
+            agtop[1] = agtop[0]
+        lit["agtop"] = agtop
+        soil["litter"] = lit
+        patch["soil"] = soil
+    report.litter_scale = scale
+    report.litter_target = float(target)
+    return scale
+
+
+# --------------------------------------------------------------------------------------------
+# DONORS BY CLIMATE ANALOGUE. The default pool is grid neighbours; for a cell synthesised under a
+# climate it has never been run under, a neighbour is a present-day analogue of the wrong climate.
+# This picks, per wanted type, the runs whose CLIMATE is nearest, from a candidate set the caller
+# has already stripped of the target's own spatial fold -- the leakage guard lives with the caller,
+# because only the caller knows the folds, and is asserted there.
+# --------------------------------------------------------------------------------------------
+def choose_analogue_runs(
+    target_z: npt.NDArray[np.float64],
+    cand_z: npt.NDArray[np.float64],
+    cand_type_counts: npt.NDArray[np.int64],
+    wanted: dict[int, int],
+    *,
+    min_stems: int = 200,
+    stems_per_wanted: int = 3,
+    max_runs: int = 12,
+) -> dict[int, npt.NDArray[np.int64]]:
+    """For each wanted type, the nearest candidate runs (standardised climate) that hold it.
+
+    Runs are taken in distance order until they supply max(min_stems, stems_per_wanted x wanted)
+    stems of that type, or `max_runs` runs. `target_z` (F,) and `cand_z` (R, F) must already be
+    standardised on the TRAINING rows; `cand_type_counts` (R, 7) is each run's stems per type.
+    """
+    d = np.sqrt(((cand_z - target_z[None, :]) ** 2).sum(axis=1))
+    order = np.argsort(d, kind="stable")
+    out: dict[int, npt.NDArray[np.int64]] = {}
+    for t, n_want in wanted.items():
+        need = max(min_stems, stems_per_wanted * int(n_want))
+        have = cand_type_counts[order, t]
+        holding = order[have > 0]
+        if holding.size == 0:
+            out[t] = np.zeros(0, dtype=np.int64)
+            continue
+        cum = np.cumsum(cand_type_counts[holding, t])
+        k = int(min(np.searchsorted(cum, need) + 1, max_runs, holding.size))
+        out[t] = holding[:k].astype(np.int64)
+    return out
+
+
+def pool_from_rows(raw: npt.NDArray[np.uint8], cells: tuple[int, ...]) -> DonorPool:
+    """A DonorPool from raw 554-byte stem rows, decoding the fields once."""
+    raw = np.ascontiguousarray(raw, dtype=np.uint8).reshape(-1, PFT_TREE_BYTES)
+    return DonorPool(raw=raw, fields=raw.view(TREE_DTYPE).reshape(-1).copy(), source_cells=cells)
+
+
+def _choose_shares(
+    type_shares: npt.ArrayLike | None, ladder: npt.NDArray[np.uint8], pool: DonorPool
+) -> tuple[npt.NDArray[np.float64], str]:
+    """The share vector to use, and where it came from: given, else the template, else the pool.
+
+    The pool is the last resort because it is the only source a TREELESS template leaves, and with
+    climate-analogue donors it is the mix of the nearest climates -- a data estimate, disclosed.
+    """
+    if type_shares is not None:
+        given = np.zeros(NTREE_TYPES)
+        vals = np.asarray(type_shares, dtype=np.float64).reshape(-1)[:NTREE_TYPES]
+        given[: vals.size] = np.where(np.isfinite(vals) & (vals > 0), vals, 0.0)
+        if given.sum() > 0:
+            return given, "given"
+    if ladder.size:
+        return _type_shares_of(np.asarray(ladder, dtype=np.int64)), "template"
+    return _type_shares_of(np.asarray(pool.fields["id"], dtype=np.int64)), "donor-pool"
+
+
+def _composition_imposed(
+    picked: Any, prediction: dict[str, float], traits: tuple[str, ...]
+) -> tuple[dict[str, npt.NDArray[np.float64]], dict[str, str]]:
+    """Imposed fields on the composition path: the picked stems' own values, recalibrated."""
+    out: dict[str, npt.NDArray[np.float64]] = {}
+    source: dict[str, str] = {}
+    n = int(picked.shape[0]) if picked.size else 0
+    u = (np.arange(n) + 0.5) / n if n else np.zeros(0)
+    for name in traits:
+        if f"{name}_p50" not in prediction:
+            continue
+        p10, p50, p90 = (float(prediction[f"{name}_p{q}"]) for q in (10, 50, 90))
+        values = np.asarray(picked[name], dtype=np.float64) if n else np.zeros(0)
+        mapped = recalibrate(values, values, p10, p50, p90) if n else None
+        out[name] = quantile_function(p10, p50, p90, u) if mapped is None else mapped
+        source[name] = "knots" if mapped is None else "reweighted"
+    return out, source
+
+
+def synthesise_cell(  # noqa: PLR0912, PLR0915 -- one pass over the patches; splitting would scatter
     template: dict[str, Any],
     prediction: dict[str, float],
     pool: DonorPool,
@@ -552,17 +867,38 @@ def synthesise_cell(  # noqa: PLR0915 -- one pass over the patches; splitting it
     seed: int = 0,
     match_traits: tuple[str, ...] = MATCH_TRAITS,
     impose_traits: tuple[str, ...] = IMPOSED_TRAITS,
+    type_shares: npt.ArrayLike | None = None,
+    allowed_types: tuple[int, ...] | None = None,
+    climbuf: dict[str, Any] | None = None,
+    rescale_litter: bool = False,
 ) -> tuple[dict[str, Any], SynthReport]:
     """Replace a template record's roster and soil totals with a predicted state.
 
     `prediction` needs `stems_per_patch`, `<trait>_p10/_p50/_p90` for the matched traits, and
-    optionally `soilc` and `litterc`.
+    optionally `soilc`, and `litterc` (read only with `rescale_litter`).
 
     `match_traits` is a parameter and not a constant because the right set is an empirical
     question, and the answer is not "all of them". One donor is ONE REAL STEM, so it carries one
     value of every trait at once; asking it to sit at the same rank in six trait distributions
     simultaneously asks for a stem that need not exist in the pool, and the nearest compromise can
     reproduce every marginal worse than a two-trait match reproduces two. Measure before widening.
+
+    THE OPTIONS BELOW ARE ALL OFF BY DEFAULT, and off they leave the output byte-identical to the
+    function before they existed -- the deliverable `synth-v5` is re-emitted bit for bit, which a
+    real-data test pins. Each one replaces a COPIED field with a DERIVED or PREDICTED one:
+
+      type_shares     seven target stem shares by type (`pft_frac_*`): the composition path, see
+                      `_composition_roster`. Without it but with `allowed_types`, the template's own
+                      mix restricted to the allowed types -- or, for a TREELESS template, the donor
+                      pool's mix -- is used, and `report.shares_source` says which.
+      allowed_types   the types the TARGET climate admits (`climbuf.bioclimatic_verdict`). Shares on
+                      other types are dropped and renormalised, and a donor-type fallback can never
+                      widen past this set. This replaces "the template holds it", which was vacuous
+                      for a treeless template: with no ladder the rule switched itself off and any
+                      type in the pool could be placed.
+      climbuf         a replacement climate buffer (`climbuf.climate_buffer_from_forcing`).
+      rescale_litter  scale the litter to `prediction["litterc"]`, preserving C:N and the derived
+                      litter cover and water capacity.
     """
     if template["skip"]:
         raise ValueError(f"template cell {template_cell} is a skip cell; nothing to condition on")
@@ -575,6 +911,9 @@ def synthesise_cell(  # noqa: PLR0915 -- one pass over the patches; splitting it
     rungs = template_ladder(template)
     ladder = type_ladder(template)
     admissible = tuple(int(t) for t in np.unique(ladder)) if ladder.size else ()
+    composition = type_shares is not None or allowed_types is not None
+    if allowed_types is not None:
+        admissible = tuple(sorted(int(t) for t in allowed_types))
     report = SynthReport(
         cell=cell,
         template_cell=template_cell,
@@ -606,14 +945,30 @@ def synthesise_cell(  # noqa: PLR0915 -- one pass over the patches; splitting it
     u_cell = (np.arange(n_cell) + 0.5) / n_cell if n_cell else np.zeros(0)
     owner = rng.permutation(np.repeat(np.arange(len(counts)), counts))
 
-    targets_cell, report.shape_source = _targets(rungs, u_cell, prediction, match_traits)
-    want_types_cell = _types_for(ladder, u_cell) if (ladder.size and n_cell) else None
-    report.type_requested = _tally(want_types_cell)
-
-    # IMPOSED fields: same ladder, same recalibration, but written into the stem instead of used
-    # to pick one. The clamp range is what REAL stems of any type in the pool actually exhibit, so
-    # a stretched prediction can never write a rooting depth no tree in the corpus has.
-    imposed_cell, imposed_shapes = _targets(rungs, u_cell, prediction, impose_traits)
+    if composition:
+        report.composition = "predicted" if type_shares is not None else "restricted"
+        shares, report.shares_source = _choose_shares(type_shares, ladder, pool)
+        shares, report.share_mass_removed = _restrict(shares, admissible)
+        report.shares_used = {t: float(s) for t, s in enumerate(shares) if s > 0}
+        targets_cell, types_c, picked, report.shape_source = _composition_roster(
+            rungs, pool, shares, n_cell, prediction=prediction, traits=match_traits, report=report
+        )
+        # An unplaceable type can leave fewer stems than asked; the ranks follow what is placeable.
+        if types_c.size != n_cell:
+            counts = [int(c) for c in np.bincount(owner[: types_c.size], minlength=len(counts))]
+            n_cell = int(types_c.size)
+            owner = rng.permutation(np.repeat(np.arange(len(counts)), counts))
+        want_types_cell = types_c if n_cell else None
+        imposed_cell, imposed_shapes = _composition_imposed(picked, prediction, impose_traits)
+    else:
+        targets_cell, report.shape_source = _targets(rungs, u_cell, prediction, match_traits)
+        want_types_cell = _types_for(ladder, u_cell) if (ladder.size and n_cell) else None
+        report.type_requested = _tally(want_types_cell)
+        # IMPOSED fields: same ladder, same recalibration, but written into the stem instead of
+        # used to pick one. The clamp range is what REAL stems of any type in the pool actually
+        # exhibit, so a stretched prediction can never write a rooting depth no tree in the corpus
+        # has.
+        imposed_cell, imposed_shapes = _targets(rungs, u_cell, prediction, impose_traits)
     report.imposed = imposed_shapes
     pool_range = {
         name: (float(np.min(pool.trait(name))), float(np.max(pool.trait(name))))
@@ -698,8 +1053,13 @@ def synthesise_cell(  # noqa: PLR0915 -- one pass over the patches; splitting it
     # vertical profile. A profile is not predicted, so inventing one would be a free parameter.
     soil_scale = _rescale_soil(new_patches, stand, prediction, report)
     report.soil_scale = soil_scale
+    if rescale_litter and prediction.get("litterc") is not None:
+        _rescale_litter(new_patches, float(prediction["litterc"]), report)
 
     rec["stands"] = [{**stand, "patches": new_patches}]
+    if climbuf is not None:
+        rec["climbuf"] = climbuf
+        report.climbuf_source = "forcing"
 
     if placed_fields:
         allf = np.concatenate(placed_fields)
