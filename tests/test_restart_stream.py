@@ -18,7 +18,6 @@ model's own file instead.
 from __future__ import annotations
 
 import itertools
-import os
 import struct
 from pathlib import Path
 from typing import Any
@@ -238,24 +237,16 @@ def test_assembly_refuses_gaps_overlaps_and_foreign_shards(tmp_path: Path) -> No
     assert not (tmp_path / "x.lpj").exists()
 
 
-def test_assembly_without_kernel_copy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The in-kernel copy is only an optimisation: failing, even part-way, changes no byte."""
-    records = _blobs(10, 25, lo=10_000, hi=200_000)
+@pytest.mark.parametrize("chunk", [1, 777, 12_345, 1 << 26])
+def test_assembly_is_independent_of_the_copy_chunk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, chunk: int
+) -> None:
+    """A segment copied in chunks that never line up with a record boundary is the same bytes."""
+    records = _blobs(10, 25, lo=10, hi=40_000)
     segs = _shards(tmp_path, records, [5, 17])
-    real = os.sendfile
-    calls = {"n": 0}
-
-    def flaky(out_fd: int, in_fd: int, offset: int, count: int) -> int:
-        # Copies a little, then refuses: the fallback must resume from exactly where it stopped.
-        calls["n"] += 1
-        if calls["n"] % 2 == 0:
-            raise OSError(95, "Operation not supported")
-        return real(out_fd, in_fd, offset, min(count, 12_345))
-
-    monkeypatch.setattr(rs.os, "sendfile", flaky)
+    monkeypatch.setattr(rs, "COPY_CHUNK", chunk)
     out = tmp_path / "global.lpj"
     assemble_restart(out, segs)
-    assert calls["n"] >= 2
     assert out.read_bytes() == _reference_file(records, GENERIC, RESTART, 0)
 
 

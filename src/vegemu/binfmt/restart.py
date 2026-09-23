@@ -33,7 +33,6 @@ detected by the version word's low byte being zero, as the C does.
 
 from __future__ import annotations
 
-import os
 import struct
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -1088,29 +1087,22 @@ def _same_framing(a: RestartReader, b: RestartReader) -> str | None:
     return None
 
 
-def _copy_range(src: BinaryIO, dst: BinaryIO, offset: int, length: int) -> None:
-    """Copy `length` bytes of `src` from `offset` to the end of `dst`, in-kernel where possible.
+COPY_CHUNK = 64 << 20
 
-    `sendfile` rather than `copy_file_range`: the cluster's Python is built without the latter.
-    Either is only an optimisation, so any failure -- even part-way -- falls back to plain reads
-    from exactly where the kernel stopped, and the bytes come out the same.
+
+def _copy_range(src: BinaryIO, dst: BinaryIO, offset: int, length: int) -> None:
+    """Copy `length` bytes of `src` from `offset` to the end of `dst`, in 64 MiB reads.
+
+    ⚠ PLAIN READS, NOT THE IN-KERNEL COPY, AND THAT IS MEASURED. `os.sendfile` looked like the
+    obvious choice (the cluster's Python has no `copy_file_range`) and was the first version. On
+    this GPFS it ran at 0.50-0.54 GB/s against 3.44-3.50 GB/s for 64 MiB buffered reads, over the
+    same 20 GiB range of the global restart, twice each (job 2281351) -- so assembling the globe
+    took 226 s where 37 s would do.
     """
-    dst.flush()
+    src.seek(offset)
     done = 0
-    sendfile = getattr(os, "sendfile", None)
-    try:
-        while sendfile is not None and done < length:
-            n = sendfile(dst.fileno(), src.fileno(), offset + done, min(length - done, 1 << 30))
-            if n == 0:
-                raise EOFError(f"source ended {length - done} bytes short of the segment")
-            done += n
-    except OSError:
-        pass
-    # The kernel moved the raw descriptor under the buffered object; re-sync before writing more.
-    dst.seek(0, os.SEEK_END)
-    src.seek(offset + done)
     while done < length:
-        chunk = src.read(min(length - done, 64 << 20))
+        chunk = src.read(min(length - done, COPY_CHUNK))
         if not chunk:
             raise EOFError(f"source ended {length - done} bytes short of the segment")
         dst.write(chunk)

@@ -772,43 +772,54 @@ def cmd_summary(out_dir: Path) -> dict[str, Any]:
 
 
 def _project(plan: dict[str, Any], synth: pl.DataFrame, blocks: list[dict[str, Any]]) -> Any:
-    """Full-globe synthesis cost, extrapolated from this run's cells by RECORD SIZE.
+    """Full-globe synthesis cost, extrapolated from this run's cells by the STEMS each one gets.
 
-    A cell's cost grows with its roster, and record size is the free proxy for the roster (the
-    index gives every cell's size without reading it). So the per-cell CPU is regressed on
-    `bytes_in` over the cells this run synthesised and summed over EVERY cell the prediction file
-    covers, rather than one mean multiplied by a count -- a dry-run block that happens to be
-    sparser or denser than the globe would otherwise bias the projection by exactly that ratio.
+    A cell's cost is dominated by its roster: the donor match is one distance row per placed stem.
+    The number of stems a cell will be given is known in advance for EVERY cell -- it is the
+    predicted `stems_per_patch` times the patch count -- so the per-cell CPU is regressed on stems
+    placed here and summed over every cell the prediction file covers. One mean times a count
+    would carry the dry-run block's own density straight into the projection; record size is a
+    worse proxy (measured: correlation 0.74 against 0.88 for stems on the first dry run, and a
+    record-size line through a block of dense cells goes NEGATIVE for a treeless one).
+
+    The line is floored at the cheapest cell actually observed, so an extrapolation below the
+    sampled range can never price a cell at zero or less. The plain mean-times-count figure is
+    reported alongside, as the naive bound.
     """
     tmpl = RestartReader(Path(plan["template"]))
-    sizes = tmpl.cell_sizes().astype(np.float64)
+    sizes = tmpl.cell_sizes()
     all_preds, _ = load_predictions(
         Path(plan["predictions"]["path"]), 0, tmpl.ncell, tuple(plan["match_traits"])
     )
-    cells = np.array(sorted(all_preds), dtype=np.int64)
-    x = synth["bytes_in"].to_numpy().astype(np.float64)
+    npatch = 25  # every leg of the ground truth; the per-cell reports carry the real counts
+    per_patch = np.array([all_preds[c]["stems_per_patch"] for c in sorted(all_preds)])
+    stems_all = np.maximum(per_patch, 0.0) * npatch
+    x = synth["stems_placed"].to_numpy().astype(np.float64)
     y = synth["cpu_s"].to_numpy().astype(np.float64)
     slope, intercept = np.polyfit(x, y, 1) if np.ptp(x) > 0 else (0.0, float(np.mean(y)))
-    cpu_cells = float(np.sum(intercept + slope * sizes[cells]))
+    cpu_cells = float(np.sum(np.maximum(intercept + slope * stems_all, float(y.min()))))
     pooled = [b["pool_build_s"] for b in blocks if b.get("donors")]
     nblock = -(-tmpl.ncell // int(plan["block_size"]))
     cpu_pools = float(np.mean(pooled)) * nblock if pooled else 0.0
     cpu_h = (cpu_cells + cpu_pools) / 3600.0
     return {
         "basis": (
-            f"{synth.height} cells synthesised in this run, CPU regressed linearly on record "
-            f"size, summed over the {cells.size} cells the prediction file covers of "
-            f"{tmpl.ncell}; one donor pool per block of {plan['block_size']} ({nblock} blocks); "
-            "pass-through cells cost ~nothing (a template byte-range copy); CPU only, so I/O "
-            "stalls add to the wall-clock figures"
+            f"{synth.height} cells synthesised in this run; CPU regressed linearly on stems "
+            f"placed, floored at the cheapest observed cell, summed over the {per_patch.size} "
+            f"cells the prediction file covers (of {tmpl.ncell}) at their PREDICTED stem count "
+            f"x {npatch} patches; one donor pool per block of {plan['block_size']} ({nblock} "
+            "blocks); pass-through cells cost ~nothing (a template byte-range copy); CPU only -- "
+            "shard writing, assembly and verification are I/O and are measured separately"
         ),
-        "cpu_s_vs_record": {"intercept_s": float(intercept), "per_mb_s": float(slope) * 1e6},
-        "cells_to_synthesise": int(cells.size),
+        "cpu_s_vs_stems": {"intercept_s": float(intercept), "per_1000_stems_s": 1e3 * slope},
+        "stems_sampled": {"min": float(x.min()), "max": float(x.max())},
+        "stems_globe": {"median": float(np.median(stems_all)), "max": float(stems_all.max())},
+        "cells_to_synthesise": int(per_patch.size),
         "cpu_hours_synthesis": cpu_cells / 3600.0,
+        "cpu_hours_naive_mean_times_count": float(np.mean(y)) * per_patch.size / 3600.0,
         "cpu_hours_donor_pools": cpu_pools / 3600.0,
         "cpu_hours_total": cpu_h,
         "wall_hours_at_64_workers": cpu_h / 64.0,
-        "wall_hours_at_128_workers": cpu_h / 128.0,
         "bytes_to_write": int(np.sum(sizes)),
     }
 
