@@ -1060,6 +1060,81 @@ def _decode_one(args: tuple[str, int, str]) -> dict[str, Any]:
     return row
 
 
+def _stem_fates(args: tuple[str, int, str]) -> list[dict[str, Any]]:
+    """Every stem placed at year 0, its year-0 fields, and whether it is alive at year 1."""
+    arm, cell, point = args
+    rdir = _scratch("runs") / "synth-pilot-t2" / arm / f"c{cell}" / point
+    out = rdir / "restart" / f"restart_1970_t2-{arm}.lpj"
+    if not out.exists():
+        return []
+    y1 = RestartReader(out).read(0)
+    y0 = RestartReader(_input_restart(arm, cell, point)).read(0)
+    rows: list[dict[str, Any]] = []
+    for p0, p1 in zip(y0["stands"][0]["patches"], y1["stands"][0]["patches"], strict=True):
+        s0, s1 = trees_of(p0["pftlist"]), trees_of(p1["pftlist"])
+        later = {
+            (int(i), int(t)): int(g)
+            for i, t, g in zip(s1["index"], s1["id"], s1["age"], strict=True)
+        }
+        for k in range(s0.size):
+            key = (int(s0["index"][k]), int(s0["id"][k]))
+            rows.append(
+                {
+                    "arm": arm,
+                    "point": point,
+                    "type": int(s0["id"][k]),
+                    "height": float(s0["height"][k]),
+                    "age": int(s0["age"][k]),
+                    "counter": int(s0["bm_inc_counter"][k]),
+                    "alive": later.get(key) == int(s0["age"][k]) + 1,
+                }
+            )
+    return rows
+
+
+def stage_t2_deaths(workers: int) -> int:
+    """Which stems die in year 1, by bad-years counter, by age and by height, per arm.
+
+    The synthesised arms transplant whole donor stems, including the donor's consecutive
+    bad-growth-years counter, which kills a stem outright at 5 (`mortality_tree_ind.c`); this
+    stage is where an inherited death sentence would show.
+    """
+    jobs = [(arm, c, p) for arm in T2_ARMS for c, p in _t2_sample()]
+    with mp.get_context("spawn").Pool(workers) as pool:
+        rows = [r for part in pool.imap_unordered(_stem_fates, jobs) for r in part]
+    frame = pl.DataFrame(rows)
+    frame.write_parquet(out_dir() / "t2_stem_fates.parquet")
+    frame = frame.with_columns(
+        pl.col("height").cut([2.0, 5.0, 10.0, 20.0]).alias("height_bin"),
+        pl.when(pl.col("age") <= 1)
+        .then(pl.lit("age<=1"))
+        .otherwise(pl.lit("age>1"))
+        .alias("age_bin"),
+    )
+
+    def rates(by: str) -> dict[str, Any]:
+        g = frame.group_by(["arm", by]).agg(
+            pl.len().alias("stems"), (1 - pl.col("alive").mean()).alias("death")
+        )
+        return {
+            arm: {
+                str(r[by]): {"stems": int(r["stems"]), "death": float(r["death"])}
+                for r in g.filter(pl.col("arm") == arm).sort(by).to_dicts()
+            }
+            for arm in T2_ARMS
+        }
+
+    summary = {
+        "basis": "the t2 sample; stems placed at year 0 and alive one model year later",
+        "by_counter": rates("counter"),
+        "by_age": rates("age_bin"),
+        "by_height": rates("height_bin"),
+    }
+    (out_dir() / "t2_deaths.json").write_text(json.dumps(summary, indent=2, default=str))
+    print(json.dumps(summary, indent=2, default=str))
+    return 0
+
+
 def stage_t2_decode(workers: int) -> int:
     jobs = [(arm, c, p) for arm in T2_ARMS for c, p in _t2_sample()]
     with mp.get_context("spawn").Pool(workers) as pool:
@@ -1113,27 +1188,22 @@ def stage_t2_decode(workers: int) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument(
-        "--stage",
-        required=True,
-        choices=("bank", "synth", "synth-summary", "t2-prep", "t2-decode", "t3-prep"),
-    )
     ap.add_argument("--arm", choices=(*ARMS, *ABLATIONS), default="oracle")
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--limit-cells", type=int, default=None, help="synth: first N cells only")
     ap.add_argument("--t3-years", type=int, default=30)
+    stages: dict[str, Any] = {
+        "bank": lambda a: stage_bank(a.workers),
+        "synth": lambda a: stage_synth(a.arm, a.workers, a.limit_cells),
+        "synth-summary": lambda a: summarise_synth(a.arm),
+        "t2-prep": lambda a: stage_t2_prep(),
+        "t2-decode": lambda a: stage_t2_decode(a.workers),
+        "t2-deaths": lambda a: stage_t2_deaths(a.workers),
+        "t3-prep": lambda a: stage_t3_prep(a.t3_years),
+    }
+    ap.add_argument("--stage", required=True, choices=tuple(stages))
     args = ap.parse_args()
-    if args.stage == "bank":
-        return stage_bank(args.workers)
-    if args.stage == "synth":
-        return stage_synth(args.arm, args.workers, args.limit_cells)
-    if args.stage == "synth-summary":
-        return summarise_synth(args.arm)
-    if args.stage == "t2-prep":
-        return stage_t2_prep()
-    if args.stage == "t2-decode":
-        return stage_t2_decode(args.workers)
-    return stage_t3_prep(args.t3_years)
+    return int(stages[args.stage](args))
 
 
 if __name__ == "__main__":
