@@ -1,0 +1,232 @@
+schema_version: 1
+
+exp_id: X-20260924-restart-worst-quantity
+line: X
+
+status: sealed
+
+title: "IS THE FOREST READ BACK FROM AN EMITTED RESTART CLOSER TO THE SETTLED FOREST, ON ITS WORST QUANTITY, THAN THE CELL'S OWN UNEDITED FOREST?"
+question: >
+  The deliverable is a restart file the real model loads. For each pilot cell and each of the 29
+  climates it was spun up under besides its control, the synthesiser (`scripts/synth_pilot.py
+  --stage synth --arm map`) writes a restart from the climate-only equilibrium map's out-of-fold
+  prediction, starting from the cell's CONTROL restart; the forest in that file is read back with the
+  corpus's own decoder. The retired emitted-restart test asked "inside the acceptance band on all 22
+  quantities at once?" and could rank nothing: at the 10 % floor its six nulls sat within 0.004 of
+  zero and a shuffled cell tied first (`docs/decisions/20260915-X-x4-is-not-sealable-*`,
+  `20260915-X-the-perturbed-spread-does-not-widen-*`).
+
+  THE FALSIFIABLE CLAIM: scored by its WORST quantity in band units -- the same band, the same 10 %
+  floor, no quantity dropped, no climate excluded -- the read-back forest is closer to the settled
+  forest than the best information-free restart, which is the cell's own control restart copied
+  unchanged, by more than 0.34 in -log(median worst-quantity error): its typical target's worst
+  quantity must sit at most exp(-0.34) = 0.71 times as many bands off as the unedited control's.
+
+estimand:
+  name: worst_quantity_skill
+  definition: >
+    ROWS: the 5,800 (cell, perturbed climate) targets of pilot-v2-constco2 -- 200 cells x the 29
+    climates other than each cell's control. The control is the synthesiser's template and the
+    `same_cell_template` null, so it is the input, not a target.
+
+    TRUTH per target: the mean of the two runs of that spin-up (seed 1, and seed 2 from
+    pilot-v2-constco2-s2), per quantity, for the 22 of SCORED_CONJUNCTIVE. A trait quantile is
+    undefined in a treeless run; where either run is treeless it is undefined in the mean.
+
+    BAND per target per quantity: max(10 %, s) x |truth| with no additive floor
+    (`vegemu.score.band_from_spread`, `abs_floor=0.0`), where s is the MEDIAN over the same cell's
+    OTHER 29 climates of that quantity's two-run relative spread |s1 - s2| / |mean|
+    (`vegemu.score.spread_across_climates`). The scored climate's own pair never sets its own band,
+    which is what stops a real run passing by arithmetic; the transfer across climates rests on the
+    measured flatness of the run-to-run spread under perturbation (20 cells x 30 climates, median
+    0.0301 perturbed vs 0.0310 control). Measured on this corpus: median floored s 0.100, 14.5 % of
+    cell-quantity-climates above the floor.
+
+    PER TARGET: e = max over the 19 quantities of SCORED_CONJUNCTIVE that vary (all but the three
+    fine-root-conductivity quantiles, constant 0.02 in every tree-bearing run;
+    `score.assert_constant_quantities` refuses the run if they vary) of |pred - truth| / band, with
+    the rules of `vegemu.score`'s C1 section: a quantity is scored only where the truth exists; a
+    missing prediction where it exists is e = inf; a zero band passes only an exact prediction; a
+    row with nothing scored is e = inf.
+
+    STATISTIC: -log of the LOWER median of e over the 5,800 targets (`score.worst_quantity_skill`).
+    Higher is better; exp(-statistic) is the median target's worst-quantity error in bands. Chosen
+    before any arm was scored under it, for having no free parameter; not tuned on any arm.
+
+    REPORTED BESIDE IT, NEVER DECIDED ON: the ACCEPTANCE NUMBER -- the share of targets with every
+    scored quantity inside its band (`share_within_band`) -- with its ceiling; the retired test's
+    22-quantity conjunctive fraction for continuity; e quantiles; which quantity sets e how often;
+    the statistic per climate; per-quantity band rates; the same after one year of the real C model
+    on whatever targets were run; and the synthesiser's oracle arm (true state in), which measures
+    what the synthesis alone loses.
+  reference_basis: >
+    LPJmL-FIT 5.6.004, binary built 2026-08-12, one binary for all 12,000 runs. Pilot corpus
+    v2-constco2: 200 cells x 30 climates x TWO seeds, single-cell 1000-year spin-ups, npatch=25,
+    tree PFTs only, base climate window 1970-1999, CO2 constant at 276.59 ppm. Seed 1 is
+    corpus/pilot-v2-constco2 (corpus.parquet); seed 2 is runs/pilot-v2-constco2-s2 (manifest
+    corpus/pilot-v2-constco2-s2/runs.csv, same forcing files as seed 1, differing only in the
+    random seed; the seed-2 logs print "Random seed: 2", both seeds stamped "5.6.004 (Aug 12 2026)"),
+    6,000 of 6,000 runs carrying the "lpjml successfully terminated" line, its states
+    read with the corpus decoder by `scripts/exp_read_replicate_states.py` (job 2281341). State from
+    the end-of-spin-up restart. 200 of the 56,986 eligible cells, not the acceptance criterion's
+    54,020. Level quantities scored in units of their own band; the statistic is dimensionless.
+  units: dimensionless (log of a band-normalised error)
+  kind: level
+
+data:
+  corpus: /p/tmp/jamirp/vegemu/corpus/pilot-v2-constco2
+  corpus_sha256: "9c117cb6c045fe90692fbee431dc3a33bf6ced1e4d5e7f4fb2350a1bce16903c"
+  replicate_table: /p/tmp/jamirp/vegemu/exp/X-sc1-read-v2s2/replicate_s2_states.parquet
+  replicate_table_sha256: "4b2b2aadc0fcf674feb5e5ea87a2612dad82d555ab7f0f94a776043cf8fcadcd"
+  replicate_manifest_sha256: "9cbac63677c5ef4a3f89925ba5e9f699a7f90e3421c03064175209aefd095099"
+  n_rows: 5800
+
+  split:
+    kind: blocked_spatial
+    k: 5
+    seed: 42
+    block_degrees: [15, 5]
+
+  leakage_checks:
+    - "Folds are per CELL, whole 15-degree tiles (vegemu.score.blocked_spatial_folds, k=5, seed 42; 5 folds over 164 tiles, 41/41/44/40/34 cells): all 30 climates of a held-out cell are held out together. The scorer recomputes the folds from the corpus cell table and REFUSES a model table whose per-cell `fold` differs (verified identical to the corpus coordinates' folds for all 200 cells)."
+    - "The map prediction the synthesiser consumes is the climate-only equilibrium map's OUT-OF-FOLD prediction (`models/equimap-v1/oof_pilot.parquet`, carrying its own `fold` column): for a held-out cell it comes from a model fitted on the other four folds' cells only, whose inputs are the 30-year climate and soil and never a state, a coordinate, a tile, a point name or a perturbation coefficient. The model-arm run is given that table as --map-oof and REFUSES it if any cell's fold differs from the scorer's (checked 2026-09-23 on the 6,000-row table: 0 mismatches over 200 cells)."
+    - "The synthesiser may read, for target (cell c, climate p): the MAP prediction for (c, p); cell c's own CONTROL restart, seed 1 -- exactly the information the same_cell_template null holds; c's own forcing for climate p, from which the climate buffer and admissible types are derived; and donor stems from runs of cells OUTSIDE c's fold (asserted in the harness). It must never read any restart, state or output of cell c at any of its 29 perturbed climates, nor anything from seed 2."
+    - "Read back, not intended: the model arm's state is the corpus decoder applied to the synthesised record, and a target counts only if the file written to disk round-trips byte-identically to that record (`t0_roundtrip`); a failed, missing or non-round-tripping target is scored as a missing prediction, e = inf, never dropped."
+    - "Every null is a deterministic function of seed 1 and the folds: donors are seed-1 states of TRAINING-fold cells only, the analogue standardisation uses training rows only, and no null reads seed 2. Seed 2 enters only the truth and the band."
+    - "The band for a target is built from the other 29 climates of the same cell and never from the target's own pair; `ceiling_arm` refuses a same-pair band."
+    - "CO2 is constant on this corpus and is never an input anywhere (invariant 8)."
+
+# Measured by scripts/exp_derive_nulls_restart_worst.py --basis v2-two-seed, job 2281348,
+# 2026-09-23, before this file was written and before any model arm existed in scored form; output
+# nulls_worst_v2-two-seed.json sha256 f24227ed0bce1eaf... The model-arm run recomputes all six in
+# the same job with the same code, so each must reproduce to the stated tolerance. The same null
+# predictions, on the retired test's own basis (pilot-v1, v0 band), reproduced its six committed
+# conjunctive values exactly (job 2281293).
+nulls:
+  - id: same_cell_template
+    description: >
+      THE DECISIVE NULL. The cell's own control restart (seed 1), unedited: "the climate changed and
+      the forest did not". It is what the synthesiser starts from, so any score it has is bought by
+      holding still.
+    expected:
+      statistic: worst_quantity_skill
+      value: -2.179997
+      tolerance: 0.001
+      derivation: >
+        Measured, job 2281348: -2.179997 (median worst-quantity error 8.85 bands) at 15 and at
+        5 deg -- it does not depend on the folds. Share within band 0.0547.
+
+  - id: nearest_analogue_any_climate
+    description: >
+      Copy the seed-1 state of the climatically nearest TRAINING (cell, climate) run anywhere in the
+      ensemble, controls included, over the fixed eight-feature analogue set of vegemu.nulls,
+      standardised on training rows. The strongest space-for-time lookup the corpus admits.
+    expected:
+      statistic: worst_quantity_skill
+      value: -2.348074
+      tolerance: 0.001
+      derivation: "Measured, job 2281348: -2.348074 at 15 deg, -2.351287 at 5 deg."
+
+  - id: nearest_analogue_same_point
+    description: "The same analogue search restricted to training cells at the same design climate."
+    expected:
+      statistic: worst_quantity_skill
+      value: -2.482551
+      tolerance: 0.001
+      derivation: "Measured, job 2281348: -2.482551 at 15 deg, -2.491098 at 5 deg."
+
+  - id: geographic_address
+    description: "The seed-1 state of the geographically nearest TRAINING cell at the same design climate."
+    expected:
+      statistic: worst_quantity_skill
+      value: -2.520201
+      tolerance: 0.001
+      derivation: "Measured, job 2281348: -2.520201 at 15 deg, -2.520275 at 5 deg."
+
+  - id: climatological_mean
+    description: "The mean seed-1 state over the training cells at the same design climate: the average forest."
+    expected:
+      statistic: worst_quantity_skill
+      value: -3.079480
+      tolerance: 0.001
+      derivation: "Measured, job 2281348: -3.079480 at 15 deg, -3.082361 at 5 deg."
+
+  - id: shuffled_target
+    description: "The seed-1 states permuted across cells within each design climate, seed 20260915. Chance."
+    expected:
+      statistic: worst_quantity_skill
+      value: -3.513081
+      tolerance: 0.001
+      derivation: "Measured, job 2281348: -3.513081 at both blockings (fold-independent)."
+
+decision_rule:
+  statistic: worst_quantity_skill
+  comparator: model_minus_best_null
+  pass_if: "> 0.34"
+  arms: [model, same_cell_template, nearest_analogue_any_climate, nearest_analogue_same_point, geographic_address, climatological_mean, shuffled_target]
+  multiplicity: none
+  power_note: >
+    THE STATISTIC HAS POWER WHERE THE RETIRED ONE HAD NONE, measured, not assumed. On the identical
+    apparatus that collapsed (pilot-v1, v0 band; job 2281293) and on this basis (job 2281348) the
+    six nulls fall in exactly the order physics predicts -- own forest > most similar climate
+    anywhere > same climate elsewhere > forest next door > average forest > chance -- with Kendall
+    tau 1.0 at 15 deg here and at 5 deg, and the smallest adjacent gap 0.0377 (15 deg). A whole-tile
+    bootstrap (2,000 draws over 164 tiles) keeps the best null above the runner-up in 99.4 % of
+    draws and the full order in 71.1 %; only the two middle arms (same-climate analogue vs forest
+    next door) are statistically tied (ordered in 71.7 % of draws).
+
+    THE THRESHOLD IS ARITHMETIC FIXED BEFORE ANY C1 VALUE WAS SEEN (the derivation script's
+    docstring): ceil_0.01(max(best-minus-runner-up gap at 15 and 5 deg) + 2 x the tile-bootstrap SE
+    of that gap at 15 deg) = ceil_0.01(0.171291 + 2 x 0.083212) = 0.34. No null clears it against
+    the best of the others -- the largest such margin is 0.168077 -- so E08 cannot fire on these
+    values. A pass requires the model to exceed -1.839997 at 15 deg: a median worst-quantity error
+    below 6.30 bands, against 8.85 for the unedited control.
+
+    If any null returns something other than its stated value the outcome is `invalid`, not fail.
+    If any null satisfies pass_if the estimand has no power and the outcome MUST be `invalid`.
+  ceiling_note: >
+    ⚠ READ AGAINST THE CEILING, NEVER AGAINST ZERO OR INFINITY. One real run of each perturbed
+    spin-up (seed 1), scored as an arm against the two-run mean with this band
+    (`score.ceiling_arm(truth_is="mean")`), reaches -0.190210: median worst-quantity error 1.21
+    bands. Because |run - mean| has exactly the distribution of a perfect expectation-predictor's
+    error against a two-run truth, that is the ATTAINABLE score on this basis, not a bound. Its
+    acceptance number is 0.3753: even the real model lands inside the band on all 19 quantities at
+    once for only 37.5 % of targets (31.4 % on the retired 22-quantity fraction, which fails every
+    treeless target). The unedited control is at 0.0547. Any share_within_band must be quoted
+    against 0.3753, per climate and pooled.
+  outcomes_note: >
+    THREE DISTINGUISHABLE RESULTS, PRE-NAMED. Let M be the model's statistic at 15 deg.
+    (a) M > -1.839997 -- the restart the emulator writes carries the climate into the state the real
+    model reads: on its worst quantity it is closer to the settled forest than leaving the cell's
+    forest unchanged, by more than the spread of the nulls plus two tile-bootstrap errors. Quote M
+    against the ceiling -0.190210 and share_within_band against 0.3753; it is not a fidelity claim.
+    (b) -2.179997 < M <= -1.839997 -- better than holding still, but not by more than the nulls'
+    own spread: no claim that the emitted file moves the state usefully.
+    (c) M <= -2.179997 -- the emitted restart is no closer on its worst quantity than the unedited
+    control: editing the template bought nothing, or lost ground. The oracle arm, reported beside,
+    says where: an oracle near the ceiling puts the loss in the map, an oracle near M in the
+    synthesis. ⚠ The oracle is fed each target's OWN seed-1 state by design, so it is never a null
+    and never a model; it is a diagnostic of the synthesiser alone and is never decided on.
+    ⚠ NONE is a fidelity claim: 200 of 54,020 cells, one corpus, no scenario leg, acceptance
+    criterion untouched.
+
+# THE MODEL-ARM RUN, exactly (the integrator runs it once synth_map.parquet exists):
+#   scripts/sbatch_py.sh --exp X-20260924-restart-worst-quantity X-restart-worst-model \
+#     scripts/exp_derive_nulls_restart_worst.py --basis v2-two-seed --arm model \
+#     --replicate <scratch>/exp/X-sc1-read-v2s2/replicate_s2_states.parquet \
+#     --pred <scratch>/exp/T-synth-pilot/synth_map.parquet \
+#     --map-oof <scratch>/models/equimap-v1/oof_pilot.parquet \
+#     --report-arm oracle=<scratch>/exp/T-synth-pilot/synth_oracle.parquet \
+#     [--pred-year1 <scratch>/exp/T-synth-pilot/t2_scored.parquet] \
+#     --threshold 0.34 --exp-id X-20260924-restart-worst-quantity \
+#     --out <scratch>/exp/X-20260924-restart-worst-quantity
+# then tools/append_result.py --exp X-20260924-restart-worst-quantity --from <out>/metrics.json
+compute:
+  launcher: scripts/sbatch_py.sh
+  tag: X-restart-worst-model
+  partition: priority
+  est_core_hours: 1
+
+outputs:
+  - path: /p/tmp/jamirp/vegemu/exp/X-20260924-restart-worst-quantity/metrics.json
+    kind: metrics
