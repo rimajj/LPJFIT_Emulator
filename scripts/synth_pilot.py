@@ -713,12 +713,17 @@ def _runs_with_features() -> pl.DataFrame:
     return runs.join(corpus_features(), on=["cell", "point"], how="left")
 
 
+def _suffixed(truth: pl.DataFrame) -> pl.DataFrame:
+    """The truth with every non-key column renamed `<name>_true`, so no join can shadow it."""
+    return truth.rename({c: f"{c}_true" for c in truth.columns if c not in ("cell", "point")})
+
+
 def _rel_err_table(
     frame: pl.DataFrame, prefix: str, truth: pl.DataFrame, qs: tuple[str, ...]
 ) -> dict[str, dict[str, float]]:
     """Median |rel err| and the fraction within 10 %, per quantity, on tree-bearing truth rows."""
-    j = frame.join(truth, on=["cell", "point"], suffix="_true")
-    j = j.filter(pl.col("stems_total_true") > 0) if "stems_total_true" in j.columns else j
+    j = frame.join(_suffixed(truth), on=["cell", "point"])
+    j = j.filter(pl.col("stems_total_true") > 0)
     out: dict[str, dict[str, float]] = {}
     for q in qs:
         col = f"{prefix}{q}"
@@ -740,7 +745,7 @@ def _rel_err_table(
 def _share_error(frame: pl.DataFrame, prefix: str, truth: pl.DataFrame) -> dict[str, float]:
     """Total-variation distance between the written and the true species mix, tree-bearing rows."""
     cols = [f"{prefix}pft_frac_{t}" for t in range(NTREE_TYPES)]
-    j = frame.join(truth, on=["cell", "point"], suffix="_true").filter(
+    j = frame.join(_suffixed(truth), on=["cell", "point"]).filter(
         (pl.col("stems_total_true") > 0) & (pl.col(f"{prefix}stems_total") > 0)
     )
     if j.height == 0:
@@ -772,8 +777,13 @@ def stage_synth(arm: str, workers: int, limit_cells: int | None) -> int:
             if (i + 1) % 10 == 0:
                 print(f"  {arm}: {i + 1}/{len(jobs)} cells, {time.time() - t0:.0f} s", flush=True)
     frame = pl.DataFrame(rows, infer_schema_length=None)
-    dest = out_dir() / f"synth_{arm}.parquet"
-    frame.write_parquet(dest)
+    frame.write_parquet(out_dir() / f"synth_{arm}.parquet")
+    return summarise_synth(arm, seconds=time.time() - t0)
+
+
+def summarise_synth(arm: str, *, seconds: float | None = None) -> int:
+    """The year-0 diagnostics of one arm, from its per-target table (re-runnable on its own)."""
+    frame = pl.read_parquet(out_dir() / f"synth_{arm}.parquet")
     truth = state_table()
     ok = frame.filter(pl.col("status") == "ok")
     null = truth.filter(pl.col("point") == CONTROL).drop("point")
@@ -781,8 +791,9 @@ def stage_synth(arm: str, workers: int, limit_cells: int | None) -> int:
     null_rows = frame.select(["cell", "point"]).join(null, on="cell")
     summary = {
         "basis": f"{VERSION}: template = each cell's control restart, targets = its other "
-        f"{len(points)} climates; {cells.height} cells; truth = that (cell, climate)'s own "
-        "end-of-spin-up state; DEV DIAGNOSTIC, no null bar",
+        f"{frame['point'].n_unique()} climates; {frame['cell'].n_unique()} cells; truth = that "
+        "(cell, climate)'s own end-of-spin-up state; tree-bearing truth rows only; "
+        "DEV DIAGNOSTIC, no null bar",
         "arm": arm,
         "targets": frame.height,
         "synthesised": ok.height,
@@ -792,6 +803,10 @@ def stage_synth(arm: str, workers: int, limit_cells: int | None) -> int:
         "type_fallbacks_total": int(ok["type_fallbacks"].sum()) if ok.height else 0,
         "stems_placed_total": int(ok["stems_placed"].sum()) if ok.height else 0,
         "stems_requested_total": int(ok["stems_requested"].sum()) if ok.height else 0,
+        "share_mass_removed_mean": float(np.mean(ok["share_mass_removed"].to_numpy()))
+        if ok.height
+        else 0.0,
+        "shares_origin": ok.group_by("shares_origin").len().to_dicts() if ok.height else [],
         "failures_by_error": frame.filter(pl.col("status") != "ok")
         .group_by("error")
         .len()
@@ -806,7 +821,7 @@ def stage_synth(arm: str, workers: int, limit_cells: int | None) -> int:
         ),
         "type_share_tv_year0": _share_error(ok, "y0_", truth),
         "type_share_tv_null": _share_error(null_rows, "null_", truth),
-        "seconds_total": time.time() - t0,
+        "seconds_total": seconds,
     }
     (out_dir() / f"synth_{arm}_summary.json").write_text(json.dumps(summary, indent=2))
     print(json.dumps(summary, indent=2))
@@ -1037,7 +1052,9 @@ def stage_t2_score(workers: int) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument(
-        "--stage", required=True, choices=("bank", "synth", "t2-prep", "t2-score", "t3-prep")
+        "--stage",
+        required=True,
+        choices=("bank", "synth", "synth-summary", "t2-prep", "t2-score", "t3-prep"),
     )
     ap.add_argument("--arm", choices=ARMS, default="oracle")
     ap.add_argument("--workers", type=int, default=4)
@@ -1048,6 +1065,8 @@ def main() -> int:
         return stage_bank(args.workers)
     if args.stage == "synth":
         return stage_synth(args.arm, args.workers, args.limit_cells)
+    if args.stage == "synth-summary":
+        return summarise_synth(args.arm)
     if args.stage == "t2-prep":
         return stage_t2_prep()
     if args.stage == "t2-score":
