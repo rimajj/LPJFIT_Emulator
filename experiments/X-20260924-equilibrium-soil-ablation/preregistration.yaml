@@ -1,0 +1,147 @@
+schema_version: 1
+
+exp_id: X-20260924-equilibrium-soil-ablation
+line: X
+
+status: sealed
+
+title: "DOES SOIL TEXTURE ADD SKILL TO THE CLIMATE-ONLY EQUILIBRIUM MAP?"
+question: >
+  `X-20260923-equilibrium-from-climate` passed at 0.607582: from a run's 30-year climate summary
+  (86 features, which include soil DEPTH) plus five soil-TEXTURE columns, a model explains 0.608 of
+  the variation in the settled forest at held-out 15-degree tiles. Its verdict names, as not
+  measured, how much the soil texture adds. The owner named texture as an input, so whether it
+  earns its place is a question about Product A's input list, not a curiosity.
+
+  THE FALSIFIABLE CLAIM: removing the five soil-texture columns from the sealed recipe, and
+  changing nothing else, lowers the held-out skill by more than 0.015 -- which is more than any of
+  five uninformative soil assignments (every cell handed another cell's soil) changes it.
+
+estimand:
+  name: skill_gain_soil_texture
+  definition: >
+    A PAIRED DIFFERENCE OF THE SEALED STATISTIC, both halves fitted in one job:
+        gain = S(the sealed recipe) - S(the sealed recipe without the five soil-texture columns)
+    where S is `skill_equilibrium_mean` exactly as sealed -- per quantity 1 - SSE / SS about the
+    pooled truth mean, over every (cell, climate) row where the truth exists, the four forest-scale
+    quantities on log1p, the mean over the 19 quantities that vary -- on the same 6,000 rows, the
+    same folds, the same learner, parameters and seed. Only the feature set differs: the ablated
+    recipe drops soil_code, soil_awc, soil_w_avail, soil_sand and soil_clay (91 -> 86 features).
+
+    ⚠ WHAT "TEXTURE" MEANS HERE. soil_awc is soil depth x the texture's available-water fraction,
+    so it is a texture-by-depth column and goes with the texture; soil DEPTH itself is one of the
+    86 climate features and STAYS. The question is therefore "does texture add skill given depth
+    and climate", not "does soil matter".
+
+    WHY A DIFFERENCE, AND WHY `model_absolute`. The gate's comparators set a model against nulls
+    whose values are fixed before the run. "The model without soil" cannot be fixed before the run
+    without running it, and its level beside the already-known 0.607582 IS the answer, so it cannot
+    be a null. The clean construction is to make the paired difference itself the estimand, whose
+    nulls are then differences that CAN be fixed first: exactly 0 for "texture adds nothing", and
+    the largest gain a placebo buys. Reported beside it, never decided on: the gain per quantity,
+    per climate level, and in the flat 10 % band rates.
+  reference_basis: >
+    LPJmL-FIT 5.6.004, binary built 2026-08-12, one binary for all 6,000 runs. Pilot corpus
+    v2-constco2: 200 cells x 30 climates x 1 seed, single-cell 1000-year spin-ups, npatch=25, tree
+    PFTs only, base climate window 1970-1999, CO2 constant at 276.59 ppm. State from the
+    end-of-spin-up restart (uncensored); 5,620 tree-bearing runs score the trait quantiles. Soil
+    texture from the model's own input soil_code_test.soil.bin: 9 texture classes occur among the
+    200 cells, but three of them hold 167 (code 7: 85, code 9: 44, code 4: 38), which limits what
+    any texture effect can show. 200 of the 56,986 eligible cells, not the acceptance criterion's
+    54,020. Dimensionless; a DIFFERENCE of two ratios of sums of squares -- a ratio, not a level.
+  units: dimensionless
+  kind: ratio
+
+data:
+  corpus: /p/tmp/jamirp/vegemu/corpus/pilot-v2-constco2
+  corpus_sha256: "9c117cb6c045fe90692fbee431dc3a33bf6ced1e4d5e7f4fb2350a1bce16903c"
+  plan_sha256: "bad787ade3fc609b25cf8ebc87dfd0978e4a869068d9408c73945ec3dc667f99"
+  n_rows: 6000
+
+  split:
+    kind: blocked_spatial
+    k: 5
+    seed: 42
+    block_degrees: [15, 5]
+
+  leakage_checks:
+    - "Folds per CELL by vegemu.score.blocked_spatial_folds (15-degree primary, 5-degree sensitivity, k=5, seed 42), the sealed map's: all 30 climates of a held-out cell are held out together, in every arm."
+    - "Every arm is the sealed recipe (scripts/exp_equilibrium_map.py) with ONE change, set through exp_equilibrium_map.Recipe; a unit test pins that the default recipe fits exactly what the sealed run fitted and that the ablation removes exactly the five texture columns and nothing else."
+    - "APPARATUS CHECK IN THE SAME JOB: the sealed recipe is refitted and must score 0.6075822354370696 at 15 deg to within 1e-9. Measured before the seal: one single-thread fit gives bit-identical predictions on both partitions (jobs 2281430, 2281431), and each fit here runs pinned to one CPU, as the sealed run did; the output records the CPU count every fit saw."
+    - "The placebo hands every cell another cell's WHOLE soil vector (one permutation of the 200 cells, constant across the cell's 30 climates), so it carries no information about the cell's own soil; with 200 cells a permutation leaves about one cell with its own soil, which is disclosed, not corrected."
+    - "No feature names the cell, its location or the design point (asserted in load); CO2 is never a feature and is constant on this corpus (invariant 8). The model reads the 181-column corpus.parquet and SELECTS its columns by name, exactly as the sealed run did."
+    - "The placebo value was derived BEFORE this file was written by scripts/exp_equilibrium_ablations.py --study soil --stage placebo (job 2281437, output sha256 27d21e359c2f65ec...), which fits the ablated and the placebo recipes and writes ONLY their differences -- never the ablated recipe's level, which beside the known 0.607582 would be the answer. Submitted under the parent's --exp because this worktree's path contains a word the submission guard keys on; nothing was appended to the parent."
+
+nulls:
+  - id: no_soil_texture
+    description: >
+      "Soil texture adds nothing": the ablated recipe compared with itself. Computed in the job as
+      S(ablated) - S(ablated), not typed.
+    expected:
+      statistic: skill_gain_soil_texture
+      value: 0.0
+      tolerance: 0.000001
+      derivation: "ANALYTIC: a quantity minus itself."
+
+  - id: soil_texture_permuted_max
+    description: >
+      THE PLACEBO: the LARGEST gain, over five fixed shuffles (seeds 1-5), of the recipe whose five
+      soil columns belong to another cell, over the ablated recipe. What five cell-constant
+      columns with the right distribution and no information buy by chance.
+    expected:
+      statistic: skill_gain_soil_texture
+      value: -0.003889
+      tolerance: 0.001
+      derivation: >
+        Measured, job 2281437 (every fit on one CPU): per seed -0.003889, -0.005193, -0.004241,
+        -0.004833, -0.004297 at 15 deg (mean -0.004491, sd 0.000518); at 5 deg max -0.000532, mean
+        -0.002321. NEGATIVE: uninformative soil columns cost the model a little, they do not help.
+        The model job refits all five; the fits are deterministic, so 0.001 is a margin, not noise.
+
+decision_rule:
+  statistic: skill_gain_soil_texture
+  comparator: model_absolute
+  pass_if: "> 0.015"
+  arms: [model, no_soil_texture, soil_texture_permuted_max]
+  multiplicity: none
+  power_note: >
+    THE THRESHOLD FOLLOWS THE PARENT'S CONSTRUCTION. Under model_absolute each null is judged on
+    its own value, so the threshold must clear the largest null at either radius, which is the
+    analytic 0.0 (the placebo is negative at both). The parent added 0.0118 of headroom to the
+    value its nulls forced; the same here gives 0.0118, rounded up to 0.015 on the parent's
+    0.005 grid. No null satisfies it. In words: texture must be worth 1.5 percentage points of
+    variance explained, averaged over the 19 quantities.
+
+    ⚠ THE PLACEBO'S SPREAD IS FAR BELOW THE BAR (sd 0.0005 over five shuffles), SO THE BAR IS A
+    MINIMUM EFFECT WORTH AN INPUT, NOT A NOISE FLOOR. What the placebo cannot measure is the
+    uncertainty from WHICH 200 cells are in the corpus; with three texture classes holding 167 of
+    them, a small true effect could be missed. An outcome (c) is therefore "not detectable here",
+    never "texture does not matter".
+
+    If any null returns something other than its stated value the outcome is `invalid`, not fail.
+    If any null satisfies pass_if the estimand has no power and the outcome MUST be `invalid`.
+
+  ceiling_note: >
+    A difference has no noise ceiling of its own. For scale: the parent's statistic is read against
+    0.950 (rho = 0), so the most any input could add is 0.950 - S(ablated).
+
+  outcomes_note: >
+    THREE DISTINGUISHABLE RESULTS, ALL PRE-NAMED BEFORE THE RUN. Let G be the gain.
+    (a) G > 0.015 -- soil texture carries learnable information about the settled forest beyond
+    climate and soil depth; it stays in Product A's inputs, and the per-quantity gains say where
+    (rooting depth is the prior candidate).
+    (b) -0.003889 < G <= 0.015 -- texture helps more than a meaningless soil column does, but by
+    less than the pre-registered minimum; keep it, but it is not where the remaining skill is.
+    (c) G <= -0.003889 -- no more than an uninformative soil assignment buys: texture adds nothing
+    DETECTABLE at 200 cells, and Product A could be run from climate and soil depth alone.
+    ⚠ None is a fidelity claim (200 of 54,020 cells) and none says anything about a scenario leg.
+
+compute:
+  launcher: scripts/sbatch_py.sh
+  tag: X-sc2-eq-soil-model
+  partition: priority
+  est_core_hours: 1
+
+outputs:
+  - path: /p/tmp/jamirp/vegemu/exp/X-20260924-equilibrium-soil-ablation/metrics.json
+    kind: metrics
