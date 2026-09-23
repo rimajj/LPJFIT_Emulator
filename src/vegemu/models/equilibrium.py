@@ -42,7 +42,11 @@ sealed model's:
        quantiles and type shares become NaN, because a trait quantile of no trees is undefined. The
        threshold is set at fit time from the TRAINING rows alone (see `treeless_threshold`)
     3. each trait's predicted quantiles are sorted into order, p10 <= p25 <= p50 <= p75 <= p90.
-       Independent heads can cross; the number of rows where they did is reported, not hidden
+       Independent heads can cross; the number of rows where they did is reported, not hidden.
+       Then each is floored at zero: every trait is a positive quantity, and a negative leaf
+       longevity or rooting depth -- which the heads do produce where they extrapolate -- has no
+       meaning. The count is reported per head. Zero is the physical floor, not a claim that zero
+       is right: the corpus's smallest values are well above it
     4. type shares are clipped at zero and renormalised to sum to one
 
 THE OUT-OF-FOLD INTERFACE. `scripts/fit_equilibrium_map.py` writes `oof_pilot.parquet`, one row per
@@ -316,6 +320,7 @@ class PostReport:
     negative_clipped: dict[str, int] = field(default_factory=dict)
     crossed_3_knots: dict[str, int] = field(default_factory=dict)
     crossed_5_knots: dict[str, int] = field(default_factory=dict)
+    trait_negative_clipped: dict[str, int] = field(default_factory=dict)
     share_negative_clipped: int = 0
     share_sum_raw: dict[str, float] = field(default_factory=dict)
     share_all_zero_rows: int = 0
@@ -362,6 +367,18 @@ def postprocess(
         rep.crossed_5_knots[t] = int((live & (np.diff(block, axis=1) < 0).any(axis=1)).sum())
         block[live] = np.sort(block[live], axis=1)
         out[:, knots] = block
+
+    # Step 3, second half: every trait here is a strictly positive physical quantity, and additive
+    # boosting overshoots below zero where it extrapolates -- leaf longevity p10 in 427 of the
+    # 67,420 historical cells of equimap-v1, rooting depth down to -84 under ssp126. Floored AFTER
+    # the crossings are counted, so those counts still describe the heads, and after sorting, which
+    # a floor at zero cannot undo (it is monotone). Covers single-knot traits too, which the sort
+    # loop skips.
+    for h in heads:
+        if h in TREED_HEADS and h not in SHARE_HEADS:
+            neg = out[:, col[h]] < 0  # NaN compares False, so treeless rows stay NaN
+            rep.trait_negative_clipped[h] = int(neg.sum())
+            out[neg, col[h]] = 0.0
 
     shares = [col[h] for h in SHARE_HEADS if h in col]
     if shares:
@@ -516,7 +533,7 @@ class EquilibriumMap:
             "postprocess": [
                 "log1p heads clipped at 0",
                 "stems_per_patch < treeless_below -> trait quantiles and type shares NaN",
-                "each trait's p10..p90 sorted into order",
+                "each trait's p10..p90 sorted into order, then floored at 0",
                 "type shares clipped at 0 and renormalised to sum 1",
             ],
             "lightgbm_version": lgb.__version__,

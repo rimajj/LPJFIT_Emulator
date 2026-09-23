@@ -140,6 +140,20 @@ def test_postprocess_does_four_things_and_reports_each() -> None:
     np.testing.assert_array_equal(raw[0, 2:5], [12.0, 10.0, 15.0])  # the input is untouched
 
 
+def test_a_negative_trait_quantile_is_floored_at_zero_after_its_crossing_is_counted() -> None:
+    """A negative leaf longevity or rooting depth has no meaning; the heads produce them where they
+    extrapolate. The crossing count must still describe the heads, not the floored values."""
+    heads = SUBSET
+    #                 stems agb  p10   p50   p90   seven shares
+    raw = np.array([[20.0, 5.0, -0.5, -1.0, 15.0, 0.2, 0.2, 0.2, 0.1, 0.1, 0.1, 0.1]])
+    out, rep = postprocess(raw, heads, treeless_below=1.0)
+    np.testing.assert_array_equal(out[0, 2:5], [0.0, 0.0, 15.0])
+    assert rep.trait_negative_clipped == {"height_p10": 1, "height_p50": 1, "height_p90": 0}
+    assert rep.crossed_3_knots["height"] == 1  # -0.5 > -1.0 crossed before anything was floored
+    only_median, rep1 = postprocess(np.array([[20.0, -2.0]]), ("stems_per_patch", "height_p50"), 1)
+    assert only_median[0, 1] == 0.0 and rep1.trait_negative_clipped == {"height_p50": 1}
+
+
 def test_a_held_out_fold_never_sees_its_own_truth() -> None:
     x, y = _problem()
     folds = np.arange(x.shape[0]) % 4
