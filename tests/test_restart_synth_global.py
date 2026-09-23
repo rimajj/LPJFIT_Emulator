@@ -48,6 +48,8 @@ import synth_global as sg
 
 NCELL = 40
 SKIP = {5, 25}
+TREELESS_TEMPLATE = 16  # a real-shaped record with no tree in it, but a forest predicted
+TREELESS_PREDICTED = 14  # a forested template the prediction says holds no tree
 GENERIC = GenericHeader(1, 1999, 1, 0, NCELL, 22, 0.5, 1.0, 0.5, 4)
 RESTART = RestartHeader(False, False, 0, False, False, (11, 22, 33), True)
 
@@ -58,11 +60,12 @@ def _record(cell: int) -> bytes:
         return write_cell(rec, _synth_record(0)[1])
     rec, lay = _synth_record(cell, npatch=2, ntree=0, ngrass=0, litter_n=3, buf_n=3, nsapling=1)
     rng = np.random.default_rng(cell)
+    nstem = 0 if cell == TREELESS_TEMPLATE else 6
     for patch in rec["stands"][0]["patches"]:
         stems = [
             _stem(int(t), float(h), 2.0e5 + 1e4 * int(t), litter=i % 3)
             for i, (t, h) in enumerate(
-                zip(rng.choice([1, 3], size=6), rng.uniform(1.0, 20.0, size=6), strict=True)
+                zip(rng.choice([1, 3], size=nstem), rng.uniform(1.0, 20.0, size=nstem), strict=True)
             )
         ]
         patch["pftlist"] = {
@@ -95,6 +98,12 @@ def world(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
     }
     pred["pred_soilc"][2] = np.nan  # cell 12: optional NaN -> key dropped, cell still synthesised
     pred["pred_height_p50"][3] = np.nan  # cell 13: required NaN -> passes through
+    # cell 14: the equilibrium map's treeless form -- a flag, a sub-threshold count, NaN traits
+    pred["pred_treeless"] = cells == TREELESS_PREDICTED
+    pred["pred_stems_per_patch"][4] = 0.5
+    for q in ("height", "wooddens"):
+        for k in (10, 50, 90):
+            pred[f"pred_{q}_p{k}"][4] = np.nan
     pred_path = root / "pred.parquet"
     pl.DataFrame(pred).write_parquet(pred_path)
     return {"root": root, "template": template, "pred": pred_path}
@@ -119,6 +128,7 @@ def test_plan_marks_only_blocks_with_work_as_shards(synth_run: Path) -> None:
     assert [b["kind"] for b in plan["blocks"]] == ["template", "shard", "shard", "template"]
     assert plan["predictions"]["cells_in_range"] == 19
     assert plan["predictions"]["dropped_nan_required"] == 1
+    assert plan["predictions"]["predicted_treeless"] == 1
     assert "truth_height_p50" not in plan["predictions"]["quantities"]
     preds = json.loads((synth_run / "predictions.json").read_text())
     assert "13" not in preds
@@ -132,7 +142,7 @@ def test_pass_through_is_byte_identical_and_synthesis_is_not(
     out = RestartReader(synth_run / "restart" / sg.OUTPUT_NAME)
     assert out.ncell == NCELL and out.generic.firstcell == 0
     assert out.restart == tmpl.restart
-    changed = set(range(10, 30)) - {13} - SKIP
+    changed = set(range(10, 30)) - {13, TREELESS_TEMPLATE} - SKIP
     with out, tmpl:
         for c in range(NCELL):
             same = out.cell_bytes(c) == tmpl.cell_bytes(c)
@@ -149,6 +159,35 @@ def test_pass_through_is_byte_identical_and_synthesis_is_not(
     assert summary["synthesised"]["cells"] == len(changed)
     assert summary["synthesised"]["inadmissible_placed"] == 0
     assert summary["projection"]["cells_to_synthesise"] == 19
+
+
+def test_a_treeless_prediction_removes_the_trees_and_keeps_the_rest(
+    world: dict[str, Path], synth_run: Path
+) -> None:
+    """A predicted-treeless cell is WRITTEN treeless -- not passed through with its old forest."""
+    tmpl = RestartReader(world["template"]).read(TREELESS_PREDICTED)
+    out = RestartReader(synth_run / "restart" / sg.OUTPUT_NAME).read(TREELESS_PREDICTED)
+    assert sum(p["pftlist"]["tree_offsets"].size for p in tmpl["stands"][0]["patches"]) > 0
+    assert all(p["pftlist"]["tree_offsets"].size == 0 for p in out["stands"][0]["patches"])
+    assert np.array_equal(out["climbuf"]["temp"], tmpl["climbuf"]["temp"])
+    cells = pl.read_parquet(synth_run / "cells.parquet")
+    row = cells.filter(pl.col("cell") == TREELESS_PREDICTED).to_dicts()[0]
+    assert row["status"] == "synthesised" and row["predicted_treeless"] and row["stems_placed"] == 0
+
+
+def test_a_treeless_template_passes_through_unless_asked(
+    world: dict[str, Path], synth_run: Path
+) -> None:
+    """No tree in the template means no admissible tree type to copy: kept unless forced."""
+    cells = pl.read_parquet(synth_run / "cells.parquet")
+    row = cells.filter(pl.col("cell") == TREELESS_TEMPLATE).to_dicts()[0]
+    assert row["status"] == "passed-through-treeless-template"
+    out = world["root"] / "forced"
+    args = _plan_args(world, out, "--only", "10:20", "--treeless-template", "synthesise")
+    assert sg.main(["run", *args, "--workers", "1"]) == 0
+    forced = pl.read_parquet(out / "cells.parquet").filter(pl.col("cell") == TREELESS_TEMPLATE)
+    assert forced.to_dicts()[0]["status"] == "synthesised"
+    assert forced.to_dicts()[0]["treeless_template"]
 
 
 def test_a_synthesised_cell_is_exactly_synthesise_cell(

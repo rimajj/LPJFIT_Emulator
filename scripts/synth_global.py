@@ -68,6 +68,7 @@ import polars as pl  # parent-side only: workers are SPAWNED, and receive plain 
 from synth_restart import BIOME_DONORS, DONOR_BAND, _donor_cells
 from vegemu.binfmt.restart import (
     PREFIX_BYTES,
+    Layout,
     RestartReader,
     RestartWriter,
     Segment,
@@ -77,7 +78,13 @@ from vegemu.binfmt.restart import (
     trees_of,
     write_cell,
 )
-from vegemu.models.synth import MATCH_TRAITS, DonorPool, build_donor_pool, synthesise_cell
+from vegemu.models.synth import (
+    MATCH_TRAITS,
+    DonorPool,
+    build_donor_pool,
+    synthesise_cell,
+    type_ladder,
+)
 from vegemu.paths import path, paths
 
 PLAN_VERSION = 1
@@ -203,6 +210,13 @@ def load_predictions(
     A NaN in a REQUIRED quantity drops the cell (it then passes through). A NaN in an optional one
     drops only that key -- passing it on would be worse than absent: `_rescale_soil` tests
     `want <= 0`, which a NaN fails, and would scale every soil pool by NaN.
+
+    A cell the prediction marks TREELESS (`pred_treeless` true, as the equilibrium map writes it:
+    its stem count fell below the model's own treeless cut, and its trait quantiles are NaN
+    because a stand with no trees has no trait distribution) is a prediction, not a gap. It is
+    kept with `stems_per_patch = 0`, so the synthesiser writes the template's grasses, soil and
+    buffers with no tree in it. Passing the template through instead would keep a present-day
+    forest in a cell the emulator says has none -- under a warmed climate, exactly the wrong way.
     """
     df = pl.read_parquet(pred_path)
     cols = [c for c in df.columns if c.startswith("pred_")]
@@ -214,20 +228,24 @@ def load_predictions(
     cells = df["cell"].to_numpy().astype(np.int64)
     if np.unique(cells).size != cells.size:
         raise ValueError(f"{pred_path}: duplicate cell ids")
-    mat = df.select(cols).to_numpy().astype(np.float64)
+    mat = df.select(pl.col(cols).cast(pl.Float64)).to_numpy()
     req = np.array([names.index(q) for q in need])
+    k_treeless = names.index("treeless") if "treeless" in names else None
     out: dict[int, dict[str, float]] = {}
     dropped = 0
+    treeless = 0
     for i, cell in enumerate(int(c) for c in cells):
         if not lo <= cell < hi:
             continue
         row = mat[i]
-        if not np.all(np.isfinite(row[req])):
+        vals = {q: float(v) for q, v in zip(names, row.tolist(), strict=True) if np.isfinite(v)}
+        if k_treeless is not None and np.isfinite(row[k_treeless]) and row[k_treeless] >= 0.5:
+            vals["stems_per_patch"] = 0.0
+            treeless += 1
+        elif not np.all(np.isfinite(row[req])):
             dropped += 1
             continue
-        out[cell] = {
-            q: float(v) for q, v in zip(names, row.tolist(), strict=True) if np.isfinite(v)
-        }
+        out[cell] = vals
     info = {
         "path": str(pred_path),
         "sha256": _sha256(pred_path),
@@ -235,6 +253,7 @@ def load_predictions(
         "quantities": names,
         "required": list(need),
         "cells_in_range": len(out),
+        "predicted_treeless": treeless,
         "dropped_nan_required": dropped,
     }
     return out, info
@@ -302,6 +321,7 @@ def make_plan(args: argparse.Namespace) -> tuple[dict[str, Any], dict[int, dict[
         "match_traits": list(match_traits),
         "synth_kwargs": synth_kwargs,
         "on_error": args.on_error,
+        "treeless_template": args.treeless_template,
         "blocks": blocks,
     }
     plan["plan_sha256"] = hashlib.sha256(json.dumps(plan, sort_keys=True).encode()).hexdigest()
@@ -328,6 +348,44 @@ def _shard_path(out_dir: Path, k: int) -> Path:
     return out_dir / "shards" / f"shard_{k:05d}.lpj"
 
 
+def _synth_one(
+    plan: dict[str, Any], cell: int, blob: bytes, *, tmpl: dict[str, Any],
+    pred: dict[str, float], pool: DonorPool, lay: Layout,
+) -> tuple[bytes, dict[str, Any]]:  # fmt: skip
+    """One cell through `synthesise_cell`, round-trip checked. Returns (record, report fields)."""
+    try:
+        rec, rep = synthesise_cell(
+            tmpl,
+            pred,
+            pool,
+            lay,
+            cell=cell,
+            template_cell=cell,
+            seed=int(plan["seed"]) + cell,
+            match_traits=tuple(plan["match_traits"]),
+            **plan["synth_kwargs"],
+        )
+        out = write_cell(rec, lay)
+        # t0 on the SYNTHESISED record, per record, before it is committed.
+        if write_cell(read_cell(out, lay), lay) != out:
+            raise AssertionError(f"cell {cell}: synthesised record does not round-trip")
+    except Exception as exc:
+        if plan["on_error"] == "raise":
+            raise
+        return blob, {"status": f"error-passed-through: {type(exc).__name__}: {exc}"}
+    return out, {
+        "status": "synthesised",
+        "stems_requested": rep.stems_requested,
+        "stems_placed": rep.stems_placed,
+        "inadmissible_placed": rep.inadmissible_placed,
+        "type_fallbacks": rep.type_fallbacks,
+        "treeless_template": not rep.type_admissible,
+        "predicted_treeless": pred["stems_per_patch"] <= 0,
+        "shape_source": ",".join(f"{k}={v}" for k, v in rep.shape_source.items()),
+        "soil_scale": rep.soil_scale,
+    }
+
+
 def run_block(job: dict[str, Any]) -> dict[str, Any]:  # noqa: PLR0915 -- one linear pass
     """Synthesise (or, in identity mode, decode and re-encode) one block into its shard."""
     wall0, cpu0 = time.perf_counter(), time.process_time()
@@ -341,7 +399,7 @@ def run_block(job: dict[str, Any]) -> dict[str, Any]:  # noqa: PLR0915 -- one li
     donors: DonorSource | None = None
     if plan["mode"] == "synth" and preds:
         donors = make_donor_source(plan["donor_rule"], template, first, ncell, plan["donor_opts"])
-    match_traits = tuple(plan["match_traits"])
+    synth_treeless_templates = plan["treeless_template"] == "synthesise"
 
     body = hashlib.sha256()
     rows: list[dict[str, Any]] = []
@@ -352,15 +410,27 @@ def run_block(job: dict[str, Any]) -> dict[str, Any]:  # noqa: PLR0915 -- one li
             blob = reader.cell_bytes(cell)
             row: dict[str, Any] = {"cell": cell, "bytes_in": len(blob)}
             out = blob
+            pred = preds.get(str(cell))
             if plan["mode"] == "identity":
                 out = write_cell(read_cell(blob, lay), lay)
                 if out != blob:
                     raise AssertionError(f"cell {cell}: decode -> encode is not byte-identical")
                 row["status"] = "identity"
-            elif str(cell) in preds:
+            elif pred is None:
+                row["status"] = "passed-through"
+            else:
                 tmpl = read_cell(blob, lay)
                 if tmpl["skip"]:
                     row["status"] = "passed-through-skip"
+                elif (
+                    pred["stems_per_patch"] > 0
+                    and not type_ladder(tmpl).size
+                    and not synth_treeless_templates
+                ):
+                    # No tree in the template means no admissible tree TYPE to copy, and the
+                    # synthesiser would then draw types from the whole pool -- the fault that
+                    # killed half the first roster within a year. Kept as the template, counted.
+                    row["status"] = "passed-through-treeless-template"
                 else:
                     assert donors is not None
                     # Timed apart from the cell: a per-block pool is built on its first call, and
@@ -371,42 +441,10 @@ def run_block(job: dict[str, Any]) -> dict[str, Any]:  # noqa: PLR0915 -- one li
                     t_pool += p_wall
                     c_wall += p_wall
                     c_cpu += p_cpu
-                    try:
-                        rec, rep = synthesise_cell(
-                            tmpl,
-                            preds[str(cell)],
-                            pool,
-                            lay,
-                            cell=cell,
-                            template_cell=cell,
-                            seed=int(plan["seed"]) + cell,
-                            match_traits=match_traits,
-                            **plan["synth_kwargs"],
-                        )
-                        out = write_cell(rec, lay)
-                        # t0 on the SYNTHESISED record, per record, before it is committed.
-                        if write_cell(read_cell(out, lay), lay) != out:
-                            raise AssertionError(
-                                f"cell {cell}: synthesised record does not round-trip"
-                            )
-                    except Exception as exc:
-                        if plan["on_error"] == "raise":
-                            raise
-                        out = blob
-                        row["status"] = f"error-passed-through: {type(exc).__name__}: {exc}"
-                    else:
-                        row.update(
-                            status="synthesised",
-                            stems_requested=rep.stems_requested,
-                            stems_placed=rep.stems_placed,
-                            inadmissible_placed=rep.inadmissible_placed,
-                            type_fallbacks=rep.type_fallbacks,
-                            treeless_template=not rep.type_admissible,
-                            shape_source=",".join(f"{k}={v}" for k, v in rep.shape_source.items()),
-                            soil_scale=rep.soil_scale,
-                        )
-            else:
-                row["status"] = "passed-through"
+                    out, fields = _synth_one(
+                        plan, cell, blob, tmpl=tmpl, pred=pred, pool=pool, lay=lay
+                    )
+                    row.update(fields)
             w.append(out)
             body.update(out)
             row["bytes_out"] = len(out)
@@ -761,6 +799,7 @@ def cmd_summary(out_dir: Path) -> dict[str, Any]:
             "inadmissible_placed": int(synth["inadmissible_placed"].sum()),
             "type_fallbacks": int(synth["type_fallbacks"].sum()),
             "treeless_template_cells": int(synth["treeless_template"].sum()),
+            "predicted_treeless_cells": int(synth["predicted_treeless"].sum()),
         }
         out["projection"] = _project(plan, synth, blocks)
     for name in ("assembly.json", "verify.json"):
@@ -951,6 +990,13 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--match-traits", default=",".join(MATCH_TRAITS))
         p.add_argument("--synth-kwargs", default=None, help="JSON of extra synthesise_cell kwargs")
         p.add_argument("--on-error", choices=("raise", "pass"), default="raise")
+        p.add_argument(
+            "--treeless-template",
+            choices=("pass", "synthesise"),
+            default="pass",
+            help="a forest predicted where the template holds no tree: keep the template "
+            "(default; the synthesiser has no admissible tree type to copy) or synthesise anyway",
+        )
 
     for name in ("plan", "run"):
         p = sub.add_parser(name)
