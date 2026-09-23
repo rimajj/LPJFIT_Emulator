@@ -13,14 +13,17 @@ THE DESIGN, in three stages, all deterministic:
   1. FORCED. The five biome reference cells (`config/paths.yaml: cells.biome`). They are the cells
      the direction test characterised, including the two results nobody has explained -- the Amazon
      bioclimatic cliff and the Sahel carbon gain -- so the corpus must contain them or those two
-     findings sit outside the training data that has to reproduce them.
+     findings sit outside the training data that has to reproduce them. A NESTED tier forces the
+     earlier tier's cells in here too (`include`), so the mid tier is a strict superset of the
+     pilot rather than a fresh draw that happens to overlap it.
   2. ONE PER TILE, the tile's climate MEDOID: the cell closest to its tile's coordinate-wise median
      in standardised design space. Every populated tile gets a cell, and the cell it gets is the
      typical one rather than a lucky one. This is the stage that makes a blocked spatial fold mean
      something -- hold out a tile and you hold out a climate you have no near neighbour for.
   3. MAXIMIN FILL for the remaining budget: greedily add the cell whose nearest already-chosen cell
      is farthest away. That is standard space-filling design, and it spends the last cells on the
-     climates the first two stages left thinnest instead of on another boreal cell.
+     climates the first two stages left thinnest instead of on another boreal cell. Capped per tile
+     (`tile_cap`), with the cap scaled to the tier so it never silently truncates the design.
 
 THE DESIGN COORDINATES ARE THE FIVE PERTURBATION AXES' OWN BASELINES, one each:
 
@@ -51,6 +54,7 @@ file, but the two are not interchangeable and neither may be quoted without sayi
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -68,8 +72,12 @@ LOG_COORDS: frozenset[str] = frozenset({"pr_ann"})
 
 TILE_DEGREES = 15.0
 # No tile may contribute more than this many cells, so the maximin fill cannot spend its whole
-# budget inside one climate it happens to find empty.
+# budget inside one climate it happens to find empty. This is the cap AT THE PILOT'S SIZE; a larger
+# tier scales it (`tile_cap`).
 MAX_PER_TILE = 3
+# The tier `MAX_PER_TILE` was chosen at. The cap scales in proportion to n from here, which keeps
+# the same allowance relative to the mean per-tile share: 3 of 200 over 164 tiles is 2.5x the mean.
+CAP_REFERENCE_NCELL = 200
 
 
 @dataclass(frozen=True)
@@ -84,13 +92,21 @@ class Selection:
     """Populated tiles among those, at `TILE_DEGREES`."""
     tiles_covered: int
     """Tiles the selection actually touches."""
+    max_per_tile: int = MAX_PER_TILE
+    """The per-tile cap the fill ran under (`tile_cap`)."""
+    nested: int = 0
+    """How many cells were FORCED IN from an earlier tier (`include`), biome cells not counted."""
 
     def cells(self) -> list[int]:
         return [int(c) for c in self.table["cell"].to_list()]
 
     def as_dict(self) -> dict[str, Any]:
         by_stage = Counter(str(s) for s in self.table["stage"].to_list())
+        extra: dict[str, Any] = {}
+        if self.nested:
+            extra["nested_cells"] = self.nested
         return {
+            **extra,
             "ncell": self.table.height,
             "by_stage": {k: int(v) for k, v in sorted(by_stage.items())},
             "eligible_cells": self.eligible,
@@ -101,7 +117,7 @@ class Selection:
             "tile_degrees": TILE_DEGREES,
             "tiles_populated": self.tiles_populated,
             "tiles_covered": self.tiles_covered,
-            "max_per_tile": MAX_PER_TILE,
+            "max_per_tile": self.max_per_tile,
             "design_coords": list(DESIGN_COORDS),
             "log_coords": sorted(LOG_COORDS),
             "why_these_coords": "one baseline per perturbation axis, so cells x climates covers "
@@ -186,12 +202,40 @@ def _tile_medoids(
     return chosen
 
 
+def tile_cap(n: int, tiles: npt.NDArray[np.int64], explicit: int | None = None) -> int:
+    """The per-tile cap for a tier of `n` cells: `explicit` if given, else scaled with `n`.
+
+    ⚠ A FIXED CAP OF 3 SILENTLY CAPS THE WHOLE DESIGN AT 472 CELLS. That is `sum(min(3, cells in
+    tile))` over the 164 populated tiles, and the fill stops there without a word -- a 1,000-cell
+    request came back as 472. So the cap scales with `n` from its pilot value, `ceil(3 n / 200)`
+    (3 at 200, 15 at 1,000), which keeps the same allowance relative to the mean per-tile share,
+    and is then raised until the tiles can hold `n` at all. At n = 200 this is exactly 3, so the
+    pilot's selection is unchanged cell for cell.
+
+    An `explicit` cap is honoured as given, even when it cannot hold `n`: `pilot_cells` then
+    refuses, which is the point of asking for one.
+    """
+    if explicit is not None:
+        if explicit < 1:
+            raise ValueError(f"max_per_tile must be at least 1, got {explicit}")
+        return explicit
+    sizes = np.unique(tiles, return_counts=True)[1]
+    if n > int(sizes.sum()):
+        raise ValueError(f"n={n} exceeds the {int(sizes.sum())} eligible cells")
+    cap = max(MAX_PER_TILE, -(-MAX_PER_TILE * n // CAP_REFERENCE_NCELL))
+    while int(np.minimum(sizes, cap).sum()) < n:
+        cap += 1
+    return cap
+
+
 def _maximin_fill(
     coords: npt.NDArray[np.float64],
     cell: npt.NDArray[np.int64],
     tiles: npt.NDArray[np.int64],
     chosen: list[int],
     want: int,
+    *,
+    cap: int = MAX_PER_TILE,
 ) -> list[int]:
     """Greedily add `want` rows, each maximising the distance to its nearest already-chosen row.
 
@@ -218,7 +262,7 @@ def _maximin_fill(
     for row in chosen:
         blocked[row] = True
     for tile, count in per_tile.items():
-        if count >= MAX_PER_TILE:
+        if count >= cap:
             blocked |= tiles == tile
 
     for _ in range(want):
@@ -234,23 +278,41 @@ def _maximin_fill(
         blocked[row] = True
         tile = int(tiles[row])
         per_tile[tile] = per_tile.get(tile, 0) + 1
-        if per_tile[tile] >= MAX_PER_TILE:
+        if per_tile[tile] >= cap:
             blocked |= tiles == tile
         nearest = np.minimum(nearest, np.linalg.norm(coords - coords[row], axis=1))
     return added
 
 
-def pilot_cells(n: int = 200, version: str = "v0", force_biome: bool = True) -> Selection:
-    """The `n` cells of a corpus tier: forced biome cells, then tile medoids, then a maximin fill.
+def pilot_cells(
+    n: int = 200,
+    version: str = "v0",
+    force_biome: bool = True,
+    *,
+    include: Sequence[int] = (),
+    max_per_tile: int | None = None,
+) -> Selection:
+    """The `n` cells of a corpus tier: forced cells, then tile medoids, then a maximin fill.
 
     Deterministic: no random number is drawn anywhere. The design is a function of the per-cell
-    tables and `n` alone, which is what lets a pre-registration cite it by hash and regenerate it.
+    tables, `n` and `include` alone, which is what lets a pre-registration cite it by hash and
+    regenerate it.
+
+    `include` NESTS an earlier tier: those cells are forced in (stage `nested`), after the biome
+    cells, and the medoid and maximin stages then spend only the remaining budget, filling around
+    them. That is what makes the mid tier a superset of the pilot, so every pilot result stays
+    evaluable on the larger corpus and the pilot's cells are not re-chosen differently by a run of
+    the same stratifier over a bigger budget.
+
+    ⚠ REFUSES RATHER THAN RETURNING FEWER THAN `n`. The fill stops when every tile is at its cap,
+    and a short selection used to come back silently -- 472 cells for a 1,000-cell request.
     """
     df = eligible_cells(version)
     coords = standardise(df)
     cell = df["cell"].to_numpy()
     tiles = df["tile"].to_numpy()
     row_of = {int(c): i for i, c in enumerate(cell)}
+    cap = tile_cap(n, tiles, max_per_tile)
 
     forced: list[int] = []
     if force_biome:
@@ -263,8 +325,19 @@ def pilot_cells(n: int = 200, version: str = "v0", force_biome: bool = True) -> 
             forced.append(row_of[int(want)])
 
     stage: dict[int, str] = {row: "biome" for row in forced}
+    missing = sorted(int(c) for c in include if int(c) not in row_of)
+    if missing:
+        raise ValueError(
+            f"{len(missing)} nested cells are not eligible (tree-bearing) in this basis, first "
+            f"few {missing[:5]}. A nested tier must be drawn from the SAME eligibility table."
+        )
+    nested = [row_of[int(c)] for c in sorted(set(int(c) for c in include))]
+    nested = [r for r in nested if r not in stage]
+    for row in nested:
+        stage[row] = "nested"
+    forced = [*forced, *nested]
     if n < len(forced):
-        raise ValueError(f"n={n} is smaller than the {len(forced)} forced biome cells")
+        raise ValueError(f"n={n} is smaller than the {len(forced)} forced cells")
 
     medoids = _tile_medoids(df, coords, exclude={int(cell[r]) for r in forced})
     if len(forced) + len(medoids) > n:
@@ -278,9 +351,14 @@ def pilot_cells(n: int = 200, version: str = "v0", force_biome: bool = True) -> 
         stage[row] = "tile_medoid"
 
     chosen = [*forced, *medoids]
-    for row in _maximin_fill(coords, cell, tiles, chosen, n - len(chosen)):
+    for row in _maximin_fill(coords, cell, tiles, chosen, n - len(chosen), cap=cap):
         stage[row] = "maximin"
         chosen.append(row)
+    if len(chosen) != n:
+        raise ValueError(
+            f"asked for {n} cells and the design could place only {len(chosen)}: every populated "
+            f"tile is at its cap of {cap}. Raise max_per_tile deliberately, or ask for fewer."
+        )
 
     order = sorted(chosen, key=lambda r: int(cell[r]))
     table = (
@@ -296,4 +374,6 @@ def pilot_cells(n: int = 200, version: str = "v0", force_biome: bool = True) -> 
         eligible=df.height,
         tiles_populated=int(np.unique(tiles).size),
         tiles_covered=int(table["tile"].n_unique()),
+        max_per_tile=cap,
+        nested=len(nested),
     )

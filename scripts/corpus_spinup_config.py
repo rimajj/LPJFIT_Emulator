@@ -71,10 +71,31 @@ def patch(text: str, pattern: str, replacement: str, expect: int = 1) -> str:
 CO2_PREINDUSTRIAL_PPM = 276.59
 CO2_CONST_FIRSTYEAR = 1700
 CO2_CONST_LASTYEAR = 2100
+# The model years a spin-up config built here reads CO2 for: `firstyear - nspinup` to `lastyear`,
+# i.e. 2000 - 1000 = 1000 through 1999 (iterate.c:85-100). A file that ends before the last one
+# kills the run at that year (getco2.c:40, ERROR015).
+SPINUP_FIRST_MODEL_YEAR = 1000
+SPINUP_LAST_MODEL_YEAR = 1999
 
 
-def write_constant_co2(dest: Path, ppm: float = CO2_PREINDUSTRIAL_PPM) -> Path:
+def write_constant_co2(
+    dest: Path,
+    ppm: float = CO2_PREINDUSTRIAL_PPM,
+    first_year: int | None = None,
+    last_year: int = CO2_CONST_LASTYEAR,
+) -> Path:
     """A CO2 forcing file holding ONE value for every year, so the spin-up is genuinely constant.
+
+    ⚠ AT ANY LEVEL BUT 276.59 THE FILE MUST START AT OR BEFORE MODEL YEAR 1000. Before a CO2 file's
+    first year LPJmL does not read the file at all: it substitutes `param.co2_p`, 276.59
+    (getco2.c:47). The historical default starts in 1700, which is harmless only because the file's
+    value IS 276.59 -- at 350 ppm the same file would hold 276.59 for model years 1000-1699 and 350
+    for 1700-1999, a step change of CO2 700 years into a run meant to be constant. So `first_year`
+    defaults to 1700 at 276.59 (the existing file, byte for byte) and to 1000 at any other level,
+    and an explicit `first_year` after 1000 at another level is refused rather than written.
+    `last_year` must reach 1999, the spin-up's final year, or the run dies with ERROR015.
+    The value is written with two decimals, so a level that does not survive that is refused too:
+    the provenance would otherwise name a CO2 the model never saw.
 
     ⚠ WHY A FILE AND NOT A CONFIG FLAG. LPJmL's `fix_climate` does pin CO2 (iterate.c:96), but the
     SAME flag also replaces the climate sequence after `fix_climate_year` (iterate.c:143-154), so it
@@ -86,10 +107,42 @@ def write_constant_co2(dest: Path, ppm: float = CO2_PREINDUSTRIAL_PPM) -> Path:
     declare 1970, so shifting the window would turn the final 30 SEQUENTIAL climate years into 30
     more shuffled spin-up years. That is a second change wearing the first one's clothes.
     """
+    if not ppm > 0:
+        raise ValueError(f"CO2 must be positive, got {ppm}")
+    if abs(float(f"{ppm:.2f}") - ppm) > 1e-9:
+        raise ValueError(f"CO2 {ppm} does not survive the file's two decimals ({ppm:.2f})")
+    at_clamp = f"{ppm:.2f}" == f"{CO2_PREINDUSTRIAL_PPM:.2f}"
+    if first_year is None:
+        first_year = CO2_CONST_FIRSTYEAR if at_clamp else SPINUP_FIRST_MODEL_YEAR
+    if not at_clamp and first_year > SPINUP_FIRST_MODEL_YEAR:
+        raise ValueError(
+            f"a {ppm} ppm file starting in {first_year} leaves model years "
+            f"{SPINUP_FIRST_MODEL_YEAR}-{first_year - 1} at the model's own "
+            f"{CO2_PREINDUSTRIAL_PPM} ppm (getco2.c:47), so the spin-up would not be constant. "
+            f"Start at or before {SPINUP_FIRST_MODEL_YEAR}."
+        )
+    if last_year < SPINUP_LAST_MODEL_YEAR:
+        raise ValueError(
+            f"the file must reach model year {SPINUP_LAST_MODEL_YEAR}, the spin-up's last; "
+            f"ending in {last_year} kills the run there (getco2.c:40)"
+        )
+    if first_year > last_year:
+        raise ValueError(f"first_year {first_year} is after last_year {last_year}")
     dest.parent.mkdir(parents=True, exist_ok=True)
-    rows = "".join(f"{y}  {ppm:.2f}\n" for y in range(CO2_CONST_FIRSTYEAR, CO2_CONST_LASTYEAR + 1))
+    rows = "".join(f"{y}  {ppm:.2f}\n" for y in range(first_year, last_year + 1))
     dest.write_text(rows, encoding="utf-8")
     return dest
+
+
+def read_co2_input(input_js: Path) -> str:
+    """The CO2 file an input list names. Raises unless exactly one `"co2"` entry is present."""
+    text = input_js.read_text(encoding="utf-8")
+    found = re.findall(
+        r'^\s*"co2"\s*:\s*\{\s*"fmt"\s*:\s*"txt",\s*"name"\s*:\s*"([^"]+)"', text, re.M
+    )
+    if len(found) != 1:
+        raise AssertionError(f"{input_js}: {len(found)} co2 entries, expected exactly 1")
+    return str(found[0])
 
 
 def build_input_js(forcing: Path, run_dir: Path, tag: str, *, co2_file: Path | None = None) -> Path:
