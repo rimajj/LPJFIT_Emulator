@@ -382,6 +382,10 @@ def load_model_arm(
     by (cell, point) with the 22 columns under `prefix`. ⚠ A target the harness failed on, or never
     wrote, is NOT dropped: it is a missing prediction and scores e = inf, exactly as a missing
     value does in `score.py`. Dropping it would score the model on an easier subset than its nulls.
+
+    READ BACK, NOT INTENDED. The harness decodes the synthesised record with the corpus decoder and
+    separately proves the file on disk decodes to that same record (`t0_roundtrip`). A row whose
+    round-trip failed is not a state the file holds, so it is treated as a failed target too.
     """
     frame = pl.read_parquet(path)
     if "fold" in frame.columns:
@@ -393,6 +397,8 @@ def load_model_arm(
     n_rows = frame.height
     if "status" in frame.columns:
         frame = frame.filter(pl.col("status") == "ok")
+    if "t0_roundtrip" in frame.columns:
+        frame = frame.filter(pl.col("t0_roundtrip").fill_null(False))
     missing_cols = [q for q in QUANTITIES if f"{prefix}{q}" not in frame.columns]
     if missing_cols:
         raise ValueError(
@@ -449,6 +455,14 @@ def _parse_args() -> argparse.Namespace:
         "--pred-year1", default="", help="the same after a 1-year C run (reported only)"
     )
     ap.add_argument("--pred-year1-prefix", default="y1_", help="column prefix in --pred-year1")
+    ap.add_argument(
+        "--report-arm",
+        action="append",
+        default=[],
+        metavar="NAME=PATH",
+        help="an extra arm scored beside the decision and never in it, e.g. the synthesiser's "
+        "oracle arm (true state in, restart out): what the synthesis alone loses",
+    )
     ap.add_argument("--threshold", type=float, help="the SEALED pass margin (model arm only)")
     ap.add_argument("--exp-id", default="")
     ap.add_argument("--out", required=True)
@@ -622,6 +636,15 @@ def main() -> int:
 
     if model is not None:
         decide_model(args, report, basis, band, folds15, null_preds=null_preds)
+    extra: dict[str, Any] = {}
+    for spec in args.report_arm:
+        label, _, path = spec.partition("=")
+        arm, cov = load_model_arm(Path(path), basis, folds15, prefix=args.pred_prefix)
+        cov.pop("covered")
+        extra[label] = {"coverage": cov, **score_arm(arm, truth, band, basis["points"])}
+        print(f"reported arm {label}: {extra[label][STATISTIC]:+.6f} (never decided on)")
+    if extra:
+        report["reported_arms_NOT_DECIDED"] = extra
     name = "metrics.json" if model is not None else f"nulls_worst_{args.basis}.json"
     (out / name).write_text(json.dumps(report, indent=2, default=float), encoding="utf-8")
     print(f"\nwrote {out / name}")
