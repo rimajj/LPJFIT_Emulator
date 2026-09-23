@@ -1,0 +1,232 @@
+schema_version: 1
+
+exp_id: X-20260923-pilot-composition-blind-arm
+line: X
+
+status: sealed
+
+title: "DOES A MODEL THAT CANNOT SEE THE CLIMATE CHANGE STILL PASS THE SPECIES-MIX KILL TEST?"
+question: >
+  The species-mix kill test (`X-20260921-pilot-composition-response-constco2-resealed`) passed at
+  0.445852 against a bar of 0.300203 on the constant-CO2 corpus. Every one of its seven nulls is
+  INFORMATION-FREE, so none of them is a learned competitor that knows the cell's starting forest
+  but not which climate perturbation it is being asked about. On the sibling response test exactly
+  that competitor -- the BLIND arm -- scores 0.362322, 64.8 % of the headline, and above that test's
+  bar. For composition it has never been run, so how much of the 0.4459 is a response to the
+  forcing, and how much is "knowing the starting roster lets you guess the typical shift", is
+  unmeasured.
+
+  THE FALSIFIABLE CLAIM: a model with the eleven forcing columns removed does NOT clear the sealed
+  kill-test bar. If it does, the kill-test pass cannot by itself be quoted as evidence that the
+  species-mix response to CLIMATE is learnable -- only that the typical shift is predictable from
+  the starting forest -- and line T's composition head must be justified by the forcing-attributable
+  part, reported beside it, not by the 0.4459.
+
+  ⚠ IN THIS EXPERIMENT THE `model` ARM IS THE BLIND MODEL. A `pass` here means the BLIND model
+  clears the bar, which is the outcome UNFAVOURABLE to the forcing claim. The word is the checker's;
+  read it through the outcomes note below, never on its own.
+
+estimand:
+  name: skill_composition_mean
+  definition: >
+    IDENTICAL TO X-20260921-pilot-composition-response-constco2-resealed, to the letter: for each of
+    the seven tree PFTs the STEM SHARE bincount(type ids) / total stems in the end-of-spin-up roster;
+    1 - SUM((dpred - dtrue)^2) / SUM(dtrue^2) pooled over all scored (cell, climate) pairs, with
+    dtrue the within-cell paired contrast against the cell's own control; the unweighted mean of the
+    seven. Treeless shares blanked by `score.blank_treeless_composition`, every arm scored on the
+    identical 5,258 pairs, a missing prediction imputed as no change.
+
+    ONLY THE MODEL'S FEATURE SET DIFFERS. `scripts/exp_model_pilot_composition.py --blind` removes
+    `FORCING_FEATURES` -- the five design axes (dtemp_k, fprec, sprec, frad, fiav) and the six forcing
+    deltas derived from them (d_tas_abs, d_pr_abs, d_rsds_abs, pert_tas_ann, pert_pr_ann,
+    pert_rsds_ann) -- leaving 85 of 96 columns: the whole control state, including the control
+    composition, and the baseline climate. The set is the one the response test's blind arm removed,
+    so the two blind numbers are the same ablation on two estimands. Learner, parameters, folds and
+    seed are unchanged.
+
+    The same three caveats travel with any number from it: stems not biomass; seven shares summing
+    to 1, so six free; scored only where a forest existed at both ends.
+  reference_basis: >
+    LPJmL-FIT 5.6.004, binary built 2026-08-12, one binary for all 6,000 runs. Pilot corpus
+    v2-constco2: 200 cells x 30 climates x 1 seed, single-cell 1000-year spin-ups, npatch=25, tree
+    PFTs only, base climate window 1970-1999, CO2 constant at 276.59 ppm. Shares from the
+    end-of-spin-up restart (uncensored). 200 of the 56,986 eligible cells, not the acceptance
+    criterion's 54,020. Dimensionless ratio of sums of squares -- a ratio, not a level.
+  units: dimensionless
+  kind: ratio
+
+data:
+  corpus: /p/tmp/jamirp/vegemu/corpus/pilot-v2-constco2
+  corpus_sha256: "9c117cb6c045fe90692fbee431dc3a33bf6ced1e4d5e7f4fb2350a1bce16903c"
+  plan_sha256: "bad787ade3fc609b25cf8ebc87dfd0978e4a869068d9408c73945ec3dc667f99"
+  n_rows: 5258
+
+  split:
+    kind: blocked_spatial
+    k: 5
+    seed: 42
+    block_degrees: [15, 5]
+
+  leakage_checks:
+    - "Folds are assigned per CELL via vegemu.score.blocked_spatial_folds (15-degree primary, 5-degree sensitivity), the same function and seed as the sealed kill test; a held-out cell's 29 perturbed states are held out together."
+    - "The blind model's features contain NONE of the eleven FORCING_FEATURES: the script asserts the intersection is empty after removal, and `forcing_index` raises rather than no-ops if any is absent. Dry run on the real cache, 2026-09-23: 85 features, 5,258 of 5,800 scorable pairs, 17 treeless-control cells -- nothing fitted, no statistic computed."
+    - "Feature set excludes lon, lat and cell id; CO2 is never a feature and is constant on this corpus (invariant 8)."
+    - "Cache is the 78-column `/p/tmp/jamirp/vegemu/exp/X-pilot-decode-v2corpus/state_pilot-v2-constco2.parquet`, the one the sealed kill test's model arm read -- NOT the 181-column corpus.parquet, which `build_features` would absorb into the feature set."
+    - "APPARATUS CHECK IN THE SAME JOB: the full (non-blind) model is re-fitted on the same folds as a diagnostic and MUST reproduce the sealed kill test's 0.445852 to within 1e-6. If it does not, this run did not reproduce its own reference and the verdict must say so and not quote a forcing-attributable number."
+
+# The seven nulls are copied VERBATIM from X-20260921-pilot-composition-response-constco2-resealed:
+# same construction, same cache, same folds, so each must return the identical value. Their
+# derivation lines name the jobs that first measured them (2262329, 2262392); the sealed kill test's
+# model job 2262398 then returned every one of them exactly.
+nulls:
+  # Construction and tolerances are X-20260914's, unchanged. Only the VALUES are re-derived, because
+  # the corpus changed. Each was measured out of fold on the v2 table by
+  # scripts/exp_derive_nulls_composition.py, job 2262329, before this file was written and before
+  # the model arm was submitted.
+  - id: no_response
+    description: >
+      Predict no change in any share, in every cell at every level. The decisive floor: does the
+      emulator do anything at all better than saying the species mix stays as it is?
+    expected:
+      statistic: skill_composition_mean
+      value: 0.0
+      tolerance: 0.000001
+      derivation: >
+        ANALYTIC and exact -- with dpred = 0 the numerator equals the denominator. It stays pinned
+        at exactly 0.0 only because a missing prediction is imputed as no change, which is what this
+        null says everywhere. Confirmed at 0.000000 on pilot-v2-constco2, job 2262329.
+
+  - id: level_mean_response
+    description: >
+      Every held-out cell is given the MEAN share change of the training cells at that same design
+      point. "The climate perturbation shifts the mix the same way everywhere."
+    expected:
+      statistic: skill_composition_mean
+      value: 0.032731
+      tolerance: 0.01
+      derivation: >
+        Measured out of fold under 15-degree blocking, job 2262329, reproduced exactly on the model
+        arm's own cache in job 2262392; 0.039256 at 5 degrees. Barely
+        moved from v1's 0.034332. It is near zero on both corpora, and that is the shape of the
+        problem this estimand exists to measure: which types replace which is a cell-specific fact,
+        not a global one.
+
+  - id: proportional_median_response
+    description: >
+      THE BEST NULL, and the one the emulator actually has to beat. Every held-out cell is given the
+      MEDIAN FRACTIONAL share change of the training cells at that design point, applied to its own
+      control shares: "every type changes by the same fraction of the share it already holds."
+    expected:
+      statistic: skill_composition_mean
+      value: 0.160203
+      tolerance: 0.01
+      derivation: >
+        Measured out of fold under 15-degree blocking, job 2262329; 0.165348 at 5 degrees. Slightly
+        WEAKER than on v1 (0.177858), unlike the response arm's best null, which strengthened. The
+        two move in opposite directions because they measure different things: a smaller forest is
+        better described by a common fractional change in its STOCKS, and less well by a common
+        fractional change in its MIX.
+
+  - id: proportional_mean_response
+    description: >
+      The same construction with the donor fractions aggregated by MEAN instead of median. On the
+      record as a measurement rather than as a remark: it is the obvious way to build the null and
+      it is unusable.
+    expected:
+      statistic: skill_composition_mean
+      value: -18.041954
+      tolerance: 1.0
+      derivation: >
+        Measured, job 2262329; -17.503925 at 5 degrees. It fails because a near-zero control share
+        in the denominator sends a few donor ratios enormous, which then multiply onto types that
+        are abundant elsewhere. v1 returned -27.619377 under the same construction. A heavy-tailed
+        ratio needs a median.
+
+  - id: nearest_cell_response
+    description: "Copy the share change of the geographically nearest TRAINING cell at the same design point. The pure spatial-address null."
+    expected:
+      statistic: skill_composition_mean
+      value: -0.328520
+      tolerance: 0.01
+      derivation: >
+        Measured, job 2262329; -0.277500 at 5 degrees. NEGATIVE: copying a neighbour's composition
+        shift is worse than predicting no shift at all. v1: -0.357056.
+
+  - id: nearest_analogue_response
+    description: "Copy the share change of the climatically most similar TRAINING cell -- nearest in the five standardised baseline coordinates the design varies. THE space-for-time null."
+    expected:
+      statistic: skill_composition_mean
+      value: -0.340200
+      tolerance: 0.01
+      derivation: >
+        Measured, job 2262329; -0.268802 at 5 degrees. Also negative, on both corpora (v1:
+        -0.366684). Space-for-time substitution does not transfer the roster -- which is the same
+        conclusion the response test reaches for the trait medians.
+
+  - id: shuffled_cells
+    description: "The true share change, permuted across cells within each design point. The sanity null."
+    expected:
+      statistic: skill_composition_mean
+      value: -0.839838
+      tolerance: 0.05
+      derivation: >
+        Near -1 by construction. Measured at -0.839838, identical at both blocking radii since the
+        permutation does not use the folds. v1: -0.835107.
+
+decision_rule:
+  statistic: skill_composition_mean
+  comparator: model_minus_best_null
+  pass_if: "> 0.140"
+  arms: [model, no_response, level_mean_response, proportional_median_response, proportional_mean_response, nearest_cell_response, nearest_analogue_response, shuffled_cells]
+  multiplicity: none
+  power_note: >
+    THE RULE IS THE SEALED KILL TEST'S, UNCHANGED -- margin over the best null > 0.140, i.e. the
+    blind model must reach 0.300203 -- because the question is whether the BLIND model passes THAT
+    test. A different threshold would ask a different question. The no-power argument is inherited
+    exactly: the nulls are the same, so no null satisfies the rule (best-minus-runner-up is 0.127472).
+
+    ⚠ `model` here is the blind model. The checker's `pass` means the blind model clears the bar.
+
+    DIAGNOSTICS, REPORTED IN THE VERDICT, NEVER ARMS: the full model re-fitted (must equal 0.445852,
+    see leakage checks), the SCRAMBLED model (forcing columns re-paired by an independent permutation
+    per cell, seed 20260914, as in the response test), and the FORCING-ATTRIBUTABLE part = full minus
+    blind, with blind as a share of full. On the response test those were 0.331019, +0.196646 and
+    64.8 %.
+
+    If any null returns something other than its stated value the outcome is `invalid`, not fail.
+
+  ceiling_note: >
+    Read every number against 0.862853 (rho = 0, a conservative lower bound; 0.931426 at rho = 0.5),
+    never against 1.0 -- the sealed kill test's ceiling, same contrasts, carrying the same caveat that
+    its noise was measured on the two transient-CO2 ground-truth spin-ups.
+
+  outcomes_note: >
+    FOUR DISTINGUISHABLE RESULTS, ALL PRE-NAMED BEFORE THE RUN. Let B be the blind model's score.
+    (a) B > 0.300203 (checker `pass`) -- a model that cannot see the climate change passes the
+    species-mix kill test by itself. The 0.4459 pass is then NOT evidence that the mix's response to
+    CLIMATE is learnable; only the forcing-attributable part (0.445852 - B) is, and that is what must
+    be quoted for line T's composition head, beside B, in the same session line T is told.
+    (b) B beats proportional_median_response (0.160203) but by 0.140 or less (checker `fail`), with
+    0.445852 - B at least as large as the response test's +0.196646 -- the composition pass leans on
+    the forcing at least as much as the response pass does. The build case for line T stands as
+    stated.
+    (c) As (b) but with 0.445852 - B below +0.196646 -- a real forcing-attributable part, smaller than
+    the response test's; quote it, and the build case stands on that smaller number.
+    (d) B <= 0.160203 (checker `fail`) -- knowing the starting forest alone buys nothing over the best
+    information-free null; essentially all of the composition skill above that null reads the
+    forcing.
+    SCRAMBLED is read beside B: if scrambled falls below B the model reads the forcing's pairing; if
+    it sits above, the forcing columns carry information the model uses without it being the right
+    perturbation's, and that must be disclosed.
+    ⚠ NONE of the four is a fidelity claim (200 of 54,020 cells; acceptance untouched) and none
+    licenses a claim about a scenario leg (`X-20260908-heldout-forcing-leg`, outcome (c)).
+
+compute:
+  launcher: scripts/sbatch_py.sh
+  tag: X-composition-blind
+  partition: priority
+  est_core_hours: 6
+
+outputs:
+  - path: /p/tmp/jamirp/vegemu/exp/X-20260923-pilot-composition-blind-arm/metrics.json
+    kind: metrics
