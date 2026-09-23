@@ -1,7 +1,7 @@
 # Line X — experiments: pre-registrations, nulls, verdicts
 
 > Durable state for THIS line. Cross-cutting facts: `MEMORY.md`. Runbook: `CLAUDE.md`. Roadmap and
-> the rung ladder: `PLAN.md`. Narrative: `journal/X/<YYYY-MM>.md` (append; never read at start).
+> the rung ladder: `PLAN.md`. Narrative: newest `journal/X/<YYYY-MM>*.md` (never read at start).
 > Budget: 120 lines, of which the NEXT block is 60. `tools/rotate_state.py X` when it fills.
 
 ## Scope

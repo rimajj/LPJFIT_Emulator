@@ -1,7 +1,7 @@
 # Line T — training: models, GPU, inference
 
 > Durable state for THIS line. Cross-cutting facts: `MEMORY.md`. Runbook: `CLAUDE.md`. Roadmap and
-> the rung ladder: `PLAN.md`. Narrative: `journal/T/<YYYY-MM>.md` (append; never read at start).
+> the rung ladder: `PLAN.md`. Narrative: newest `journal/T/<YYYY-MM>*.md` (never read at start).
 > Budget: 120 lines, of which the NEXT block is 60. `tools/rotate_state.py T` when it fills.
 
 ## Scope

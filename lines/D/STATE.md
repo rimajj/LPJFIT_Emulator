@@ -1,7 +1,7 @@
 # Line D — data: binary formats, corpus generation, provenance
 
 > Durable state for THIS line. Cross-cutting facts: `MEMORY.md`. Runbook: `CLAUDE.md`. Roadmap and
-> the rung ladder: `PLAN.md`. Narrative: `journal/D/<YYYY-MM>.md` (append; never read at start).
+> the rung ladder: `PLAN.md`. Narrative: newest `journal/D/<YYYY-MM>*.md` (never read at start).
 > Budget: 120 lines, of which the NEXT block is 60. `tools/rotate_state.py D` when it fills.
 
 ## Scope
