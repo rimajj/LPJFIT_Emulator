@@ -5,7 +5,7 @@
     scripts/synth_pilot.py --stage synth     --arm oracle --workers 32
     scripts/synth_pilot.py --stage synth     --arm map    --workers 32
     scripts/synth_pilot.py --stage t2-prep                   # configs + manifests, 1 model year
-    scripts/synth_pilot.py --stage t2-score                  # decode year 1, the diagnostics
+    scripts/synth_pilot.py --stage t2-decode                  # decode year 1, the diagnostics
     scripts/synth_pilot.py --stage t3-prep                   # manifests for 30 years, NOT launched
 
 THE QUESTION. The pilot spun every one of 200 cells up under 30 climates. Take a cell's CONTROL
@@ -144,6 +144,7 @@ LITTER_RULE = "soilc"
 # The t2 sample. Points by design value: the hottest and coldest perturbations, and pure +4 K.
 T2_POINTS: tuple[str, ...] = ("lhs14", "lhs02", "core_t+4_p10")
 T2_CELL_STRIDE = 5  # every 5th pilot cell by id -> 40 of 200
+T3_SHARD = 250  # members per t3 manifest, i.e. per SLURM job -- the pilot's own shard size
 
 
 # ------------------------------------------------------------------------------------------------
@@ -839,7 +840,13 @@ def _patch(text: str, pattern: str, repl: str, expect: int = 1) -> str:
 
 
 def from_restart_config(
-    target: tuple[int, str], restart: Path, run_dir: Path, *, years: tuple[int, int], tag: str
+    target: tuple[int, str],
+    restart: Path,
+    run_dir: Path,
+    *,
+    years: tuple[int, int],
+    tag: str,
+    link: bool = False,
 ) -> Path:
     """The TARGET run's own spin-up config, switched to its FROM_RESTART branch for `years`.
 
@@ -877,7 +884,13 @@ def from_restart_config(
     (run_dir / "output").mkdir(parents=True, exist_ok=True)
     (run_dir / "restart").mkdir(parents=True, exist_ok=True)
     dest = run_dir / "restart" / restart.name
-    if not dest.exists() or dest.stat().st_size != restart.stat().st_size:
+    if link:
+        # t3 prepares 23,200 members: a symlink instead of a 23 GB copy. The model opens the
+        # file by name and reads it once, so a link is indistinguishable to it.
+        if dest.is_symlink() or dest.exists():
+            dest.unlink()
+        dest.symlink_to(restart.resolve())
+    elif not dest.exists() or dest.stat().st_size != restart.stat().st_size:
         dest.write_bytes(restart.read_bytes())
     cfg = run_dir / f"lpjml_{tag}.js"
     cfg.write_text(head + block, encoding="utf-8")
@@ -897,7 +910,16 @@ def _input_restart(arm: str, cell: int, point: str) -> Path:
     return synth_restart_path(arm, cell, point)
 
 
-def _prep(kind: str, years: tuple[int, int], targets: list[tuple[int, str]]) -> dict[str, Any]:
+def _prep(
+    kind: str,
+    years: tuple[int, int],
+    targets: list[tuple[int, str]],
+    *,
+    shard: int | None = None,
+    link: bool = False,
+) -> dict[str, Any]:
+    """Configs and manifests per arm; `shard` splits each arm's manifest into files of that size,
+    because one manifest is one SLURM job with one task per member."""
     base = _scratch("runs") / f"synth-pilot-{kind}"
     manifests: dict[str, Any] = {}
     for arm in ("truth", "null", *ARMS):
@@ -910,15 +932,24 @@ def _prep(kind: str, years: tuple[int, int], targets: list[tuple[int, str]]) -> 
                 continue
             tag = f"{kind}-{arm}"
             rdir = base / arm / f"c{cell}" / point
-            cfg = from_restart_config((cell, point), src, rdir, years=years, tag=tag)
+            cfg = from_restart_config((cell, point), src, rdir, years=years, tag=tag, link=link)
             lines.append(f"{arm}-c{cell}-{point}\t{cfg}\t{rdir}")
         if not lines:
             manifests[arm] = {"members": 0, "skipped": skipped}
             continue
-        man = base / arm / f"manifest_{kind}_{arm}.tsv"
-        man.parent.mkdir(parents=True, exist_ok=True)
-        man.write_text("\n".join(lines) + "\n")
-        manifests[arm] = {"manifest": str(man), "members": len(lines), "skipped": skipped}
+        size = shard or len(lines)
+        files = []
+        for k in range(0, len(lines), size):
+            suffix = f"_s{k // size:02d}" if shard else ""
+            man = base / arm / f"manifest_{kind}_{arm}{suffix}.tsv"
+            man.parent.mkdir(parents=True, exist_ok=True)
+            man.write_text("\n".join(lines[k : k + size]) + "\n")
+            files.append(str(man))
+        manifests[arm] = {
+            "manifest" if not shard else "manifests": files[0] if not shard else files,
+            "members": len(lines),
+            "skipped": skipped,
+        }
     return manifests
 
 
@@ -932,18 +963,30 @@ def stage_t2_prep() -> int:
 def stage_t3_prep(nyears: int) -> int:
     cells = cell_table().sort("cell")["cell"].to_list()
     targets = [(int(c), p) for c in cells for p in points_of() if p != CONTROL]
-    out = _prep("t3", (1970, 1970 + nyears - 1), targets)
+    out = _prep("t3", (1970, 1970 + nyears - 1), targets, shard=T3_SHARD, link=True)
     t2 = out_dir() / "t2_timing.json"
-    per_year = json.loads(t2.read_text())["median_seconds_per_run"] if t2.exists() else None
+    one_year = json.loads(t2.read_text())["median_seconds_per_run"] if t2.exists() else None
+    # The pilot spin-ups' own per-year cost, read off their logs: the marginal year.
+    rates = []
+    for cell in cells:
+        log = pilot_run_dir(int(cell), CONTROL) / f"lpjml.c{cell}-{CONTROL}-s{SEED}.log"
+        m = re.search(r"([0-9.]+) sec/cell/year", log.read_text(errors="replace"))
+        if m:
+            rates.append(float(m.group(1)))
+    per_year = float(np.median(rates)) if rates else None
+    members = sum(v.get("members", 0) for v in out.values() if isinstance(v, dict))
     out["cost"] = {
         "targets_per_arm": len(targets),
+        "members_all_arms": members,
         "years": nyears,
-        "t2_median_seconds_for_one_year_one_cell": per_year,
-        "note": "cost = members x (startup + years x per-year); one core per member",
+        "t2_median_wall_seconds_one_year_run": one_year,
+        "pilot_spinup_median_seconds_per_cell_year": per_year,
+        "note": "one core per member; wall per member = (one-year run) + (years - 1) x per-year",
     }
-    if per_year is not None:
-        members = sum(v.get("members", 0) for v in out.values() if isinstance(v, dict))
-        out["cost"]["core_hours_upper_bound"] = members * per_year * nyears / 3600.0
+    if one_year is not None and per_year is not None:
+        wall = one_year + (nyears - 1) * per_year
+        out["cost"]["wall_seconds_per_member"] = wall
+        out["cost"]["core_hours"] = members * wall / 3600.0
     (out_dir() / "t3_manifests.json").write_text(json.dumps(out, indent=2))
     print(json.dumps(out, indent=2))
     return 0
@@ -973,7 +1016,7 @@ def _survivors(y0: dict[str, Any], y1: dict[str, Any]) -> tuple[Array, Array]:
     return placed, alive
 
 
-def _score_one(args: tuple[str, int, str]) -> dict[str, Any]:
+def _decode_one(args: tuple[str, int, str]) -> dict[str, Any]:
     arm, cell, point = args
     rdir = _scratch("runs") / "synth-pilot-t2" / arm / f"c{cell}" / point
     name = f"{arm}-c{cell}-{point}"
@@ -981,7 +1024,7 @@ def _score_one(args: tuple[str, int, str]) -> dict[str, Any]:
     row: dict[str, Any] = {"arm": arm, "cell": cell, "point": point}
     text = log.read_text(errors="replace") if log.exists() else ""
     row["success"] = bool(re.search(r"^lpjml successfully terminated", text, flags=re.M))
-    m = re.search(r"^Simulation ran for\s+([0-9.]+)\s+sec", text, flags=re.M)
+    m = re.search(r"^Total wall clock time:\s+([0-9.]+)\s+sec", text, flags=re.M)
     row["log_seconds"] = float(m.group(1)) if m else None
     out = rdir / "restart" / f"restart_1970_t2-{arm}.lpj"
     if not (row["success"] and out.exists()):
@@ -998,12 +1041,12 @@ def _score_one(args: tuple[str, int, str]) -> dict[str, Any]:
     return row
 
 
-def stage_t2_score(workers: int) -> int:
+def stage_t2_decode(workers: int) -> int:
     jobs = [(arm, c, p) for arm in ("truth", "null", *ARMS) for c, p in _t2_sample()]
     with mp.get_context("spawn").Pool(workers) as pool:
-        rows = list(pool.imap_unordered(_score_one, jobs))
+        rows = list(pool.imap_unordered(_decode_one, jobs))
     frame = pl.DataFrame(rows, infer_schema_length=None)
-    frame.write_parquet(out_dir() / "t2_scored.parquet")
+    frame.write_parquet(out_dir() / "t2_decoded.parquet")
     truth0 = state_table()
     truth1 = (
         frame.filter((pl.col("arm") == "truth") & pl.col("success"))
@@ -1054,7 +1097,7 @@ def main() -> int:
     ap.add_argument(
         "--stage",
         required=True,
-        choices=("bank", "synth", "synth-summary", "t2-prep", "t2-score", "t3-prep"),
+        choices=("bank", "synth", "synth-summary", "t2-prep", "t2-decode", "t3-prep"),
     )
     ap.add_argument("--arm", choices=ARMS, default="oracle")
     ap.add_argument("--workers", type=int, default=4)
@@ -1069,8 +1112,8 @@ def main() -> int:
         return summarise_synth(args.arm)
     if args.stage == "t2-prep":
         return stage_t2_prep()
-    if args.stage == "t2-score":
-        return stage_t2_score(args.workers)
+    if args.stage == "t2-decode":
+        return stage_t2_decode(args.workers)
     return stage_t3_prep(args.t3_years)
 
 
