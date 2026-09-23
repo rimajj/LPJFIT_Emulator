@@ -126,16 +126,40 @@ def test_a_failed_or_missing_model_target_is_never_credited(tmp_path: Path) -> N
     cells, points = [1, 2], ["a", "b"]
     frame = _grid_frame(cells, points).rename({q: f"y0_{q}" for q in QUANTITIES})
     frame = frame.with_columns(
-        pl.Series("status", ["ok", "error", "ok", "ok"]), pl.Series("fold", [0, 0, 1, 1])
+        pl.Series("status", ["ok", "error", "ok", "ok"]),
+        pl.Series("fold", [0, 0, 1, 1]),
+        pl.Series("arm", ["map"] * 4),
     ).filter(~((pl.col("cell") == 2) & (pl.col("point") == "b")))
     path = tmp_path / "synth_map.parquet"
     frame.write_parquet(path)
     basis = {"cell_ids": cells, "points": points}
-    pred, cov = load_model_arm(path, basis, np.array([0, 1]), prefix="y0_")
+    pred, cov = load_model_arm(path, basis, np.array([0, 1]), prefix="y0_", arm="map")
     assert cov["targets_covered"] == 2 and cov["targets_missing_scored_as_never_credited"] == 2
     assert np.isnan(pred[0, 1]).all() and np.isnan(pred[1, 1]).all()
     truth = np.ones_like(pred)
     e = row_errors(pred, truth, np.full_like(pred, 0.1))
     assert np.isinf(e[0, 1]) and np.isinf(e[1, 1])
     with pytest.raises(ValueError, match="folds differ"):
-        load_model_arm(path, basis, np.array([1, 1]), prefix="y0_")
+        load_model_arm(path, basis, np.array([1, 1]), prefix="y0_", arm="map")
+
+
+def test_a_multi_arm_table_is_cut_to_the_named_arm(tmp_path: Path) -> None:
+    """The one-year table holds map, oracle and truth rows for the same targets; never mix them."""
+    cells, points = [1], ["a"]
+    rows = [
+        _grid_frame(cells, points, seed=s).rename({q: f"y1_{q}" for q in QUANTITIES})
+        for s in (1, 2)
+    ]
+    frame = pl.concat(
+        [
+            rows[0].with_columns(pl.lit("map").alias("arm"), pl.lit(True).alias("success")),
+            rows[1].with_columns(pl.lit("truth").alias("arm"), pl.lit(True).alias("success")),
+        ]
+    )
+    path = tmp_path / "t2_scored.parquet"
+    frame.write_parquet(path)
+    basis = {"cell_ids": cells, "points": points}
+    got, _ = load_model_arm(path, basis, np.array([0]), prefix="y1_", arm="map")
+    assert np.array_equal(got[0, 0], rows[0].select([f"y1_{q}" for q in QUANTITIES]).row(0))
+    with pytest.raises(ValueError, match="no rows of arm"):
+        load_model_arm(path, basis, np.array([0]), prefix="y1_", arm="oracle")

@@ -386,7 +386,12 @@ def check_folds(
 
 
 def load_model_arm(
-    path: Path, basis: dict[str, Any], folds15: npt.NDArray[np.int64], *, prefix: str
+    path: Path,
+    basis: dict[str, Any],
+    folds15: npt.NDArray[np.int64],
+    *,
+    prefix: str,
+    arm: str,
 ) -> tuple[Array, dict[str, Any]]:
     """(cells, points, 22) decoded read-back states, and what the table actually covered.
 
@@ -399,15 +404,22 @@ def load_model_arm(
     READ BACK, NOT INTENDED. The harness decodes the synthesised record with the corpus decoder and
     separately proves the file on disk decodes to that same record (`t0_roundtrip`). A row whose
     round-trip failed is not a state the file holds, so it is treated as a failed target too.
+    A table holding several arms (the harness's one-year table carries `arm` = map / oracle /
+    truth) is cut to `arm`, and a row whose C run did not succeed (`success`) is a failed target.
     """
     frame = pl.read_parquet(path)
+    if "arm" in frame.columns:
+        frame = frame.filter(pl.col("arm") == arm)
+        if frame.height == 0:
+            raise ValueError(f"{path.name} holds no rows of arm {arm!r}")
     if "fold" in frame.columns:
         check_folds(frame, basis, folds15, what=path.name)
     n_rows = frame.height
     if "status" in frame.columns:
         frame = frame.filter(pl.col("status") == "ok")
-    if "t0_roundtrip" in frame.columns:
-        frame = frame.filter(pl.col("t0_roundtrip").fill_null(False))
+    for flag in ("t0_roundtrip", "success"):
+        if flag in frame.columns:
+            frame = frame.filter(pl.col(flag).fill_null(False))
     missing_cols = [q for q in QUANTITIES if f"{prefix}{q}" not in frame.columns]
     if missing_cols:
         raise ValueError(
@@ -460,6 +472,9 @@ def _parse_args() -> argparse.Namespace:
     ap.add_argument("--arm", choices=("nulls", "model"), default="nulls")
     ap.add_argument("--pred", default="", help="decoded read-back states, keyed by (cell, point)")
     ap.add_argument("--pred-prefix", default="y0_", help="column prefix in --pred")
+    ap.add_argument(
+        "--pred-arm", default="map", help="the `arm` value to score, if the table has one"
+    )
     ap.add_argument(
         "--pred-year1", default="", help="the same after a 1-year C run (reported only)"
     )
@@ -572,7 +587,11 @@ def decide_model(
         # After one year of the real model, on whatever targets were run: the model AND every null
         # on that same subset, against the same truth. Reported beside the decision, never in it.
         y1, cov = load_model_arm(
-            Path(args.pred_year1), basis, folds15, prefix=args.pred_year1_prefix
+            Path(args.pred_year1),
+            basis,
+            folds15,
+            prefix=args.pred_year1_prefix,
+            arm=args.pred_arm,
         )
         mask = cov.pop("covered")
         truth = basis["truth"]
@@ -626,7 +645,9 @@ def main() -> int:
     folds15 = blocked_spatial_folds(lon, lat, k=args.k, degrees=args.degrees, seed=42)
     model = None
     if args.arm == "model":
-        model, cov = load_model_arm(Path(args.pred), basis, folds15, prefix=args.pred_prefix)
+        model, cov = load_model_arm(
+            Path(args.pred), basis, folds15, prefix=args.pred_prefix, arm=args.pred_arm
+        )
         cov.pop("covered")
         report["model_coverage"] = cov
         if args.map_oof:
@@ -657,7 +678,7 @@ def main() -> int:
     extra: dict[str, Any] = {}
     for spec in args.report_arm:
         label, _, path = spec.partition("=")
-        arm, cov = load_model_arm(Path(path), basis, folds15, prefix=args.pred_prefix)
+        arm, cov = load_model_arm(Path(path), basis, folds15, prefix=args.pred_prefix, arm=label)
         cov.pop("covered")
         extra[label] = {"coverage": cov, **score_arm(arm, truth, band, basis["points"])}
         print(f"reported arm {label}: {extra[label][STATISTIC]:+.6f} (never decided on)")
