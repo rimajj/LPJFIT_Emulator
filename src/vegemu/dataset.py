@@ -42,21 +42,74 @@ class Leg:
     climate: pl.DataFrame
     seed1: pl.DataFrame
     seed2: pl.DataFrame
+    # True only when the caller explicitly loaded a clone (`allow_identical_seeds=True`), so the
+    # fact travels with the data instead of living in whoever remembers it.
+    seeds_identical: bool = False
 
     @property
     def cells(self) -> npt.NDArray[np.int64]:
         return np.asarray(self.climate["cell"].to_numpy(), dtype=np.int64)
 
 
-def load_leg(leg: str, version: str = "v0") -> Leg:
+class IdenticalSeedsError(ValueError):
+    """Two 'seeds' of a leg are one realisation twice. Raised by `load_leg` unless allowed."""
+
+
+def files_identical(a: Path, b: Path, *, chunk: int = 1 << 20) -> bool:
+    """Byte-for-byte equality of two files: sizes first (free), then a streamed comparison."""
+    if a.stat().st_size != b.stat().st_size:
+        return False
+    with a.open("rb") as fa, b.open("rb") as fb:
+        while True:
+            ba, bb = fa.read(chunk), fb.read(chunk)
+            if ba != bb:
+                return False
+            if not ba:
+                return True
+
+
+def load_leg(leg: str, version: str = "v0", *, allow_identical_seeds: bool = False) -> Leg:
+    """One leg's climate and both seeds, aligned by cell -- REFUSING a leg whose seeds are a clone.
+
+    ⚠ WHY THE GUARD. The band is max(10 %, |s1 - s2| / |mean|). With s1 == s2 it collapses to the
+    bare floor in EVERY cell while still reading as "10 % or the model's own spread" -- the floor
+    wearing the spread's name, which inflates every margin measured against it and says nothing
+    anywhere. Corpus v0's ssp370 leg is exactly that: its two state tables are byte-identical,
+    because the configured "seed 2" run restored seed 1's RNG from its restart
+    (`docs/decisions/20260910-D-the-ssp370-second-seed-exists-and-the-configured-path-is-its-clone.md`).
+    Refused on byte identity (the known case) AND on content identity after the sort (a clone
+    re-written with different bytes), both before any band can be built.
+
+    `allow_identical_seeds=True` loads it anyway and marks `Leg.seeds_identical`, for a caller that
+    uses the leg as a single realisation and never builds a band from its pair. ⚠ The two closed
+    corpus-v0 experiments that read ssp370 (`scripts/exp_derive_nulls.py`,
+    `scripts/train_emulator.py`) predate this guard and now need that keyword to re-run.
+    """
     d = corpus_dir(version)
+    p1, p2 = d / f"state_{leg}_seed1.parquet", d / f"state_{leg}_seed2.parquet"
+    identical = files_identical(p1, p2)
+    if identical and not allow_identical_seeds:
+        raise IdenticalSeedsError(
+            f"{version}/{leg}: state_{leg}_seed1.parquet and _seed2.parquet are byte-identical "
+            "-- one realisation twice, so its 'two-seed spread' is zero and any band built from "
+            "it is the bare floor. Pass allow_identical_seeds=True only if no band is built from "
+            "the pair."
+        )
     climate = pl.read_parquet(d / f"climate_{leg}.parquet").sort("cell")
-    seed1 = pl.read_parquet(d / f"state_{leg}_seed1.parquet").sort("cell")
-    seed2 = pl.read_parquet(d / f"state_{leg}_seed2.parquet").sort("cell")
+    seed1 = pl.read_parquet(p1).sort("cell")
+    seed2 = pl.read_parquet(p2).sort("cell")
     for name, frame in (("seed1", seed1), ("seed2", seed2)):
         if not np.array_equal(frame["cell"].to_numpy(), climate["cell"].to_numpy()):
             raise ValueError(f"{leg}/{name}: cell order does not match the climate table")
-    return Leg(leg, climate, seed1, seed2)
+    if not identical and seed1.equals(seed2):
+        identical = True
+        if not allow_identical_seeds:
+            raise IdenticalSeedsError(
+                f"{version}/{leg}: the two seed tables differ in bytes but hold identical rows "
+                "-- a clone written twice. Pass allow_identical_seeds=True only if no band is "
+                "built from the pair."
+            )
+    return Leg(leg, climate, seed1, seed2, seeds_identical=identical)
 
 
 def tree_bearing(leg: Leg) -> npt.NDArray[np.bool_]:
