@@ -28,7 +28,8 @@ THE SELECTION RULE -- fixed in this docstring before the screen was first run:
     every candidate and never enters a comparison or a choice.
   * Greedy, in a fixed order: feature set, then target form, then the two-stage inputs, then tuned
     hyperparameters, then bagging. A component is kept only if it raises the dev statistic by more
-    than MIN_GAIN over the recipe without it; otherwise the simpler recipe stands.
+    than MIN_GAIN over the recipe without it; otherwise the simpler recipe stands. For the feature
+    set, where two components (+v3, -soil) can combine, that holds for each component separately.
   ⚠ Tuning selects the best of N trials ON the dev folds, so a tuned recipe's dev number is
     optimistic by construction; only its held-out number is clean.
 
@@ -606,9 +607,11 @@ def main() -> int:  # noqa: PLR0912, PLR0915 -- one screen, a fixed sequence of 
             eng, dataclasses.replace(base, name="a+h: +v3 -soil", v3=True, soil=False), rows, "A"
         ),
     }
-    best_f = max(feats, key=lambda k: feats[k]["dev"]["pooled"])
-    if best_f != "base" and not _accept(b, feats[best_f]):
-        best_f = "base"
+    # A feature set is admissible only if EACH of its components pays for itself: removing either
+    # one costs more than MIN_GAIN. The best admissible set wins; the base is always admissible.
+    without = {"+v3": ["base"], "-soil": ["base"], "+v3-soil": ["-soil", "+v3"], "base": []}
+    admissible = [k for k in feats if all(_accept(feats[w], feats[k]) for w in without[k])]
+    best_f = max(admissible, key=lambda k: feats[k]["dev"]["pooled"])
     cur = dataclasses.replace(
         base, v3="+v3" in best_f, soil="-soil" not in best_f, name=f"F[{best_f}]"
     )
