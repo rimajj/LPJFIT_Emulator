@@ -390,6 +390,14 @@ PROPOSAL = {
     "ceiling",
     "why_it_matters": "synth.py copies each stem's TYPE from the template, so a warmed forest "
     "cannot change its mix unless a composition head exists and is shown to be right",
+    # ⚠ Invariant 2 is "pre-register before you run", and on these rows the model arm HAS run.
+    "not_blind": "THE MODEL ARM HAS ALREADY BEEN SCORED ON THESE EXACT ROWS AND FOLDS -- the "
+    "'shares' block of this file, which a pre-registration author will have read. A test "
+    "sealed on pilot-v2-constco2 would be sealed after its outcome was seen, and must say so "
+    "in its question. A blind test needs places the map has never been scored on (new cells, "
+    "e.g. the mid-size corpus). The constant-CO2 second seed does not supply one: it repeats "
+    "the same cells and climates, so the map's predictions are identical and only the truth's "
+    "noise differs -- it gives the ceiling, not an independent test",
 }
 
 
