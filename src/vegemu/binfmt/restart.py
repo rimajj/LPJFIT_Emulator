@@ -33,6 +33,7 @@ detected by the version word's low byte being zero, as the C does.
 
 from __future__ import annotations
 
+import os
 import struct
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -943,12 +944,37 @@ class RestartReader:
         return read_cell(self.cell_bytes(cell), self.layout)
 
 
+def framing_prefix(generic: GenericHeader, restart: RestartHeader) -> bytes:
+    """The 84 bytes before the offset table. One definition, shared by the writer and assembler."""
+    out = RESTART_MAGIC + struct.pack("<i", RESTART_VERSION) + generic.pack() + restart.pack()
+    assert len(out) == PREFIX_BYTES
+    return out
+
+
+def _partial(path: Path) -> Path:
+    """Where a file is built before it is renamed into place. Same directory, so the rename is
+    atomic: a reader never sees a file whose offset table is still the zero placeholder."""
+    return path.with_name(path.name + ".partial")
+
+
 class RestartWriter:
     """Write a restart file for a chosen subset of cells, in the model's own framing.
 
     Used two ways: to prove the round-trip (write real records back and `cmp`), and to emit the
     emulator's product (write synthesised records the model will load). Both go through here so
     there is exactly one implementation of the framing.
+
+    STREAMING, because the product is the whole globe. It used to hold every record in RAM until
+    `close()`, which for 67,420 cells is the whole 119 GiB file. Now each record goes to disk as it
+    is appended and only its offset is kept (8 bytes a cell); the offset table is written as a zero
+    placeholder up front and fixed up in place at `close()`, when every length is known. The bytes
+    on disk are identical to the old writer's for the same records -- same prefix, same offsets,
+    same bodies in the same order -- and `tests/test_restart_stream.py` holds it to that.
+
+    The file is built as `<name>.partial` and renamed into place only by a successful `close()`,
+    so the old guarantee survives: an exception inside the `with` block, or a short count, leaves
+    no file at `path` (and an existing one untouched) rather than a half-written restart the model
+    would happily try to load.
     """
 
     def __init__(
@@ -966,27 +992,56 @@ class RestartWriter:
             self.generic.firstcell = firstcell
         self.restart = restart
         self.ncell = ncell
-        self._records: list[bytes] = []
+        self._offsets = np.zeros(ncell, dtype="<i8")
+        self._count = 0
+        self._pos = PREFIX_BYTES + 8 * ncell
+        self._fh: BinaryIO | None = None
 
-    def append(self, record: bytes) -> None:
-        self._records.append(record)
+    @property
+    def records_written(self) -> int:
+        return self._count
+
+    @property
+    def bytes_written(self) -> int:
+        """The file's size so far, prefix and offset table included."""
+        return self._pos
+
+    def _open(self) -> BinaryIO:
+        # Opened on first use rather than in __init__, so constructing a writer touches nothing on
+        # disk -- as the in-memory writer never did.
+        if self._fh is None:
+            self._fh = _partial(self.path).open("wb")
+            self._fh.write(framing_prefix(self.generic, self.restart))
+            self._fh.write(bytes(8 * self.ncell))  # placeholder; fixed up in close()
+        return self._fh
+
+    def append(self, record: bytes | memoryview) -> None:
+        if self._count >= self.ncell:
+            self.abort()
+            raise ValueError(f"declared ncell={self.ncell} but appended more")
+        fh = self._open()
+        self._offsets[self._count] = self._pos
+        fh.write(record)
+        self._pos += memoryview(record).nbytes
+        self._count += 1
 
     def close(self) -> None:
-        if len(self._records) != self.ncell:
-            raise ValueError(f"declared ncell={self.ncell} but appended {len(self._records)}")
-        offsets = np.empty(self.ncell, dtype="<i8")
-        pos = PREFIX_BYTES + 8 * self.ncell
-        for i, rec in enumerate(self._records):
-            offsets[i] = pos
-            pos += len(rec)
-        with self.path.open("wb") as fh:
-            fh.write(RESTART_MAGIC)
-            fh.write(struct.pack("<i", RESTART_VERSION))
-            fh.write(self.generic.pack())
-            fh.write(self.restart.pack())
-            fh.write(offsets.tobytes())
-            for rec in self._records:
-                fh.write(rec)
+        if self._count != self.ncell:
+            self.abort()
+            raise ValueError(f"declared ncell={self.ncell} but appended {self._count}")
+        fh = self._open()
+        fh.seek(PREFIX_BYTES)
+        fh.write(self._offsets.tobytes())
+        fh.close()
+        self._fh = None
+        _partial(self.path).replace(self.path)
+
+    def abort(self) -> None:
+        """Discard the partial file. Nothing at `path` is created or changed."""
+        if self._fh is not None:
+            self._fh.close()
+            self._fh = None
+        _partial(self.path).unlink(missing_ok=True)
 
     def __enter__(self) -> RestartWriter:
         return self
@@ -994,3 +1049,145 @@ class RestartWriter:
     def __exit__(self, *exc: object) -> None:
         if not exc or exc[0] is None:
             self.close()
+        else:
+            self.abort()
+
+
+# --------------------------------------------------------------------------------------------
+# Assembly. The global product is built as SHARDS -- each a valid restart file for a contiguous
+# block -- by many tasks at once, then stitched. Stitching needs no decoding at all: a block's
+# records are contiguous bytes from index[first] onwards, so a segment is one byte-range copy plus
+# a rebased slice of its offset table.
+# --------------------------------------------------------------------------------------------
+@dataclass(frozen=True)
+class Segment:
+    """`ncell` consecutive records of an existing restart file, starting at its record `first`.
+
+    A shard is a segment over the whole shard file; a run of cells that passes through unchanged is
+    a segment over the TEMPLATE, which is why pass-through blocks never need a shard written at all.
+    """
+
+    path: Path
+    first: int
+    ncell: int
+
+
+def _same_framing(a: RestartReader, b: RestartReader) -> str | None:
+    """Why two files cannot be stitched together, or None if they can.
+
+    Everything in the prefix except `firstcell` and `ncell` must agree: a shard written against a
+    different template, or under a different configuration, fails here rather than as a restart
+    file whose records the model decodes with the wrong layout.
+    """
+    ga = {**a.generic.__dict__, "firstcell": 0, "ncell": 0}
+    gb = {**b.generic.__dict__, "firstcell": 0, "ncell": 0}
+    if ga != gb:
+        return f"generic header differs: {ga} vs {gb}"
+    if a.restart != b.restart:
+        return f"restart header differs: {a.restart} vs {b.restart}"
+    return None
+
+
+def _copy_range(src: BinaryIO, dst: BinaryIO, offset: int, length: int) -> None:
+    """Copy `length` bytes of `src` from `offset` to the end of `dst`, in-kernel where possible.
+
+    `sendfile` rather than `copy_file_range`: the cluster's Python is built without the latter.
+    Either is only an optimisation, so any failure -- even part-way -- falls back to plain reads
+    from exactly where the kernel stopped, and the bytes come out the same.
+    """
+    dst.flush()
+    done = 0
+    sendfile = getattr(os, "sendfile", None)
+    try:
+        while sendfile is not None and done < length:
+            n = sendfile(dst.fileno(), src.fileno(), offset + done, min(length - done, 1 << 30))
+            if n == 0:
+                raise EOFError(f"source ended {length - done} bytes short of the segment")
+            done += n
+    except OSError:
+        pass
+    # The kernel moved the raw descriptor under the buffered object; re-sync before writing more.
+    dst.seek(0, os.SEEK_END)
+    src.seek(offset + done)
+    while done < length:
+        chunk = src.read(min(length - done, 64 << 20))
+        if not chunk:
+            raise EOFError(f"source ended {length - done} bytes short of the segment")
+        dst.write(chunk)
+        done += len(chunk)
+
+
+def assemble_restart(
+    dest: Path, segments: list[Segment], *, firstcell: int | None = None
+) -> dict[str, Any]:
+    """Stitch segments, in order, into one restart file with its own offset table.
+
+    Byte-identical to appending the same records one by one to a `RestartWriter` whose headers are
+    the first segment's with `ncell` summed -- that equivalence is what the tests pin. `firstcell`
+    defaults to the absolute cell id of the first segment's first record.
+
+    The segments must tile a CONTIGUOUS run of absolute cell ids (a file's `firstcell` plus the
+    record index within it), because `openrestart.c` maps a run's `startgrid` onto the file by
+    `firstcell` alone: a gap or an overlap would load every later cell's state into the wrong cell,
+    silently. That is checked here, not assumed.
+    """
+    dest = Path(dest)
+    if not segments:
+        raise ValueError("nothing to assemble")
+    # One reader per distinct file: a template referenced by a hundred pass-through segments is
+    # opened, and its offset table read, once.
+    cache: dict[Path, RestartReader] = {}
+    for seg in segments:
+        if Path(seg.path) not in cache:
+            cache[Path(seg.path)] = RestartReader(seg.path)
+    readers = [cache[Path(seg.path)] for seg in segments]
+    head = readers[0]
+    expect_cell = head.generic.firstcell + segments[0].first
+    for seg, rd in zip(segments, readers, strict=True):
+        why = _same_framing(head, rd)
+        if why:
+            raise ValueError(f"{seg.path}: cannot be stitched to {segments[0].path}: {why}")
+        if not (seg.first >= 0 and seg.ncell >= 1 and seg.first + seg.ncell <= rd.ncell):
+            raise ValueError(
+                f"{seg.path}: records [{seg.first}, +{seg.ncell}) outside its {rd.ncell}"
+            )
+        at = rd.generic.firstcell + seg.first
+        if at != expect_cell:
+            raise ValueError(
+                f"{seg.path}: starts at cell {at}, expected {expect_cell} (gap/overlap)"
+            )
+        expect_cell += seg.ncell
+
+    total = sum(s.ncell for s in segments)
+    generic = GenericHeader(**{**head.generic.__dict__})
+    generic.ncell = total
+    generic.firstcell = (
+        head.generic.firstcell + segments[0].first if firstcell is None else firstcell
+    )
+    offsets = np.empty(total, dtype="<i8")
+    spans: list[tuple[int, int]] = []
+    pos = PREFIX_BYTES + 8 * total
+    k = 0
+    for seg, rd in zip(segments, readers, strict=True):
+        start, _ = rd.extent(seg.first)
+        _, end = rd.extent(seg.first + seg.ncell - 1)
+        offsets[k : k + seg.ncell] = rd.index[seg.first : seg.first + seg.ncell] - start + pos
+        spans.append((start, end - start))
+        pos += end - start
+        k += seg.ncell
+
+    tmp = _partial(dest)
+    try:
+        with tmp.open("wb") as out:
+            out.write(framing_prefix(generic, head.restart))
+            out.write(offsets.tobytes())
+            for seg, (start, length) in zip(segments, spans, strict=True):
+                with Path(seg.path).open("rb") as src:
+                    _copy_range(src, out, start, length)
+            if out.tell() != pos:
+                raise AssertionError(f"assembled {out.tell()} bytes, expected {pos}")
+        tmp.replace(dest)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    return {"ncell": total, "firstcell": generic.firstcell, "bytes": pos, "segments": len(segments)}
