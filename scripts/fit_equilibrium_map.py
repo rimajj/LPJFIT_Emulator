@@ -87,6 +87,14 @@ Array = npt.NDArray[np.float64]
 IntArray = npt.NDArray[np.int64]
 
 SEALED_EXP = "X-20260923-equilibrium-from-climate"
+# What the reference runs of each corpus ARE, for the manifest's basis. The corpus table does not
+# record the binary or the CO2 setting, so it is written down here -- per version, because a single
+# string stamped into every build would describe pilot-v2-constco2 on a map trained on anything
+# else (the constant-CO2 second seed, a larger corpus). A version with no entry is refused.
+REFERENCE: dict[str, str] = {
+    "pilot-v2-constco2": "LPJmL-FIT 5.6.004 (binary 2026-08-12), 1000-yr single-cell spin-ups, "
+    "npatch 25, tree PFTs only, CO2 constant at 276.59 ppm, end-of-spin-up restart",
+}
 LAT_BANDS: tuple[float, ...] = (-60.0, -45.0, -30.0, -15.0, 0.0, 15.0, 30.0, 45.0, 60.0, 75.0, 90.0)
 QUANTILES: tuple[float, ...] = (0.5, 0.9, 0.99, 1.0)
 
@@ -446,6 +454,11 @@ def main() -> int:  # noqa: PLR0915 -- one linear build, every check reported in
     out = Path(args.out)
     if (out / "manifest.json").exists() and not args.force:
         raise SystemExit(f"{out} already holds a saved map; pass --force to replace it")
+    if args.version not in REFERENCE:
+        raise SystemExit(
+            f"no REFERENCE entry for corpus {args.version!r}: write down what its runs are "
+            "(binary, npatch, CO2) before a map trained on it is saved with a basis"
+        )
     out.mkdir(parents=True, exist_ok=True)
     cfg = paths()
     root = Path(str(cfg["scratch"]["corpus"]))
@@ -549,9 +562,10 @@ def main() -> int:  # noqa: PLR0915 -- one linear build, every check reported in
         "rows": int(x.shape[0]),
         "cells": len(pilot["cells"]),
         "climates_per_cell": n_p,
-        "seeds": 1,
-        "reference": "LPJmL-FIT 5.6.004 (binary 2026-08-12), 1000-yr single-cell spin-ups, "
-        "npatch 25, tree PFTs only, CO2 constant at 276.59 ppm, end-of-spin-up restart",
+        # Counted from the table, not asserted: a two-seed corpus must not be stamped "1".
+        "seeds": int(pilot["frame"]["seed"].n_unique()),
+        "npatch": sorted(int(v) for v in pilot["frame"]["npatch"].unique().to_list()),
+        "reference": REFERENCE[args.version],
         "soil": {"file": str(soil_bin), "adapter": "scripts/screen_d95max.py:soil_columns"},
         "recipe": f"the sealed recipe of {SEALED_EXP} for the 22 scored heads; extra heads dev",
         "code_commit": _git("rev-parse", "HEAD"),
