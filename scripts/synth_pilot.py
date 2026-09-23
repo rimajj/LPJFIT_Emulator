@@ -1032,8 +1032,12 @@ def _decode_one(args: tuple[str, int, str]) -> dict[str, Any]:
     r1 = RestartReader(out)
     y1 = r1.read(0)
     y0 = RestartReader(_input_restart(arm, cell, point)).read(0)
-    row.update({f"y1_{k}": v for k, v in summarise_cell(y1, cell, r1.layout).items()})
-    row.update({f"y0_{k}": v for k, v in summarise_cell(y0, cell, r1.layout).items()})
+    row.update(
+        {f"y1_{k}": v for k, v in summarise_cell(y1, cell, r1.layout).items() if k != "cell"}
+    )
+    row.update(
+        {f"y0_{k}": v for k, v in summarise_cell(y0, cell, r1.layout).items() if k != "cell"}
+    )
     placed, alive = _survivors(y0, y1)
     for t in range(NTREE_TYPES):
         row[f"placed_{t}"] = float(placed[t])
