@@ -42,7 +42,7 @@ Each rung is a pre-registered experiment. Status is updated here when a verdict 
 | **4** | **End-to-end.** Emulated restart → real transient vs real restart → real transient. | the deliverable as a whole | blocked on rung 3's state fidelity |
 | **5** | Does the response survive a **held-out forcing leg**? | the warming claim | **FAILED 2026-09-14 at pre-named outcome (c), 0.0054 vs persistence 0.0337** — the scenario legs cannot train a response. Not a contradiction of rung 1; see below |
 | **6** | Product B, and stage-2 output reconstruction. | product B only | not started |
-| **7** | All 54,020 tree-bearing cells, both scenarios, at acceptance-grade patch count. | acceptance | not started |
+| **7** | **Owner, 2026-09-24:** as good as a rerun, on the 56,986 cells with a stem, 25 patches, CO₂ 276.59, against the STORED spin-up's constant-CO₂ years (no new runs). | acceptance | **FAILS, measured 2026-09-24.** Vegetation carbon (the only per-cell quantity stored): 24.7 % of cells in band vs a rerun's 85.9 % (pilot-trained, D −0.612; trained on the spin-up itself 42.7 %). Full state, pilot: 0.36 % vs 10.35 % (D −0.100, below a neighbour lookup). `X-20260924-spinup-vegc-*`, `-pilot-state-asgood` |
 | **8** | **Can the species mix shift, and can that be learned?** | the synthesiser copying composition | **PASSED, AND RE-PASSED WITH CO₂ PINNED 2026-09-21: 0.4459 vs a bar of 0.3002, 52 % of the attainable 0.8629** (on v1: 0.4256 vs 0.3379). Copying composition is a measured defect, not a free simplification, and not a CO₂ artefact. ⚠ fails 2 of 29 levels, both cold. ⚠ **A model BLIND to the climate change scores 0.3079 and clears that bar by itself** (2026-09-23): only ~+0.138 of the 0.4459 reads the forcing |
 
 ### Rung 0 — format round-trip (line D). PASSED.
@@ -105,46 +105,40 @@ reproduces trait or size distributions at all.
 
 ## Now — the critical path
 
-**Rung 1's pass is the hinge, and it now holds on the equilibrium corpus too.** Whether a warming
-response could be learned at all was the question that could stop this project; where climate and
-place are separable, it can. Rung 5's failure is not a contradiction — the *existing scenario legs*
-cannot train a response, which is why the designed ensemble exists. Rungs 3–4 are blocked on state
-fidelity, not identification. ⚠ **Compute was never the bottleneck — the sessions are.**
+**Owner, 2026-09-24, and it reframes everything below rung 7.** CO₂ fixed at 276.59 ppm. Pass rule:
+**as good as a rerun** of the model, per cell. Acceptance cells: the **56,986** with any stem, 25
+patches. **No new runs**: "there is spinup, ssp370 and ssp126 available already; in the spinup only
+the years until the onset of rising CO₂ should be used; the SSPs only go 100 years, so no
+equilibrium. For now make the emulator work for the spinup with constant CO₂; when that works I
+will give you more data." So the mid tier and the all-cell truth campaign are **PARKED**, not owed.
+Record: `20260924-INT-*`.
 
-**The second seed RAN on 2026-09-15 and discharged all five asks at once** (`pilot-v1-s2`, 600
-spin-ups). **The model's own run-to-run spread does NOT widen under climate perturbation**, so
-**X4 is retired as the WRONG INSTRUMENT, not as a failure** — the 10 % floor dominates 79.6 % of
-cell-quantities, so the conjunctive level statistic has no power and a replacement needs a **new
-estimand**, never a widened floor (a threshold chosen after seeing the values). The transferred band
-was legitimate all along, so nothing scored to date needs recomputing; the 2.7 % soil-carbon offset
-is a **real bias** owed an attribution. `MEMORY.md:perturbed-spread-is-flat`, `abs-floor-measured`,
-`x4-wrong-instrument`, `soilc-offset-is-real`.
+⚠ **What the stored spin-up can test.** Model years 1000–1699 recycle the 1901–1930 climate at
+constant CO₂; per cell it kept **only vegetation carbon** (both seeds, every year) — no restart and
+no traits before 1999. So the all-cell test exists for vegetation carbon only; tree counts and
+traits are tested on the pilot, whose full second seed ran 2026-09-23 (6,000/6,000).
 
-**Product A is learnable from climate + soil alone** (`X-20260923-equilibrium-from-climate`): the
-open question is no longer whether, but the trait gap (rooting depth, wood density) and the 10 % band.
-⚠ **The integrator may now do any line's work directly** (owner, 2026-09-17), so "owner" below is
-who the item belongs to, not who must do it. Record `20260917-INT-*`.
+**Where the emulator stands (2026-09-24), all against the owner's rule:**
+
+| test | emulator | rerun | best lookup |
+|---|---|---|---|
+| vegetation carbon, 56,986 cells, trained on the pilot | 24.7 % (variance expl. 0.926) | 85.9 % | 18.4 % |
+| same, trained on the stored spin-up's own cells | 42.7 % (0.961) | 85.9 % | 33.1 % |
+| full state, 19 quantities at once, pilot 6,000 rows | 0.36 % | 10.35 % | 3.25 % |
+
+It has the broad pattern and misses cell-level precision; even 57,000 training cells leave most cells
+outside 10 % on vegetation carbon. ⚠ The full-state conjunction is failed by the model itself in 90 %
+of rows: it rewards getting every quantity of one forest right at once.
 
 | open, in value order | owner | blocked on |
 |---|---|---|
-| **move the forcing-attributable part** — +0.1967 on the response test, +0.138 on composition (blind 69 %, `X-20260923-pilot-composition-blind-arm`); the blind arm, not the nulls, is the competitor | **X** | nothing |
-| **close the climate-only map's gap**: traits at 0.29–0.60 vs ceilings ~0.9, and 0 % inside 10 % on all 22; a soil ablation is owed | **T** | nothing |
-| **stop `models/synth.py` copying species composition**; it needs its own t0–t4 pass, not just a score | **T** | nothing |
-| a NEW estimand for the emitted restart, replacing X4 | **X** | nothing |
-| one cell, one year, two binaries, byte-compared — the only unproven rung-5 claim | **D** | nothing |
+| **the Product A chain for the spin-up**: held-out predictions for every cell's 1901–1930 climate → a synthesised restart for all 56,986 cells (`synth_global.py`) → the model loads it and stays near the stored equilibrium | T/D | the synthesis branch's review |
+| **cell-level precision**: daily-forcing features and learner capacity, screened on dev folds only (`int/features`), then a sealed confirmation on untouched folds | T | nothing |
+| **a coherent forest, not 19 separate regressions** — the conjunctive test needs every quantity of one row right together | T | the screen's result |
+| synthesised established stems die at 2× the model's rate in year 1 even from a perfect prediction | T | nothing |
+| the emitted-restart test is SEALED (`X-20260924-restart-worst-quantity`); its model arm waits on re-running the synthesiser against the final map | X | the synthesis merge |
 
-**Closed 2026-09-21 — BOTH KILL TESTS RE-PASS ON THE EQUILIBRIUM CORPUS**, so neither was a CO₂
-artefact and the kill test is passed for a STATIONARY target. Response 0.5590 (bar 0.2577),
-composition 0.4459 (bar 0.3002); all fourteen nulls returned their values exactly, each bar
-re-derived from v2's own nulls, so scores and bars compare only within a corpus. ⚠ Blind arm
-unchanged at 64.8 % of the headline; composition loses to no-change at 2 of 29 (cold) levels.
-
-**Closed 2026-09-17/23** (detail in the records): the additive band floor sits in the shared scorer
-at 0.0384 with no default; five verdicts carrying a withdrawn basis were corrected with the seals
-untouched; all 40 ledger rows closed; a sealed experiment can now be abandoned by an appended
-registry row instead of an edit, so the two integrity gates stop contradicting each other.
-
-**Full acceptance (rung 7) has no defensible date**: the conjunctive pass rate is 0.0351 against an
-attainable ceiling of **0.5585, not 1.0**, what closes that gap is unknown, and it needs the mid or
-full corpus. ⚠ **That severity is not the emulator's alone** — one REAL realisation of the model
-passes the same 22-quantity test in only **0.470** of its own 200 cells. `lines/<L>/STATE.md`.
+**Still standing:** both kill tests (rungs 1, 8) with their blind-arm caveats; the equilibrium map
+passes its skill test (0.608 vs a 0.223 bar). The two model builds write byte-identical restarts for
+one cell-year (`20260923-D-the-two-builds-*`). ⚠ A rerun-grade vegetation-carbon map is the next
+milestone the owner's "when that works" can be read against; full-state rerun grade is further.
