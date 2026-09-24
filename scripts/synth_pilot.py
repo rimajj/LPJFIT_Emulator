@@ -36,6 +36,7 @@ attached, the t2 sample is 40 of 200 cells at 3 of 29 climates, and the pilot is
 from __future__ import annotations
 
 import argparse
+import filecmp
 import json
 import multiprocessing as mp
 import re
@@ -621,8 +622,11 @@ def _plan(
     return shares, origin, wanted
 
 
-def _synth_cell(args: tuple[str, int, float, int, list[str]]) -> list[dict[str, Any]]:
-    arm, cell, lat, fold, points = args
+def _synth_cell(args: tuple[str, int, float, int, list[str], list[str]]) -> list[dict[str, Any]]:
+    # `design` is the FULL list of perturbed points, whatever subset `points` is: the seed must
+    # depend on which climate a target is, never on which others are synthesised with it, or an
+    # ablation over a sample draws a different roster from the arm it is compared with.
+    arm, cell, lat, fold, points, design = args
     runs = _runs_with_features()
     preds = load_predictions(arm)
     assert preds is not None
@@ -665,7 +669,7 @@ def _synth_cell(args: tuple[str, int, float, int, list[str]]) -> list[dict[str, 
                 reader.layout,
                 cell=cell,
                 template_cell=cell,
-                seed=20260923 + cell * 100 + points.index(point),
+                seed=20260923 + cell * 100 + design.index(point),
                 type_shares=shares,
                 allowed_types=allowed,
                 climbuf=None if arm.endswith("-cbcopy") else buf,
@@ -767,14 +771,15 @@ def stage_synth(arm: str, workers: int, limit_cells: int | None) -> int:
         print(f"arm {arm}: prediction source absent ({'/'.join(MAP_OOF)}); nothing to do")
         return 3
     cells = cell_table().sort("cell")
-    points = [p for p in points_of() if p != CONTROL]
+    design = [p for p in points_of() if p != CONTROL]
+    points = list(design)
     if arm in ABLATIONS:
         cells = cells.filter(pl.col("cell").is_in([c for c, _ in _t2_sample()]))
         points = list(T2_POINTS)
     if limit_cells:
         cells = cells.head(limit_cells)
     jobs = [
-        (arm, int(c), float(la), int(fo), points)
+        (arm, int(c), float(la), int(fo), points, design)
         for c, la, fo in zip(cells["cell"], cells["lat"], cells["fold"], strict=True)
     ]
     t0 = time.time()
@@ -897,8 +902,14 @@ def from_restart_config(
         if dest.is_symlink() or dest.exists():
             dest.unlink()
         dest.symlink_to(restart.resolve())
-    elif not dest.exists() or dest.stat().st_size != restart.stat().st_size:
-        dest.write_bytes(restart.read_bytes())
+    else:
+        # Compared by CONTENT, never by size: a re-synthesised restart (another seed, another
+        # buffer) is usually the same size as the one it replaces, and a size check then leaves
+        # the model reading the stale file while the decode reads the new one.
+        if dest.is_symlink():
+            dest.unlink()
+        if not (dest.exists() and filecmp.cmp(dest, restart, shallow=False)):
+            dest.write_bytes(restart.read_bytes())
     cfg = run_dir / f"lpjml_{tag}.js"
     cfg.write_text(head + block, encoding="utf-8")
     return cfg
@@ -1031,22 +1042,35 @@ def _survivors(y0: dict[str, Any], y1: dict[str, Any]) -> tuple[Array, Array]:
     return placed, alive
 
 
+def _t2_run(arm: str, cell: int, point: str) -> tuple[Path, bool, float | None, Path]:
+    """A t2 member's run dir, whether its log carries the model's own completion line, the wall
+    time the model reports, and the INPUT restart the model actually read -- the copy in the run
+    dir, not the synthesis output, which a later re-synthesis may have replaced."""
+    rdir = _scratch("runs") / "synth-pilot-t2" / arm / f"c{cell}" / point
+    log = rdir / f"lpjml.{arm}-c{cell}-{point}.log"
+    text = log.read_text(errors="replace") if log.exists() else ""
+    success = bool(re.search(r"^lpjml successfully terminated", text, flags=re.M))
+    m = re.search(r"^Total wall clock time:\s+([0-9.]+)\s+sec", text, flags=re.M)
+    return (
+        rdir,
+        success,
+        (float(m.group(1)) if m else None),
+        (rdir / "restart" / _input_restart(arm, cell, point).name),
+    )
+
+
 def _decode_one(args: tuple[str, int, str]) -> dict[str, Any]:
     arm, cell, point = args
-    rdir = _scratch("runs") / "synth-pilot-t2" / arm / f"c{cell}" / point
-    name = f"{arm}-c{cell}-{point}"
-    log = rdir / f"lpjml.{name}.log"
+    rdir, success, seconds, read_in = _t2_run(arm, cell, point)
     row: dict[str, Any] = {"arm": arm, "cell": cell, "point": point}
-    text = log.read_text(errors="replace") if log.exists() else ""
-    row["success"] = bool(re.search(r"^lpjml successfully terminated", text, flags=re.M))
-    m = re.search(r"^Total wall clock time:\s+([0-9.]+)\s+sec", text, flags=re.M)
-    row["log_seconds"] = float(m.group(1)) if m else None
+    row["success"] = success
+    row["log_seconds"] = seconds
     out = rdir / "restart" / f"restart_1970_t2-{arm}.lpj"
     if not (row["success"] and out.exists()):
         return row
     r1 = RestartReader(out)
     y1 = r1.read(0)
-    y0 = RestartReader(_input_restart(arm, cell, point)).read(0)
+    y0 = RestartReader(read_in).read(0)
     row.update(
         {f"y1_{k}": v for k, v in summarise_cell(y1, cell, r1.layout).items() if k != "cell"}
     )
@@ -1063,12 +1087,12 @@ def _decode_one(args: tuple[str, int, str]) -> dict[str, Any]:
 def _stem_fates(args: tuple[str, int, str]) -> list[dict[str, Any]]:
     """Every stem placed at year 0, its year-0 fields, and whether it is alive at year 1."""
     arm, cell, point = args
-    rdir = _scratch("runs") / "synth-pilot-t2" / arm / f"c{cell}" / point
+    rdir, success, _, read_in = _t2_run(arm, cell, point)
     out = rdir / "restart" / f"restart_1970_t2-{arm}.lpj"
-    if not out.exists():
+    if not (success and out.exists()):
         return []
     y1 = RestartReader(out).read(0)
-    y0 = RestartReader(_input_restart(arm, cell, point)).read(0)
+    y0 = RestartReader(read_in).read(0)
     rows: list[dict[str, Any]] = []
     for p0, p1 in zip(y0["stands"][0]["patches"], y1["stands"][0]["patches"], strict=True):
         s0, s1 = trees_of(p0["pftlist"]), trees_of(p1["pftlist"])
