@@ -545,7 +545,7 @@ def spread_across_climates(
     out = np.full_like(raw, floor)
     for j in range(raw.shape[1]):
         others = np.delete(raw, j, axis=1)
-        have = np.isfinite(others).any(axis=1)
+        have = np.asarray(np.isfinite(others).any(axis=1), dtype=np.bool_)
         # nanmedian warns on an all-NaN slice; those are exactly the slices `have` excludes, so
         # they are filled with a dummy value and then overwritten by the floor.
         med = np.nanmedian(np.where(have[:, None, :], others, 0.0), axis=1)
