@@ -11,6 +11,7 @@
     scripts/synth_global.py run      --out <file> --predictions <parquet> ...   # everything
     scripts/synth_global.py farm     --out <file> --ntasks 4    # prints the multi-job submission
     scripts/synth_global.py t0       --out <file> [--first-cell F --ncell N]   # the scale proof
+    scripts/synth_global.py census   --out <parquet> [--template <file>]   # stems per template cell
 
 Every command after `plan` finds the plan through `--out` (its work directory is `<out>.work/`
 unless `--work-dir` says otherwise) or through `--work-dir` alone.
@@ -412,6 +413,84 @@ def load_predictions(
 
 
 # --------------------------------------------------------------------------------------------
+# The template census: which cells hold a stem. Only a decode of every record can say, so it is
+# its own pass, run once per template; the plan reads it to say EXACTLY how many cells it will
+# synthesise, and the cost projection to price only those.
+# --------------------------------------------------------------------------------------------
+def census_block(job: dict[str, Any]) -> dict[str, Any]:
+    reader = RestartReader(Path(job["template"]))
+    lay = reader.layout
+    out: dict[str, Any] = {"first": job["first"], "cell": [], "skip": [], "stems": [], "bytes": []}
+    with reader:
+        for cell in range(job["first"], job["first"] + job["ncell"]):
+            blob = reader.cell_bytes(cell)
+            rec = read_cell(blob, lay)
+            skip = bool(rec["skip"])
+            out["cell"].append(cell)
+            out["skip"].append(skip)
+            out["stems"].append(0 if skip else int(type_ladder(rec).size))
+            out["bytes"].append(len(blob))
+    out["maxrss_mb"] = _maxrss_mb()
+    return out
+
+
+def cmd_census(template: Path, dest: Path, workers: int, block_size: int) -> dict[str, Any]:
+    """Tree stems per template cell (`type_ladder`, the synthesiser's own test), to a parquet."""
+    wall0 = time.perf_counter()
+    reader = RestartReader(template)
+    jobs = [
+        {"template": str(template), "first": a, "ncell": min(block_size, reader.ncell - a)}
+        for a in range(0, reader.ncell, block_size)
+    ]
+    parts = sorted(_farm(census_block, jobs, workers), key=lambda r: int(r["first"]))
+    df = pl.DataFrame(
+        {k: [v for r in parts for v in r[k]] for k in ("cell", "skip", "stems", "bytes")},
+        schema={"cell": pl.Int64, "skip": pl.Boolean, "stems": pl.Int64, "bytes": pl.Int64},
+    )
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(dest.name + ".partial")
+    df.write_parquet(tmp)
+    tmp.replace(dest)
+    info = {
+        "template": str(template),
+        "template_ncell": reader.ncell,
+        "template_bytes": reader.filesize,
+        "skip": int(df["skip"].sum()),
+        "any_stem": int((df["stems"] > 0).sum()),
+        "no_stem": int(((df["stems"] == 0) & ~df["skip"]).sum()),
+        "stems_total": int(df["stems"].sum()),
+        "wall_s": time.perf_counter() - wall0,
+        "workers": workers,
+        "max_worker_rss_mb": max(float(r["maxrss_mb"]) for r in parts),
+    }
+    _write_json(dest.with_suffix(".json"), info)
+    print(json.dumps(info, indent=1), flush=True)
+    return info
+
+
+def census_counts(census: Path, reader: RestartReader, predicted: set[int]) -> dict[str, Any]:
+    """What a census says about this plan: how many predicted cells hold a stem (and so will be
+    synthesised under `--treeless-template pass`), and how many do not."""
+    df = pl.read_parquet(census)
+    if df.height != reader.ncell or df["cell"].to_list() != list(range(reader.ncell)):
+        raise ValueError(f"{census}: not a census of this template ({df.height} rows)")
+    stems = df["stems"].to_numpy()
+    skip = df["skip"].to_numpy()
+    pred = np.zeros(reader.ncell, dtype=bool)
+    pred[sorted(predicted)] = True
+    with_stem = pred & (stems > 0)
+    return {
+        "path": str(census),
+        "sha256": _sha256(census),
+        "template_any_stem": int((stems > 0).sum()),
+        "template_skip": int(skip.sum()),
+        "predicted_with_stem": int(with_stem.sum()),
+        "predicted_without_stem": int((pred & (stems == 0) & ~skip).sum()),
+        "any_stem_without_prediction": int(((stems > 0) & ~pred).sum()),
+    }
+
+
+# --------------------------------------------------------------------------------------------
 # The plan: every block, fixed before any work, and hashed so a shard can prove which plan it
 # belongs to.
 # --------------------------------------------------------------------------------------------
@@ -453,6 +532,10 @@ def make_plan(args: argparse.Namespace) -> tuple[dict[str, Any], dict[int, dict[
         )
         pred_info["only"] = [lo, hi]
 
+    census_info: dict[str, Any] | None = None
+    if getattr(args, "census", None):
+        census_info = census_counts(Path(args.census), reader, set(preds))
+
     blocks = []
     for k, a in enumerate(range(first, first + ncell, args.block_size)):
         n = min(args.block_size, first + ncell - a)
@@ -480,6 +563,7 @@ def make_plan(args: argparse.Namespace) -> tuple[dict[str, Any], dict[int, dict[
         "synth_kwargs": synth_kwargs,
         "on_error": args.on_error,
         "treeless_template": args.treeless_template,
+        "census": census_info,
         "blocks": blocks,
     }
     plan["plan_sha256"] = hashlib.sha256(json.dumps(plan, sort_keys=True).encode()).hexdigest()
@@ -1160,7 +1244,14 @@ def _project(
         Path(plan["predictions"]["path"]), 0, tmpl.ncell, tuple(plan["match_traits"])
     )
     npatch = 25  # every leg of the ground truth; the per-cell reports carry the real counts
-    per_patch = np.array([all_preds[c]["stems_per_patch"] for c in sorted(all_preds)])
+    priced = sorted(all_preds)
+    exact = False
+    if plan.get("census") and plan["treeless_template"] == "pass":
+        # The census says which predicted cells will really be synthesised: those with a stem.
+        stems_t = pl.read_parquet(plan["census"]["path"])["stems"].to_numpy()
+        priced = [c for c in priced if stems_t[c] > 0]
+        exact = True
+    per_patch = np.array([all_preds[c]["stems_per_patch"] for c in priced])
     stems_all = np.maximum(per_patch, 0.0) * npatch
     x = synth["stems_placed"].to_numpy().astype(np.float64)
     y = synth["cpu_s"].to_numpy().astype(np.float64)
@@ -1178,7 +1269,12 @@ def _project(
         "basis": (
             f"{synth.height} cells synthesised in this run; CPU regressed linearly on stems "
             f"placed, floored at the cheapest observed cell, summed over the {per_patch.size} "
-            f"cells the prediction file covers (of {tmpl.ncell}) at their PREDICTED stem count "
+            + (
+                "predicted cells whose template holds a stem (from the census) "
+                if exact
+                else "cells the prediction file covers, template stems unknown (an upper bound) "
+            )
+            + f"(of {tmpl.ncell}) at their PREDICTED stem count "
             f"x {npatch} patches; one donor pool per block of {plan['block_size']} ({nblock} "
             "blocks); pass-through cells cost ~nothing (a template byte-range copy); CPU only -- "
             "shard writing, assembly and verification are I/O and are measured separately"
@@ -1187,6 +1283,7 @@ def _project(
         "stems_sampled": {"min": float(x.min()), "max": float(x.max())},
         "stems_globe": {"median": float(np.median(stems_all)), "max": float(stems_all.max())},
         "cells_to_synthesise": int(per_patch.size),
+        "cells_to_synthesise_exact": exact,
         "cpu_hours_synthesis": cpu_cells / 3600.0,
         "cpu_hours_naive_mean_times_count": float(np.mean(y)) * per_patch.size / 3600.0,
         "cpu_hours_donor_pools": cpu_pools / 3600.0,
@@ -1284,6 +1381,8 @@ def cmd_plan(args: argparse.Namespace, work: Path) -> dict[str, Any]:
         if old["plan_sha256"] != plan["plan_sha256"] and any((work / "shards").glob("*.json")):
             print("  NOTE: replacing a plan whose shards exist; they will be rewritten", flush=True)
     _write_json(_plan_path(work), plan)
+    if plan["census"]:
+        print(f"  census: {json.dumps(plan['census'])}", flush=True)
     n_shard = sum(1 for b in plan["blocks"] if b["kind"] == "shard")
     print(
         f"plan: {plan['ncell']} cells from {plan['first_cell']} in {len(plan['blocks'])} blocks "
@@ -1406,6 +1505,9 @@ def build_parser() -> argparse.ArgumentParser:  # noqa: PLR0915 -- one flat list
             "with no admissible tree type to copy) or synthesise it anyway",
         )
         p.add_argument("--skip-disk-check", action="store_true")
+        p.add_argument(
+            "--census", default=None, help="the template's census parquet (see `census`)"
+        )
 
     for name in ("plan", "run"):
         p = sub.add_parser(name)
@@ -1437,6 +1539,11 @@ def build_parser() -> argparse.ArgumentParser:  # noqa: PLR0915 -- one flat list
     p.add_argument("--workers", type=int, default=64)
     p.add_argument("--time", default="04:00:00")
     p.add_argument("--tag-prefix", default="D-glb-farm", help="each job's tag is <prefix>-t<i>")
+    p = sub.add_parser("census")
+    p.add_argument("--out", required=True, help="the parquet to write (cell, skip, stems, bytes)")
+    p.add_argument("--template", default=None)
+    p.add_argument("--workers", type=int, default=_allocated_cpus())
+    p.add_argument("--block-size", type=int, default=DEFAULT_BLOCK)
     p = sub.add_parser("t0")
     p.add_argument("--out", required=True)
     p.add_argument("--template", default=None)
@@ -1447,11 +1554,15 @@ def build_parser() -> argparse.ArgumentParser:  # noqa: PLR0915 -- one flat list
     return ap
 
 
-def main(argv: list[str] | None = None) -> int:  # noqa: PLR0911 -- one exit per command
+def main(argv: list[str] | None = None) -> int:  # noqa: PLR0911, PLR0912 -- one exit per command
     args = build_parser().parse_args(argv)
 
     if args.cmd == "t0":
         return 0 if cmd_t0(args)["verdict"] == "BYTE-IDENTICAL" else 1
+    if args.cmd == "census":
+        template = Path(args.template) if args.template else _template_default()
+        cmd_census(template, Path(args.out), args.workers, args.block_size)
+        return 0
     work = _resolve_work(args)
     if args.cmd == "plan":
         cmd_plan(args, work)

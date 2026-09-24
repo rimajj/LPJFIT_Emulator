@@ -496,3 +496,39 @@ def test_read_cell_of_the_fixture_is_sane(world: dict[str, Path]) -> None:
         RestartReader(world["template"]).cell_bytes(15), RestartReader(world["template"]).layout
     )
     assert rec["skip"] == 0 and len(rec["stands"][0]["patches"]) == 2
+
+
+def test_the_census_counts_stems_and_makes_the_plan_exact(
+    world: dict[str, Path], synth_run: Run
+) -> None:
+    """The census is the synthesiser's own stem test over every template record; with it the plan
+    says, before any work, exactly how many cells it will synthesise -- the count verify sees."""
+    census = world["root"] / "census" / "census.parquet"
+    args = ["census", "--template", str(world["template"]), "--out", str(census)]
+    assert sg.main([*args, "--workers", "1", "--block-size", "7"]) == 0
+    df = pl.read_parquet(census)
+    assert df["cell"].to_list() == list(range(NCELL))
+    assert set(df.filter(pl.col("skip"))["cell"].to_list()) == SKIP
+    no_stem = df.filter(~pl.col("skip") & (pl.col("stems") == 0))["cell"].to_list()
+    assert set(no_stem) == {TREELESS_TEMPLATE, TREELESS_BOTH}
+    assert set(df.filter(pl.col("stems") > 0)["stems"].to_list()) == {12}  # 2 patches x 6
+    info = json.loads(census.with_suffix(".json").read_text())
+    assert info["any_stem"] == NCELL - len(SKIP) - 2
+
+    run = Run(world["root"], "with-census")
+    plan_args = _plan_args(world, run, "--only", "10:30", "--census", str(census))
+    assert sg.main(["run", *plan_args, "--workers", "1"]) == 0
+    plan = json.loads((run.work / "plan.json").read_text())
+    assert plan["census"]["predicted_with_stem"] == len(CHANGED)
+    assert plan["census"]["predicted_without_stem"] == 2
+    verify = json.loads((run.work / "verify.json").read_text())
+    assert verify["synthesised_checked"] == len(CHANGED)
+    proj = json.loads((run.work / "summary.json").read_text())["projection"]
+    assert proj["cells_to_synthesise"] == len(CHANGED) and proj["cells_to_synthesise_exact"]
+    assert run.out.read_bytes() == synth_run.out.read_bytes()  # the census changes no byte
+    other = world["root"] / "census" / "three_cells.lpj"
+    with RestartWriter(other, GENERIC, RESTART, ncell=3) as w:
+        for c in range(3):
+            w.append(_record(c))
+    with pytest.raises(ValueError, match="not a census of this template"):
+        sg.census_counts(census, RestartReader(other), set())
