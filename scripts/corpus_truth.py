@@ -234,6 +234,12 @@ def check_co2_file(dest: Path, ppm: float) -> dict[str, Any]:
         raise AssertionError(f"{dest}: CO2 years are not consecutive")
     if len(values) != 1 or abs(next(iter(values)) - ppm) > 0.005:
         raise AssertionError(f"{dest}: CO2 values {sorted(values)[:3]} are not the constant {ppm}")
+    clamp = float(_load("corpus_spinup_config").CO2_PREINDUSTRIAL_PPM)
+    if abs(ppm - clamp) > 0.005 and years[0] > FIRST_MODEL_YEAR:
+        raise AssertionError(
+            f"{dest}: a {ppm} ppm file starting in {years[0]} leaves model years "
+            f"{FIRST_MODEL_YEAR}-{years[0] - 1} at the model's built-in {clamp} ppm (getco2.c:47)"
+        )
     return {
         "file": str(dest),
         "sha256": hashlib.sha256(dest.read_bytes()).hexdigest(),

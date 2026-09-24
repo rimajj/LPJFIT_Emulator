@@ -143,6 +143,14 @@ def test_check_co2_file(tmp_path: Path) -> None:
     bad.write_text("1700  276.59\n1701  300.00\n")
     with pytest.raises(AssertionError, match="constant"):
         m.check_co2_file(bad, 276.59)
+    # Another level from 1700 is a STEP at model year 1700, not a constant: refused.
+    step = tmp_path / "step.txt"
+    step.write_text("".join(f"{y}  409.63\n" for y in range(1700, 2101)))
+    with pytest.raises(AssertionError, match="built-in"):
+        m.check_co2_file(step, 409.63)
+    ok = tmp_path / "ok.txt"
+    ok.write_text("".join(f"{y}  409.63\n" for y in range(1000, 2101)))
+    assert m.check_co2_file(ok, 409.63)["first_year"] == 1000
 
 
 # ------------------------------------------------------------------------------------------------
