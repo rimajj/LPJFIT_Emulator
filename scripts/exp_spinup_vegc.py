@@ -281,7 +281,8 @@ def main() -> int:
         "rerun_skill_log1p_seed2_vs_seed1": rerun_skill,
         "band_is_floor_share": sc["band_is_floor"],
         "features": list(FEATURES),
-        "arms": arms,
+        # Not "arms": append_result_block writes that key with the bare decision values.
+        "arm_details": arms,
     }
     for n, a in arms.items():
         print(f"  {n:20s} D {a['D']:+.6f}  frac {a['frac']:.4f}  skill {a['skill_log1p']:+.4f}")
@@ -294,7 +295,8 @@ def main() -> int:
             if args.threshold is not None and arms["model"]["D"] >= args.threshold
             else "fail",
         }
-        nulls = json.loads((out / "nulls.json").read_text())["arms"]
+        prior = json.loads((out / "nulls.json").read_text())
+        nulls = prior.get("arm_details", prior["arms"])
         report.update(
             append_result_block(
                 statistic=STATISTIC,
