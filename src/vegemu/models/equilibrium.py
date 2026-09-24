@@ -65,6 +65,16 @@ THE OUT-OF-FOLD INTERFACE. `scripts/fit_equilibrium_map.py` writes `oof_pilot.pa
 with `<head>` running over `HEADS`, in that order. The per-leg files `pred_<leg>.parquet` carry
 `cell, lon, lat, pred_treeless, pred_<head>...` plus three extrapolation flags, `env_nn_dist`,
 `env_nn_dist_analogue` and `env_n_outside`, documented in that script.
+
+THE PER-FOLD MAPS, and why a global score must use them. The final map is fitted on all 200 pilot
+cells, and their 15-degree tiles cover every one of the 56,986 tree-bearing land cells. So a
+final-map prediction anywhere in the forest comes from a model that saw a training cell in that
+tile -- not the held-out-tile setting the sealed 0.607582 was measured in, and an easier question.
+`fit_fold_maps` keeps the five models behind the out-of-fold predictions (a fold map predicts its
+held-out rows bit-identically to `fit_out_of_fold`), and `HeldOutMaps` predicts each row with the
+map that never saw its tile. They are saved under `<map>/folds/`; `pred_<leg>_heldout.parquet` is
+the held-out counterpart of each leg file, with `tile`, `fold` (-1: no pilot cell in that tile, so
+the final map, which never saw it either) and `raw_<head>` besides `pred_<head>`.
 """
 
 from __future__ import annotations
@@ -86,11 +96,13 @@ import polars as pl
 from lightgbm import LGBMRegressor
 
 from vegemu.corpus.climate import CLIMATE_FEATURES
-from vegemu.score import SCORED_CONJUNCTIVE, TRAITS_SCORED
+from vegemu.score import SCORED_CONJUNCTIVE, TRAITS_SCORED, spatial_blocks
 
 Array = npt.NDArray[np.float64]
+IntArray = npt.NDArray[np.int64]
 
 FORMAT = "vegemu-equilibrium-map/1"
+FOLDS_FORMAT = "vegemu-equilibrium-map-folds/1"
 
 # The five soil columns the sealed experiment joined by cell id from the model's own soil input.
 SOIL_FEATURES: tuple[str, ...] = ("soil_code", "soil_awc", "soil_w_avail", "soil_sand", "soil_clay")
@@ -586,4 +598,156 @@ class EquilibriumMap:
             stats=manifest["feature_stats"],
             n_train=int(manifest["n_train_rows"]),
             text_roundtrip_max_abs=float(manifest["text_roundtrip_max_abs"]),
+        )
+
+
+# ------------------------------------------------------------------------------------------------
+# The per-fold maps: predictions at places whose whole tile the predicting model never saw.
+# ------------------------------------------------------------------------------------------------
+def fit_fold_maps(
+    x: Array,
+    y: Array,
+    row_folds: IntArray,
+    *,
+    heads: Sequence[str] = HEADS,
+    params: dict[str, object] | None = None,
+    workers: int = 1,
+    features: Sequence[str] = FEATURES,
+) -> dict[int, EquilibriumMap]:
+    """One map per fold, fitted on the OTHER folds' rows: the models behind `fit_out_of_fold`, kept.
+
+    Each head sees the same rows, in the same order, under the same parameters as that fold's fit
+    in `fit_out_of_fold`, so a fold map's prediction of its held-out rows IS the out-of-fold
+    prediction, bit for bit (a test pins it; the build asserts it on the pilot). Each map's treeless
+    threshold comes from its own training rows, exactly as `oof_pilot.parquet`'s per-fold one does.
+    """
+    maps: dict[int, EquilibriumMap] = {}
+    for f in np.unique(row_folds):
+        train: npt.NDArray[np.bool_] = np.asarray(row_folds != f)
+        em = EquilibriumMap(
+            heads=tuple(heads),
+            features=tuple(features),
+            params=dict(params if params is not None else PARAMS),
+        )
+        maps[int(f)] = em.fit(x[train], y[train], workers=workers)
+    return maps
+
+
+def tile_folds(lon: Array, lat: Array, folds: IntArray, degrees: float) -> dict[int, int]:
+    """Tile id -> the fold that held it out, from the training cells' coordinates and folds."""
+    out: dict[int, int] = {}
+    for t, f in zip(spatial_blocks(lon, lat, degrees).tolist(), folds.tolist(), strict=True):
+        assert out.setdefault(int(t), int(f)) == int(f), f"tile {t} is split across folds"
+    return out
+
+
+@dataclass
+class HeldOutMaps:
+    """Predict each row with the fold map that held out its tile; the final map where none did.
+
+    A row whose tile holds no training cell was held out by every map, the final one included, so
+    the final map predicts it and its `fold` is -1. Post-processing runs per map, under that map's
+    own treeless threshold, as the out-of-fold file's does.
+    """
+
+    folds: dict[int, EquilibriumMap]
+    tile_fold: dict[int, int]
+    final: EquilibriumMap
+    degrees: float = 15.0
+    rule: dict[str, object] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        for f, em in self.folds.items():
+            assert em.heads == self.final.heads, f"fold {f} map has other heads than the final map"
+            assert em.features == self.final.features, f"fold {f} map has other features"
+        missing = set(self.tile_fold.values()) - set(self.folds)
+        assert not missing, f"tiles are assigned to folds with no map: {sorted(missing)}"
+
+    def fold_of(self, lon: Array, lat: Array) -> IntArray:
+        tiles = spatial_blocks(
+            np.asarray(lon, np.float64), np.asarray(lat, np.float64), self.degrees
+        )
+        return np.array([self.tile_fold.get(int(t), -1) for t in tiles.tolist()], dtype=np.int64)
+
+    def _map(self, f: int) -> EquilibriumMap:
+        return self.final if f < 0 else self.folds[f]
+
+    def predict_raw(self, x: Array, lon: Array, lat: Array) -> tuple[Array, IntArray]:
+        """Natural scale, inverse transform only, and the fold whose map made each row."""
+        fold = self.fold_of(lon, lat)
+        out = np.full((x.shape[0], len(self.final.heads)), np.nan)
+        for f in np.unique(fold).tolist():
+            m = fold == f
+            out[m] = self._map(int(f)).predict_raw(x[m])
+        return out, fold
+
+    def predict(
+        self, x: Array, lon: Array, lat: Array
+    ) -> tuple[Array, Array, IntArray, dict[int, PostReport]]:
+        """`(pred, raw, fold, reports)`: post-processed, raw, which map, what each map changed."""
+        raw, fold = self.predict_raw(x, lon, lat)
+        pred = np.full_like(raw, np.nan)
+        reports: dict[int, PostReport] = {}
+        for f in np.unique(fold).tolist():
+            m = fold == f
+            em = self._map(int(f))
+            pred[m], reports[int(f)] = postprocess(raw[m], em.heads, em.treeless_below)
+        return pred, raw, fold, reports
+
+    def save(self, map_dir: Path, *, basis: dict[str, object]) -> Path:
+        """Each fold map under `<map_dir>/folds/fold<k>/`, and `folds/folds.json` binding them.
+
+        The index records the sha256 of the FINAL map's manifest, which must already be saved: a
+        later rebuild of the final map alone would leave fold maps from another build beside it,
+        and `load` refuses that pairing.
+        """
+        map_dir = Path(map_dir)
+        root = map_dir / "folds"
+        entries: dict[str, dict[str, object]] = {}
+        for f, em in sorted(self.folds.items()):
+            tiles = sorted(t for t, g in self.tile_fold.items() if g == f)
+            held = {"held_out_fold": f, "held_out_tiles": tiles, "degrees": self.degrees}
+            manifest = em.save(root / f"fold{f}", basis={**basis, **held})
+            entries[str(f)] = {
+                "dir": f"fold{f}",
+                "manifest_sha256": _sha256(manifest),
+                "n_train_rows": em.n_train,
+                "n_held_out_tiles": len(tiles),
+            }
+        index = {
+            "format": FOLDS_FORMAT,
+            "degrees": self.degrees,
+            "rule": self.rule,
+            "tile_fold": {str(t): g for t, g in sorted(self.tile_fold.items())},
+            "unassigned_tile": "fold -1: no training cell there, so predicted by the final map",
+            "folds": entries,
+            "final_manifest_sha256": _sha256(map_dir / "manifest.json"),
+        }
+        path = root / "folds.json"
+        path.write_text(json.dumps(index, indent=2), encoding="utf-8")
+        return path
+
+    @classmethod
+    def load(cls, map_dir: Path) -> HeldOutMaps:
+        map_dir = Path(map_dir)
+        index = json.loads((map_dir / "folds" / "folds.json").read_text(encoding="utf-8"))
+        if index.get("format") != FOLDS_FORMAT:
+            raise ValueError(f"not a {FOLDS_FORMAT} index: {index.get('format')!r}")
+        if _sha256(map_dir / "manifest.json") != index["final_manifest_sha256"]:
+            raise ValueError(
+                f"{map_dir}/manifest.json is not the final map these fold maps were built with; "
+                "refusing to pair them"
+            )
+        folds: dict[int, EquilibriumMap] = {}
+        for key, entry in index["folds"].items():
+            fold_dir = map_dir / "folds" / str(entry["dir"])
+            if _sha256(fold_dir / "manifest.json") != entry["manifest_sha256"]:
+                raise ValueError(f"{fold_dir}/manifest.json does not match folds.json; refusing")
+            folds[int(key)] = EquilibriumMap.load(fold_dir)
+        return cls(
+            folds=folds,
+            tile_fold={int(t): int(g) for t, g in index["tile_fold"].items()},
+            final=EquilibriumMap.load(map_dir),
+            degrees=float(index["degrees"]),
+            rule=dict(index["rule"]),
         )

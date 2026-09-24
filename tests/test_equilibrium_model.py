@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import diag_equilibrium_map as diag
 import exp_equilibrium_map as sealed
 from exp_model_pilot_response import PARAMS as SEALED_PARAMS
-from fit_equilibrium_map import nn_rms, outside
+from fit_equilibrium_map import nn_rms, outside, prediction_frame
 from vegemu.corpus.state import STATE_COLUMNS
 from vegemu.models.equilibrium import (
     FEATURES,
@@ -35,14 +35,17 @@ from vegemu.models.equilibrium import (
     SHARE_HEADS,
     TREED_HEADS,
     EquilibriumMap,
+    HeldOutMaps,
     feature_matrix,
+    fit_fold_maps,
     fit_out_of_fold,
     forward,
     postprocess,
     targets_from_frame,
+    tile_folds,
     treeless_threshold,
 )
-from vegemu.score import SCORED_CONJUNCTIVE
+from vegemu.score import SCORED_CONJUNCTIVE, blocked_spatial_folds, spatial_blocks
 
 SMALL = {**PARAMS, "n_estimators": 15, "min_child_samples": 5}
 SUBSET = ("stems_per_patch", "agb", "height_p10", "height_p50", "height_p90", *SHARE_HEADS)
@@ -183,6 +186,86 @@ def test_a_saved_map_loads_back_to_identical_predictions(tmp_path: Path) -> None
     head.write_text(head.read_text() + "\n", encoding="utf-8")
     with pytest.raises(ValueError, match="sha256"):
         EquilibriumMap.load(tmp_path)
+
+
+def test_a_fold_map_predicts_its_held_out_rows_exactly_as_the_out_of_fold_fit() -> None:
+    x, y = _problem()
+    folds = np.arange(x.shape[0]) % 4
+    oof = fit_out_of_fold(x, y, folds, heads=SUBSET, params=SMALL)
+    maps = fit_fold_maps(x, y, folds, heads=SUBSET, params=SMALL)
+    assert sorted(maps) == [0, 1, 2, 3]
+    for f, em in maps.items():
+        te = folds == f
+        np.testing.assert_array_equal(em.predict_fitted_scale(x[te]), oof[te])
+        assert em.n_train == int((~te).sum())
+        stems = y[:, SUBSET.index("stems_per_patch")]
+        assert em.treeless_below == treeless_threshold(stems[~te])  # its OWN training rows
+
+
+def test_held_out_maps_use_the_map_that_never_saw_the_tile(tmp_path: Path) -> None:
+    x, y = _problem()
+    rng = np.random.default_rng(5)
+    # 24 cells of 10 rows each, scattered over 15-degree tiles; folds dealt per tile.
+    cell_lon = rng.uniform(-170, 170, 24)
+    cell_lat = rng.uniform(-50, 70, 24)
+    cell_fold = blocked_spatial_folds(cell_lon, cell_lat, k=3, degrees=15.0, seed=42)
+    lon, lat, folds = (np.repeat(v, 10) for v in (cell_lon, cell_lat, cell_fold))
+    tf = tile_folds(cell_lon, cell_lat, cell_fold, 15.0)
+    final = EquilibriumMap(heads=SUBSET, params=SMALL).fit(x, y)
+    held = HeldOutMaps(
+        folds=fit_fold_maps(x, y, folds, heads=SUBSET, params=SMALL), tile_fold=tf, final=final
+    )
+    raw, fold = held.predict_raw(x, lon, lat)
+    np.testing.assert_array_equal(fold, folds)
+    for f in np.unique(folds):
+        te = folds == f
+        np.testing.assert_array_equal(raw[te], held.folds[int(f)].predict_raw(x[te]))
+    # A place in a tile no training cell was in: fold -1, the final map.
+    far_lon, far_lat = np.array([179.9]), np.array([-89.9])
+    assert int(spatial_blocks(far_lon, far_lat, 15.0)[0]) not in tf
+    r1, f1 = held.predict_raw(x[:1], far_lon, far_lat)
+    assert f1.tolist() == [-1]
+    np.testing.assert_array_equal(r1, final.predict_raw(x[:1]))
+
+    final.save(tmp_path, basis={"what": "synthetic"})
+    held.save(tmp_path, basis={"what": "synthetic"})
+    back = HeldOutMaps.load(tmp_path)
+    pred_a, raw_a, fold_a, _ = held.predict(x, lon, lat)
+    pred_b, raw_b, fold_b, _ = back.predict(x, lon, lat)
+    np.testing.assert_array_equal(raw_a, raw_b)
+    np.testing.assert_array_equal(pred_a, pred_b)
+    np.testing.assert_array_equal(fold_a, fold_b)
+    # Fold maps from one build beside a final map from another are refused.
+    EquilibriumMap(heads=SUBSET, params={**SMALL, "n_estimators": 3}).fit(x, y).save(
+        tmp_path, basis={"what": "another build"}
+    )
+    with pytest.raises(ValueError, match="refusing to pair"):
+        HeldOutMaps.load(tmp_path)
+
+
+def test_the_prediction_file_says_which_map_made_each_row() -> None:
+    x, y = _problem()
+    lon = np.repeat(np.array([-100.0, 10.0, 120.0]), 80)
+    lat = np.repeat(np.array([40.0, 10.0, -20.0]), 80)
+    folds = np.repeat(np.array([0, 1, 2]), 80)
+    final = EquilibriumMap(heads=SUBSET, params=SMALL).fit(x, y)
+    held = HeldOutMaps(
+        folds=fit_fold_maps(x, y, folds, heads=SUBSET, params=SMALL),
+        tile_fold=tile_folds(lon[::80], lat[::80], folds[::80], 15.0),
+        final=final,
+    )
+    clim = pl.DataFrame({"cell": np.arange(x.shape[0]), "lon": lon, "lat": lat}).with_columns(
+        *(pl.Series(f, x[:, j]) for j, f in enumerate(FEATURES))
+    )
+    everywhere, info = prediction_frame(clim, final, None)
+    assert (everywhere["fold"] == -1).all() and not info["held_out"]
+    raw_final = everywhere.select([f"raw_{h}" for h in SUBSET]).to_numpy()
+    np.testing.assert_array_equal(raw_final, final.predict_raw(x))
+    heldout, info = prediction_frame(clim, final, held)
+    np.testing.assert_array_equal(heldout["fold"].to_numpy(), folds)
+    assert info["rows_by_fold"] == {"0": 80, "1": 80, "2": 80}
+    assert heldout.columns[:6] == ["cell", "lon", "lat", "tile", "fold", "pred_treeless"]
+    assert heldout["raw_height_p50"].is_nan().sum() == 0  # raw is never blanked
 
 
 def test_a_manifest_whose_feature_order_disagrees_with_its_heads_is_refused(tmp_path: Path) -> None:

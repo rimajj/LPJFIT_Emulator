@@ -10,21 +10,31 @@ WHAT IT WRITES, into --out:
                           interface the restart-synthesis work consumes. Schema: the module
                           docstring of `vegemu.models.equilibrium`
     manifest.json, heads/ the final map, fitted on all 6,000 pilot rows; `EquilibriumMap.load`
+    folds/                the five per-fold maps behind oof_pilot.parquet, and folds/folds.json
+                          (which fold held out which tile); `HeldOutMaps.load`
     pred_<leg>.parquet    the final map applied to every one of the 67,420 land cells, for each
                           leg whose 30-year climate table exists (corpus v0: historical 1970-1999,
-                          ssp126 and ssp370 2071-2100), plus two per-cell extrapolation flags:
+                          ssp126 and ssp370 2071-2100), plus three per-cell extrapolation flags:
                             env_nn_dist    RMS distance, in pilot-standardised feature units, to
                                            the nearest pilot training row, all 91 features
                             env_nn_dist_analogue   the same over the eight analogue climate axes
                             env_n_outside  how many of the 91 features fall outside the pilot's
                                            training range
+    pred_<leg>_heldout.parquet   the same cells and climate, each predicted by the fold map that
+                          never saw its tile (`prediction_frame` documents the columns). ⚠ SCORE
+                          THESE, NOT pred_<leg>: the pilot's tiles cover every tree-bearing land
+                          cell, so the final map has seen a training cell in the tile of each one
     envelope.json         where those predictions are extrapolations, per leg and latitude band
     report.json           every check below, and the basis
+
+To predict any other climate from the saved map without refitting: `apply_equilibrium_map.py`.
 
 WHAT IT CHECKS, and refuses to continue past:
   * the feature matrix and the 22 sealed targets are bit-identical to what the sealed script's own
     `load()` builds from the same table, so "same inputs" is measured and not asserted by reading;
   * the state columns of `corpus.parquet` equal the 78-column decoded state table on every row;
+  * each fold map predicts its held-out pilot rows bit-identically to the out-of-fold fit, and,
+    reloaded from disk, reproduces oof_pilot.parquet's raw_ and pred_ columns exactly;
   * the v0 historical climate table computes the 86 features exactly as the pilot did, on the 200
     pilot cells' unperturbed control runs (both come from `climate_columns`; this proves it).
 And it MEASURES, and reports whatever it finds:
@@ -71,17 +81,22 @@ from vegemu.models.equilibrium import (
     HEADS,
     SEALED_HEADS,
     EquilibriumMap,
+    HeldOutMaps,
     feature_matrix,
+    fit_fold_maps,
     fit_out_of_fold,
     natural,
     postprocess,
     targets_from_frame,
+    tile_folds,
     transformed,
     treeless_threshold,
 )
 from vegemu.nulls import ANALOGUE_FEATURES
 from vegemu.paths import paths, repo_root
 from vegemu.score import blocked_spatial_folds, spatial_blocks
+
+FOLD_DEGREES = 15.0  # the sealed blocking; the 5-degree one is a sensitivity check only
 
 Array = npt.NDArray[np.float64]
 IntArray = npt.NDArray[np.int64]
@@ -303,6 +318,61 @@ def oof_frame(
     cols |= {f"pred_{h}": pl.Series(f"pred_{h}", pred[:, j]) for j, h in enumerate(HEADS)}
     cols |= {f"raw_{h}": pl.Series(f"raw_{h}", raw[:, j]) for j, h in enumerate(HEADS)}
     return pl.DataFrame(cols), reports
+
+
+def prediction_frame(
+    clim: pl.DataFrame, final: EquilibriumMap, held: HeldOutMaps | None
+) -> tuple[pl.DataFrame, dict[str, Any]]:
+    """One row per cell of a climate table that already carries the soil columns (`with_soil`).
+
+        cell, lon, lat   identity only
+        tile             `spatial_blocks(lon, lat, 15)`
+        fold             the map that made the row: 0..4 the fold map that held that tile out;
+                         -1 the final map -- every row when `held` is None, otherwise only rows
+                         whose tile holds no pilot cell, which no map saw
+        pred_treeless    post-processing step 2 fired, under that map's own threshold
+        pred_<head>      natural scale, post-processed; NaN on treeless rows (traits, shares)
+        raw_<head>       natural scale, before post-processing, never NaN: what a score uses, as
+                         the sealed scorer does, so that no truth-bearing row goes unpredicted
+        env_n_outside    features outside the pilot training range (the final map's stats)
+
+    ⚠ With `held` None these are NOT held-out predictions anywhere in the forest: the pilot's
+    15-degree tiles cover every tree-bearing land cell.
+    """
+    x = feature_matrix(clim, final.features)
+    lon = clim["lon"].to_numpy().astype(np.float64)
+    lat = clim["lat"].to_numpy().astype(np.float64)
+    if held is None:
+        raw = final.predict_raw(x)
+        pred, rep = postprocess(raw, final.heads, final.treeless_below)
+        fold = np.full(x.shape[0], -1, dtype=np.int64)
+        reports = {-1: rep}
+    else:
+        pred, raw, fold, reports = held.predict(x, lon, lat)
+    lo = np.array([final.stats[f]["min"] for f in final.features])
+    hi = np.array([final.stats[f]["max"] for f in final.features])
+    treeless = np.isnan(pred[:, final.heads.index("height_p50")])
+    frame = pl.DataFrame(
+        {
+            "cell": clim["cell"].cast(pl.Int64),
+            "lon": clim["lon"],
+            "lat": clim["lat"],
+            "tile": spatial_blocks(lon, lat, FOLD_DEGREES),
+            "fold": fold,
+            "pred_treeless": treeless,
+            **{f"pred_{h}": pred[:, j] for j, h in enumerate(final.heads)},
+            **{f"raw_{h}": raw[:, j] for j, h in enumerate(final.heads)},
+            "env_n_outside": outside(x, lo, hi).sum(axis=1).astype(np.int64),
+        }
+    )
+    info = {
+        "rows": frame.height,
+        "held_out": held is not None,
+        "rows_by_fold": {str(int(f)): int((fold == f).sum()) for f in np.unique(fold)},
+        "predicted_treeless_share": float(treeless.mean()),
+        "postprocess_by_fold": {str(f): r.as_dict() for f, r in reports.items()},
+    }
+    return frame, info
 
 
 # ------------------------------------------------------------------------------------------------
@@ -548,6 +618,21 @@ def main() -> int:  # noqa: PLR0915 -- one linear build, every check reported in
     report["oof_postprocess_per_fold"] = post_reports
     print(f"wrote {out / 'oof_pilot.parquet'} {oof.shape}", flush=True)
 
+    # 5b. The per-fold maps: the models behind that file, KEPT, so that any climate can be predicted
+    # at a place whose whole tile the predicting model never saw. Asserted to BE the OOF fit.
+    t = time.time()
+    fold_maps = fit_fold_maps(x, y, folds[FOLD_DEGREES], workers=args.workers)
+    report["seconds_fold_maps"] = time.time() - t
+    report["fold_maps_vs_oof"] = {}
+    for f, fm in fold_maps.items():
+        fm.predict_threads = args.workers
+        te = folds[FOLD_DEGREES] == f
+        report["fold_maps_vs_oof"][str(f)] = same(fm.predict_fitted_scale(x[te]), z_oof[te])
+    assert all(v["identical"] for v in report["fold_maps_vs_oof"].values()), (
+        f"a fold map is not the out-of-fold fit: {report['fold_maps_vs_oof']}"
+    )
+    print("fold maps reproduce the out-of-fold predictions bit for bit", flush=True)
+
     # 6. The final map on all 6,000 rows, saved, reloaded, and checked against itself.
     t = time.time()
     em = EquilibriumMap().fit(x, y, workers=args.workers)
@@ -586,6 +671,38 @@ def main() -> int:  # noqa: PLR0915 -- one linear build, every check reported in
     }
     assert report["reload"]["loaded_vs_fitted_on_pilot"]["identical"], "reload changed predictions"
     print(f"saved and reloaded: {report['reload']}", flush=True)
+
+    # 6b. The fold maps, saved beside it and reloaded: on the pilot rows they must give back the
+    # interface file, every raw_ and pred_ value, and route every row to its own sealed fold.
+    cell_folds = folds[FOLD_DEGREES][::n_p]
+    held = HeldOutMaps(
+        folds=fold_maps,
+        tile_fold=tile_folds(pilot["lon"], pilot["lat"], cell_folds, FOLD_DEGREES),
+        final=em,
+        degrees=FOLD_DEGREES,
+        rule={"fn": "blocked_spatial_folds", "k": 5, "degrees": FOLD_DEGREES, "seed": 42},
+    )
+    held.save(
+        out, basis={**basis, "what": "one per-fold map: fitted on the other four folds' rows only"}
+    )
+    held_back = HeldOutMaps.load(out)
+    for m in (*held_back.folds.values(), held_back.final):
+        m.predict_threads = args.workers
+    h_pred, h_raw, h_fold, _ = held_back.predict(
+        x, np.repeat(pilot["lon"], n_p), np.repeat(pilot["lat"], n_p)
+    )
+    oof_raw = oof.select([f"raw_{h}" for h in HEADS]).to_numpy().astype(np.float64)
+    oof_pred = oof.select([f"pred_{h}" for h in HEADS]).to_numpy().astype(np.float64)
+    report["fold_maps_reload"] = {
+        "tiles": len(held_back.tile_fold),
+        "routed_to_own_sealed_fold": bool(np.array_equal(h_fold, folds[FOLD_DEGREES])),
+        "raw_vs_oof_file": same(h_raw, oof_raw),
+        "pred_vs_oof_file": same(h_pred, oof_pred),
+    }
+    fr = report["fold_maps_reload"]
+    assert fr["routed_to_own_sealed_fold"], "a pilot row was routed to a map that saw its tile"
+    assert fr["raw_vs_oof_file"]["identical"] and fr["pred_vs_oof_file"]["identical"], fr
+    print(f"fold maps saved and reloaded: {fr}", flush=True)
 
     # 7. Every land cell, each leg, with the envelope beside it.
     ref = oof_reference(pilot, folds[15.0], back)
@@ -633,6 +750,18 @@ def main() -> int:  # noqa: PLR0915 -- one linear build, every check reported in
             }
         )
         frame.write_parquet(out / f"pred_{leg}.parquet")
+        held_frame, held_info = prediction_frame(clim, back, held_back)
+        # The final map's own rows of this file must equal pred_<leg>'s: the same map, same code.
+        final_rows = held_frame["fold"].to_numpy() < 0
+        held_info["final_map_rows_equal_pred_file"] = same(
+            held_frame.filter(pl.Series(final_rows))
+            .select([f"pred_{h}" for h in HEADS])
+            .to_numpy(),
+            pred[final_rows],
+        )["identical"]
+        assert held_info["final_map_rows_equal_pred_file"], "held-out file disagrees with pred file"
+        held_frame.write_parquet(out / f"pred_{leg}_heldout.parquet")
+        env["heldout"] = held_info
         env["climate_table"] = str(v0 / f"climate_{leg}.parquet")
         env["climate_table_sha256"] = _sha256(v0 / f"climate_{leg}.parquet")
         env["window"] = WINDOWS[leg].describe()
@@ -643,7 +772,9 @@ def main() -> int:  # noqa: PLR0915 -- one linear build, every check reported in
             "any feature outside (tree-bearing) "
             f"{env['tree_bearing']['share_any_feature_outside']:.3f}, "
             f"analogue-space nn p50 {env['tree_bearing']['nn_dist']['analogue8']['p50']:.3f} "
-            f"vs oof {ref['summary']['nn_dist']['analogue8']['p50']:.3f}",
+            f"vs oof {ref['summary']['nn_dist']['analogue8']['p50']:.3f}; held-out file: rows by "
+            f"fold {held_info['rows_by_fold']}, "
+            f"treeless {held_info['predicted_treeless_share']:.3f}",
             flush=True,
         )
 
