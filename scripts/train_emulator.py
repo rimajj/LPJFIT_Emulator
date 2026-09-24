@@ -109,7 +109,10 @@ def oof_nulls(
 
 def run(version: str, block_degrees: float, k: int, out: Path) -> dict[str, object]:
     hist = load_leg("historical", version)
-    ssp = load_leg("ssp370", version)
+    # v0's ssp370 seed tables are byte-identical (one realisation twice); this run uses the leg only
+    # for the response delta of its mean and never builds a band from its pair -- the case the
+    # opt-in exists for. Passing it keeps sealed X-20260908-warming-response reproducible.
+    ssp = load_leg("ssp370", version, allow_identical_seeds=True)
 
     # ---- the map experiment ---------------------------------------------------------------
     a = assemble(hist, SCORED_CONJUNCTIVE, k=k, block_degrees=block_degrees)
