@@ -437,6 +437,17 @@ def stage_plan(  # noqa: PLR0912, PLR0915 -- one flat pass: choose, write, recor
         existing = d / "provenance.json"
         if existing.is_file() and json.loads(existing.read_text()).get("derived_from"):
             raise SystemExit(f"{d.name} is a re-decode of another version; plan the source instead")
+    # ⚠ A PLAN MADE BEFORE HASH SCHEME 2 IS NEVER RE-PLANNED IN PLACE. Sealed pre-registrations cite
+    # such a version's `plan_sha256` under the OLD formula (`pilot-v2-constco2`: `bad787ad...`), and
+    # a re-plan here would rewrite that key under the new one -- the directory would stop matching
+    # every citation of it, although neither its cells nor its climates changed. Under scheme 1 a
+    # re-plan was harmless because it reproduced the same hash; now it cannot.
+    here = out / "provenance.json"
+    if here.is_file() and "plan_hash_scheme" not in json.loads(here.read_text()):
+        raise SystemExit(
+            f"{out.name} was planned under plan-hash scheme 1 and its plan_sha256 is cited by that "
+            "value; re-planning it would rewrite the hash under scheme 2. Plan a new version."
+        )
     # ⚠ A REPLICATE TAKES ITS FIRST SEED'S CO2 AND CLIMATES, OR IT IS NOT A REPLICATE. The build now
     # reads the CO2 mode from THIS plan, so a seed-2 plan made without `--const-co2` under a
     # constant-CO2 seed 1 builds transient-CO2 configs, verify passes them against their own plan,

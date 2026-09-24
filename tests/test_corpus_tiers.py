@@ -385,6 +385,26 @@ def test_a_replicate_plan_must_take_its_first_seeds_co2_and_design(
         m.stage_plan("v9", 200, 30, 250, seed=2, co2=m.Co2(True, 276.59))
 
 
+def test_a_scheme_1_plan_is_not_re_planned_in_place(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Every version on disk was planned under hash scheme 1 and is cited by that `plan_sha256`;
+    a re-plan in place would rewrite it under scheme 2. A scheme-2 plan may still be re-planned."""
+    m = _two_versions(monkeypatch, tmp_path, {"co2_constant": True, "plan_sha256": "bad787"})
+    monkeypatch.setattr(m, "pilot_cells", lambda *a, **k: pytest.fail("got past the guard"))
+    with pytest.raises(SystemExit, match="plan-hash scheme 1"):
+        m.stage_plan("v9", 200, 30, 250, co2=m.Co2(True, 276.59))
+    assert json.loads((tmp_path / "pilot-v9" / "provenance.json").read_text()) == {
+        "co2_constant": True,
+        "plan_sha256": "bad787",
+    }
+    (tmp_path / "pilot-v9" / "provenance.json").write_text(
+        json.dumps({"co2_constant": True, "npoint": 30, "plan_hash_scheme": 2})
+    )
+    with pytest.raises(pytest.fail.Exception, match="got past the guard"):
+        m.stage_plan("v9", 200, 30, 250, co2=m.Co2(True, 276.59))
+
+
 def test_two_build_shards_racing_to_create_the_co2_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
