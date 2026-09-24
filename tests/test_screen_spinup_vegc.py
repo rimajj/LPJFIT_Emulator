@@ -145,6 +145,8 @@ def test_the_choice_reads_dev_only_and_needs_more_than_min_gain() -> None:
         {"objective": "huber", "bag": 2},
         {"objective": "l1", "zero_floor": 1e9},
         {"pool": "both", "pilot_weight": 0.25},
+        {"objective": "l1+l2", "gate": "soft"},
+        {"objective": "l1+huber", "capacity": "big"},
     ],
 )
 def test_every_fitting_path_predicts_exactly_the_held_out_fold(change: dict[str, object]) -> None:
@@ -192,3 +194,12 @@ def test_a_recipe_survives_its_json_round_trip() -> None:
     )
     back = scr.recipe_of(json.loads(json.dumps(dataclasses.asdict(r))))
     assert back == r and back.key() == r.key()
+
+
+def test_a_recipe_is_deterministic_whatever_the_parallelism() -> None:
+    """Round 2 re-runs round 1's best and must get round 1's number, so a fit may not depend on
+    how many folds run at once (the round-2 job itself checks the number)."""
+    d = _data(4)
+    a, _ = scr.predict_all(d, scr.Recipe("t", objective="l1", gate="soft"), (0, 1), 1, 1)
+    b, _ = scr.predict_all(d, scr.Recipe("t", objective="l1", gate="soft"), (0, 1), 2, 1)
+    np.testing.assert_array_equal(a, b)

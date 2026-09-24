@@ -442,26 +442,33 @@ def fit_predict_fold(
     x_te = d.xg[r.feats][te]
     logs: list[Array] = []
     info: dict[str, Any] = {"rows": int(y.size), "iters": []}
+    # An objective like "l1+l2" is an ensemble: one fit per loss, averaged in log space.
+    members = [dataclasses.replace(r, objective=o) for o in r.objective.split("+")]
     for b in range(r.bag):
         seed = None if b == 0 else b  # b = 0 is the sealed settings' own (default) seed
-        if r.gate == "none" or tb.all() or (~tb).sum() < 50:
-            m, it = _fit_reg(r, x, y, w, tiles, f=f, threads=threads, seed=seed)
-            logs.append(m.predict(x_te))
-            info["iters"].append(it)
-            continue
-        cp = {**PARAMS, "n_jobs": threads}
-        if seed is not None:
-            cp["random_state"] = seed
-        clf = LGBMClassifier(**cp)
-        clf.fit(x, tb.astype(np.int64), sample_weight=w)
-        prob = clf.predict_proba(x_te)[:, 1]
-        m1, it1 = _fit_reg(r, x[tb], y[tb], w[tb], tiles[tb], f=f, threads=threads, seed=seed)
-        m0, it0 = _fit_reg(r, x[~tb], y[~tb], w[~tb], tiles[~tb], f=f, threads=threads, seed=seed)
-        l1, l0 = m1.predict(x_te), m0.predict(x_te)
-        logs.append(
-            np.where(prob >= 0.5, l1, l0) if r.gate == "hard" else prob * l1 + (1 - prob) * l0
-        )
-        info["iters"].append([it1, it0])
+        prob = None
+        if not (r.gate == "none" or tb.all() or (~tb).sum() < 50):
+            cp = {**PARAMS, "n_jobs": threads}
+            if seed is not None:
+                cp["random_state"] = seed
+            clf = LGBMClassifier(**cp)
+            clf.fit(x, tb.astype(np.int64), sample_weight=w)
+            prob = clf.predict_proba(x_te)[:, 1]
+        for rm in members:
+            if prob is None:
+                m, it = _fit_reg(rm, x, y, w, tiles, f=f, threads=threads, seed=seed)
+                logs.append(m.predict(x_te))
+                info["iters"].append(it)
+                continue
+            m1, it1 = _fit_reg(rm, x[tb], y[tb], w[tb], tiles[tb], f=f, threads=threads, seed=seed)
+            m0, it0 = _fit_reg(
+                rm, x[~tb], y[~tb], w[~tb], tiles[~tb], f=f, threads=threads, seed=seed
+            )
+            l1, l0 = m1.predict(x_te), m0.predict(x_te)
+            logs.append(
+                np.where(prob >= 0.5, l1, l0) if r.gate == "hard" else prob * l1 + (1 - prob) * l0
+            )
+            info["iters"].append([it1, it0])
     pred = np.clip(np.expm1(np.mean(logs, axis=0)), 0.0, None)
     if r.zero_floor > 0:
         pred = np.where(pred < r.zero_floor, 0.0, pred)
@@ -657,6 +664,7 @@ class Screen:
 # when round 1's order was fixed, each applied to round 1's final recipe by the same rule.
 ROUND2: tuple[tuple[str, tuple[dict[str, Any], ...]], ...] = (
     ("productivity features", ({"feats": "v3p"},)),
+    ("objective ensemble", ({"objective": "l1+l2"}, {"objective": "l1+huber"})),
 )
 
 
