@@ -1,0 +1,226 @@
+schema_version: 1
+
+exp_id: X-20260925-spinup-restart-continuation
+line: X
+
+status: draft
+
+title: "DOES THE REAL MODEL, STARTED FROM THE EMULATED CONSTANT-CO2 RESTART, STAY AT THE STORED SPIN-UP'S EQUILIBRIUM AS WELL AS A RERUN WOULD, ON EVERY CELL?"
+question: >
+  The owner, 2026-09-24: "make the emulator work for the spinup with constant co2"; pass rule the
+  same day: AS GOOD AS A RERUN of the original model, cell by cell, on the 56,986 cells that carry
+  any stem, at 25 patches, CO2 276.59 ppm (docs/decisions/20260924-INT-*).
+
+  The emulator's product is a restart file: every cell's forest, soil and climate memory at the
+  end of the stored global spin-up's constant-CO2 stretch (model year 1699), written from the
+  climate-only equilibrium map's held-out prediction for the cell's recycled 1901-1930 climate
+  (`scripts/synth_global.py --cell-rule vegemu.models.spinup_rule:SpinupRule`). The sealed map test
+  (X-20260924-spinup-vegc-from-pilot) scored the map's vegetation-carbon HEAD; this scores the FILE
+  the way an equilibrium restart must be judged -- by handing it to the real model and letting the
+  model run. LPJmL-FIT is started from the file (-DFROM_RESTART) and continues the stored run's
+  own protocol for 30 model years (shuffled draws of 1901-1930, 276.59 ppm, every other setting the
+  stored run's), and the mean vegetation carbon of continuation years 1-10 is scored exactly as a
+  second run of the model would be.
+
+  THE FALSIFIABLE CLAIM: D = frac(emulated continuation) - frac(rerun) >= -0.02, i.e. across the
+  56,986 cells the model started from the emulated restart lands inside the acceptance band at most
+  2 cells in 100 less often than a second run of LPJmL-FIT does.
+
+  ⚠ WHAT A PASS WOULD NOT SAY: nothing about tree counts, traits or soil carbon (the stored run
+  kept only vegetation carbon for these years); nothing about a warmed climate (1901-1930 is the
+  only climate here); and nothing about an emulator that never saw the cell -- the synthesiser's
+  template is each cell's own restart_1999 record (see leakage_checks), whose information is
+  exactly what the restart_1999 continuation null measures.
+
+estimand:
+  name: asgood_vegc_spinup
+  definition: >
+    Rows, truth, band, pass and frac EXACTLY as in X-20260924-spinup-vegc-from-pilot, computed by
+    the same code (`scripts/exp_spinup_vegc.py` `scored_set` and `score`): the 56,986 cells with any
+    stem in the stored restart_1999, seed 1, each in a 15-degree tile the pilot covers (asserted);
+    T_k = seed k's mean total VegC (trees + grass, gC/m2) over model years 1450-1699; band
+    w = max(0.10, s), s = |H_1 - H_2| / mean(H_1, H_2) with H_k seed k's 1200-1449 mean (s = 0
+    where mean(H) <= 1 gC/m2); an arm x passes against T_k if |x - T_k| <= w |T_k|, its per-cell
+    score the mean over k = 1, 2; frac(x) the mean per-cell score; frac(rerun) = 0.858711 scores
+    T_2 against T_1 and T_1 against T_2 with the same w. THE STATISTIC: D(x) = frac(x) - frac(rerun).
+
+    x FOR AN ARM: the real model's own annual VegC output (netCDF, trees + grass) averaged over
+    continuation years 1-10 (model years 1871-1880 of the continuation run), per cell.
+
+    THE CONTINUATION RUN (`scripts/spinup_continuation.py`, identical for every arm): the stored
+    run's saved config (`scripts_for_running_the_model/lpjml_2000_2019.js`) with exactly these
+    changes, each asserted to hit: restart true from the arm's file, nspinup 30, nspinyear 30,
+    firstyear 1901, lastyear 1900 (so all 30 years are shuffled spin-up draws of 1901-1930,
+    iterate.c:102-119), a constant 276.59 ppm CO2 file, no restart written, outputs VegC (cdf),
+    globalflux (txt), grid (cdf) and climatyear (txt); npatch 25, fire, shuffle, inheritance and
+    every other setting unchanged; -DFROM_RESTART; Aug-12 2026 build (`lpjml.binary`, byte-identical
+    to the Feb-05 build on the one cell-year tested, 20260923-D-the-two-builds-*). The 30 years
+    drawn follow from the restart header's RNG state (openrestart.c:139); both arms carry
+    restart_1999's header, so both draw the same 30 years (checked from the climatyear output; the
+    model arm is refused if they differ). Run as 1,015 contiguous cell ranges of one task each in a
+    task farm (members.json), the same ranges for every arm.
+
+    THE MODEL ARM: the emulated restart `restart_1699_emulated.lpj` continued. Its cells: every cell
+    with a stem in restart_1999 and a prediction is synthesised by `synthesise_cell` with predicted
+    stem shares, the types the model's own bioclimatic limits admit under the cell's replayed 1699
+    climate buffer, that buffer itself (replayed from the cell's 1901-1930 forcing, the stored
+    protocol stopped at 1699: 700 shuffled draws), and litter rescaled by predicted / template soil
+    carbon; every other cell is restart_1999's record unchanged. As written 2026-09-24
+    (restart_1699_emulated.lpj, 127,214,462,509 B, sha256 7fe58fc220be43ac..., job 2287401):
+    56,986 cells synthesised, 10,434 passed through (no stem in the template), 32,210,123 stems
+    placed of 32,369,762 requested; 620 synthesised cells hold no tree: 612 where the climate rule
+    admits no tree type under the 1699 buffer (their requests are the whole 159,639-stem shortfall;
+    121 of them the map also predicts treeless) and 8 more the map predicts treeless.
+
+    REPORTED BESIDE THE STATISTIC, NEVER DECIDED ON, with every null beside it: D on the mean of
+    continuation years 21-30 (THE DRIFT WINDOW: the primary window scores whether the model holds the
+    state in its first decade; 21-30 says where the state is going -- a model arm that passes on 1-10
+    and falls on 21-30 is relaxing away from the stored equilibrium, one that rises from 1-10 to
+    21-30 was placed off it and is being pulled back, and the restart_1999 continuation's own change
+    between the windows is the rate at which the model sheds the CO2-ramp carbon); D of every single
+    year; frac(x); variance explained on log1p against the two-seed mean; the flat-10 % rate; D per
+    latitude band; the 90 % tile-bootstrap interval on D; the scored cells' total VegC over the
+    truth's, per year; and the year-0 VegC read back from each arm's restart file (dev diagnostic,
+    `scripts/spinup_product.py --stage year0`).
+  reference_basis: >
+    The stored global LPJmL-FIT 5.6.004 spin-up, Historical ground truth, Feb-05 2026 binary, npatch
+    25, seeds 1 and 2, model years 1000-1999, 67,420 cells; CO2 276.59 ppm (the getco2.c clamp) for
+    model years < 1700, which is the only part scored. Recycled climate 1901-1930 of GSWP3-W5E5 v3.
+    Per-cell truth from vegc_spinup_1999.nc via scripts/spinup_target.py --stage truth
+    (spinup_truth.parquet sha256 37391b3f70c12995...). Continuation runs: LPJmL-FIT 5.6.004 Aug-12
+    2026 binary from restart_1999 (null arm) and from the emulated restart (model arm), model years
+    1871-1900 at constant 276.59 ppm (co2_const_276.59.txt sha256 ba414a720588249f...). Emulated
+    restart: models/equimap-v1 pred_1901_1930_heldout.parquet (held-out per fold, sealed folds),
+    template restart_1999 seed 1, census census_restart_1999.parquet. 56,986 cells scored, level (a
+    share of cells inside a band), the statistic a difference of two shares.
+  units: dimensionless
+  kind: ratio
+
+data:
+  corpus: /p/tmp/jamirp/vegemu/corpus/spinup-constco2
+  corpus_sha256: "37391b3f70c12995b80f04cf6a8bb61f27cf1b321c2e5b5dd9975280221d56d9"
+  plan_sha256: "bbfb9768687727a5a0157788d431b6d5cca4bee6d8c2d52ed37ec31c840d5baa"
+  n_rows: 56986
+
+  split:
+    kind: blocked_spatial
+    k: 5
+    seed: 42
+    block_degrees: [15]
+
+  leakage_checks:
+    - "Folds: the emulated restart is written from models/equimap-v1 pred_1901_1930_heldout.parquet, in which every cell of a tile the pilot covers is predicted by the fold model trained on the pilot cells of the OTHER four sealed folds (15 deg, k=5, seed 42); the scored set is asserted to lie in those tiles (exp_spinup_vegc.scored_set). The map never saw the stored run: not its targets, cells, protocol or climate window."
+    - "⚠ THE TEMPLATE IS THE CELL'S OWN restart_1999 RECORD, DISCLOSED, NOT HIDDEN (synth_global.py's design): the grasses, soil water and enthalpy, the vertical soil and litter profiles (rescaled to predicted totals), the height/density SHAPE of the stand (recalibrated onto the predicted quantiles), the types the cell holds (restricted by the climate rule) and the restart header are the cell's own state at model year 1999, i.e. after the CO2 ramp. That is information about the cell's own truth, from a different state than the one scored (1999 at 368 ppm, not 1450-1699 at 276.59 ppm). It is why the decisive null is the restart_1999 continuation itself: whatever the template contributes, the null has all of it."
+    - "The donor stems come from the proximity band of the cell's own 500-cell block (synth_global.py default), the block itself excluded; a donor is a real stem of another cell's restart_1999."
+    - "No stored truth of the scored years (1200-1699) enters the restart, the continuation or its config; the truth windows are read only by the scorer."
+    - "The climate buffer is a pure function of the cell's 1901-1930 forcing, the stored run's year sequence and the template's own albedo; the bioclimatic type rule reads only that buffer and forcing."
+    - "CO2 is never a feature; the continuation runs at the constant 276.59 ppm of the scored years (invariant 8)."
+    - "Both arms draw the same 30 years (the header's RNG state), run the same members with the same config text except the restart path; the metrics stage refuses if the climatyear sequences differ."
+
+# The map-level nulls are X-20260924-spinup-vegc-from-pilot's, reused BY VALUE: they are
+# deterministic functions of the scored set and the folds, the scored set here is the same, and the
+# metrics stage reads them from that sealed experiment's own nulls.json (job 2286364). The
+# continuation null was measured by running it, before the model arm, and is read back from its
+# harvested output by the model job, which recomputes nothing about it.
+nulls:
+  - id: restart_1999_continuation
+    description: >
+      THE DECISIVE NULL. The stored run's own end state, restart_1999 (the right forest of each cell,
+      carrying the carbon of the 1700-1999 CO2 ramp), continued identically: what the model does
+      from the one real restart every cell has. An emulated restart that does not beat it has not
+      added anything the template did not already carry.
+    expected:
+      statistic: asgood_vegc_spinup
+      value: -0.567148
+      tolerance: 0.001
+      derivation: >
+        Measured 2026-09-24 by running it: jobs 2287399 (127 members) and 2295343 (888 members),
+        1015/1015 members printed the model's completion line, merged by job 2298812 and rated by
+        job 2298813 with exp_spinup_vegc's scorer (asgood.json sha256 669ecaf39a25d0f5...,
+        vegc_continuation.npy sha256 a5606d026b3ae419...): years 1-10 frac 0.2916, D -0.567148,
+        tile-bootstrap 90 % [-0.5879, -0.5451], variance explained on log1p 0.935; years 21-30
+        frac 0.4105, D -0.448259. Drawn years 1926, 1930, 1923, 1926, 1903, ... (30, one sequence
+        in every member, equal to the RNG replay from the header). The model job reads this arm's
+        harvested windows and recomputes nothing about it.
+
+  - id: training_mean
+    description: "Every cell gets the mean (on log1p) of the pilot training rows' targets: the average forest (map-level, sealed)."
+    expected:
+      statistic: asgood_vegc_spinup
+      value: -0.812129
+      tolerance: 0.001
+      derivation: "Sealed in X-20260924-spinup-vegc-from-pilot, measured job 2286364: frac 0.0466, D -0.812129."
+
+  - id: nearest_analogue
+    description: "Copy the target of the climatically nearest pilot TRAINING row over the fixed eight-feature analogue set (map-level, sealed)."
+    expected:
+      statistic: asgood_vegc_spinup
+      value: -0.675043
+      tolerance: 0.001
+      derivation: "Sealed in X-20260924-spinup-vegc-from-pilot, measured job 2286364: frac 0.1837, D -0.675043."
+
+  - id: nearest_geographic
+    description: "Copy the CONTROL-climate target of the nearest pilot training cell (unit sphere): the address null (map-level, sealed)."
+    expected:
+      statistic: asgood_vegc_spinup
+      value: -0.734821
+      tolerance: 0.001
+      derivation: "Sealed in X-20260924-spinup-vegc-from-pilot, measured job 2286364: frac 0.1239, D -0.734821."
+
+  - id: shuffled
+    description: "The two-seed mean truth of the held-out fold, permuted within that fold (seed 20260924): a random real forest (map-level, sealed)."
+    expected:
+      statistic: asgood_vegc_spinup
+      value: -0.814753
+      tolerance: 0.001
+      derivation: "Sealed in X-20260924-spinup-vegc-from-pilot, measured job 2286364: frac 0.0440, D -0.814753."
+
+decision_rule:
+  statistic: asgood_vegc_spinup
+  comparator: model_absolute
+  pass_if: ">= -0.02"
+  arms: [model, restart_1999_continuation, training_mean, nearest_analogue, nearest_geographic, shuffled]
+  multiplicity: none
+  power_note: >
+    THE RULE AND MARGIN ARE THE OWNER'S AND THE SEALED TEST'S: D >= -0.02, i.e. frac(emulated) >=
+    0.838711. Under model_absolute every null is judged on its own D; the best null is the restart_1999 continuation at -0.567148, so no
+    null satisfies the rule and the estimand has power. If any
+    null satisfied the rule the estimand would have no power and the outcome would be `invalid`.
+
+  ceiling_note: >
+    ⚠ THE REFERENCE IS THE RERUN, NOT 1.0: frac(rerun) = 0.858711, variance explained on log1p
+    0.995. A single continuation is ONE realisation of the model's stochastic dynamics, so it
+    carries a rerun's noise; unlike the map head it cannot average it away. A 10-year mean is
+    noisier than the truth's 250-year mean, which costs every continuation arm alike.
+
+  outcomes_note: >
+    PRE-NAMED BEFORE THE MODEL ARM RUNS. (a) D >= -0.02: the model started from the emulated
+    restart holds the stored constant-CO2 equilibrium's vegetation carbon as well as a rerun, on
+    every cell -- the first all-cell acceptance result for the RESTART FILE, for one quantity.
+    (b) -0.567148 < D < -0.02: the emulated restart is closer to the stored equilibrium than the
+    stored run's own end state, and not yet rerun-grade. (c) D <= -0.567148: the emulated file
+    does no better than continuing the one real restart every cell already has. In every outcome
+    report the 21-30 window beside it (drift) and the yearly D and total-carbon series.
+
+    ⚠ WHAT THE NULL ARM ALREADY SHOWS ABOUT THE WINDOWS (measured, dev, before the model arm).
+    Continued at 276.59 ppm, restart_1999 does not relax smoothly: the scored cells' total VegC
+    is 1.196 of the truth in continuation year 1, 1.075 in year 4, then 0.747 in year 5 -- global
+    VegC falls from 780 to 523 PgC in one year while litter rises from 727 to 919 PgC and fire
+    stays at 7.8 PgC/yr, a mass die-off, not a burn -- and it then regrows steadily to 0.861 of
+    the truth by year 30 (D -0.636 in year 1, -0.635 in year 5, -0.518 in year 30). The most
+    likely mechanism, NOT verified here, is the per-tree count of consecutive bad-growth years,
+    which kills a tree at 5: the CO2 drop from the 1999 level cuts global NPP by 21 % (77.8 to
+    61.3 PgC/yr) and would put many stems over the limit together in year 5. So the years 1-10
+    window straddles that event for the null, and a model arm whose stems carry restart_1999
+    donors' counters may show the same; 21-30 is the window past it, where a stable equilibrium
+    restart should sit flat near the truth and a relaxing one shows a trend.
+
+compute:
+  launcher: scripts/sbatch_py.sh
+  tag: X-contrun-metrics
+  partition: standard
+  est_core_hours: 150
+
+outputs:
+  - path: /p/tmp/jamirp/vegemu/exp/X-20260925-spinup-restart-continuation/metrics.json
+    kind: metrics

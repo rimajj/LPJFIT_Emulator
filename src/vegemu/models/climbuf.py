@@ -35,7 +35,7 @@ The field-by-field source map is in `climate_buffer_from_forcing`'s docstring.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import numpy as np
@@ -199,6 +199,25 @@ class SpinupProtocol:
     climate_firstyear: int = 1970
     v_req_every_year: bool = True
 
+    def until(self, year: int) -> SpinupProtocol:
+        """The same run, stopped at the END of model year `year`: the buffer the model held then.
+
+        `lastyear` is where `iterate.c`'s loop ends, so a replay with an earlier `lastyear` is the
+        prefix of the full one -- the same draws in the same order, cut short. That is how the
+        stored global spin-up's state at the end of its constant-CO2 stretch (model year 1699) is
+        recovered, although that run only ever wrote a restart at 1999.
+        """
+        if not self.firstyear - self.nspinup <= year:
+            raise ValueError(
+                f"year {year} is before the run's first year {self.firstyear - self.nspinup}"
+            )
+        return replace(self, lastyear=int(year))
+
+    def years_needed(self) -> int:
+        """How many forcing years, from `climate_firstyear`, the schedule reads (max index + 1)."""
+        idx, _ = self.schedule()
+        return int(idx.max()) + 1 if idx.size else 0
+
     def schedule(self) -> tuple[npt.NDArray[np.int64], tuple[int, int, int]]:
         """The forcing-year INDEX read in every simulated year, and the RNG state left behind.
 
@@ -222,6 +241,41 @@ class SpinupProtocol:
 
 
 PILOT_PROTOCOL = SpinupProtocol()
+
+
+def continue_draws(seed: tuple[int, int, int], n: int, nspinyear: int = 30) -> list[int]:
+    """The next `n` shuffled forcing-year indices from a 48-bit RNG state (low word first).
+
+    What a run started FROM a restart draws: `openrestart.c:139` restores `config->seed` from the
+    header, and every spin-up year then takes `erand48(seed) * nspinyear` exactly as above.
+    """
+    x = int(seed[0]) | (int(seed[1]) << 16) | (int(seed[2]) << 32)
+    out: list[int] = []
+    for _ in range(n):
+        x = (_RAND48_A * x + _RAND48_C) & _RAND48_MASK
+        out.append(int((x / float(1 << 48)) * nspinyear))
+    return out
+
+
+# THE STORED GLOBAL SPIN-UP (`ground_truth.historical_seed1`), read off its own saved config
+# (`scripts_for_running_the_model/lpjml_2000_2019.js`: nspinup 1000, nspinyear 30, firstyear 2000,
+# lastyear 1999, random_seed 1, shuffle_climate true) and its log ("Spinup using climate starting
+# from year 1901"). Same loop as the pilot's, different split: the forcing file starts in 1901, so
+# model years 1000-1900 are 901 shuffled draws of 1901-1930 and 1901-1999 are the file's own years
+# in order -- 901 + 99, where the pilot's 1970-1999 files give 970 + 30. Its restart header records
+# `sdate_option 0`, so V_req is updated every year as in the pilot. Checked, not assumed: 901 draws
+# from seed 1 leave the 48-bit state (10901, 14779, 51459), which is what `restart_1999`'s header
+# holds. `STORED_SPINUP.until(1699)` is its buffer at the end of the constant-CO2 stretch.
+STORED_SPINUP = SpinupProtocol(
+    nspinup=1000,
+    nspinyear=30,
+    random_seed=1,
+    shuffle=True,
+    firstyear=2000,
+    lastyear=1999,
+    climate_firstyear=1901,
+    v_req_every_year=True,
+)
 
 
 @dataclass
@@ -411,11 +465,13 @@ def climate_buffer_from_forcing(
 
     "EXACT" is a claim about the arithmetic and the year sequence; it is checked against every
     pilot restart by `scripts/synth_pilot.py --stage bank`, which reports the residual per field.
+
+    The forcing must START at `protocol.climate_firstyear` and cover every year the schedule reads:
+    the first `nspinyear` for a run that stops inside its shuffled years (the pilot; the stored
+    spin-up stopped at 1699), more for one that goes on into the file's own years in order (the
+    stored spin-up to 1999 reads 1901-1999). Extra years at the end are ignored.
     """
-    if forcing.nyear != protocol.nspinyear:
-        raise ValueError(
-            f"forcing has {forcing.nyear} years; the protocol cycles {protocol.nspinyear}"
-        )
+    check_forcing_covers(forcing, protocol)
     idx, seed = protocol.schedule()
     agg = year_aggregates(forcing)
     pet = daily_pet(forcing, np.asarray(albedo, dtype=np.float64)) * stand_frac
@@ -498,19 +554,43 @@ def climate_buffer_from_forcing(
     return buf, ClimbufTrace(idx, tmin20, tmax20, seed)
 
 
-def ema_year_weights(protocol: SpinupProtocol = PILOT_PROTOCOL) -> Array:
+def check_forcing_covers(forcing: Forcing, protocol: SpinupProtocol) -> None:
+    """Refuse a forcing that does not start where the protocol's file starts, or is too short.
+
+    Both faults would otherwise replay silently: an index into the wrong year, or an IndexError
+    deep in the loop. The old rule was "exactly `nspinyear` years", which is right for the pilot
+    and wrong for a run that reads the file's own years after its shuffled ones.
+    """
+    if forcing.firstyear != protocol.climate_firstyear:
+        raise ValueError(
+            f"forcing starts in {forcing.firstyear}; the protocol's climate starts in "
+            f"{protocol.climate_firstyear}"
+        )
+    need = max(protocol.years_needed(), protocol.nspinyear if protocol.shuffle else 0)
+    if forcing.nyear < need:
+        raise ValueError(
+            f"forcing has {forcing.nyear} years; the protocol reads {need} "
+            f"({protocol.climate_firstyear}-{protocol.climate_firstyear + need - 1})"
+        )
+
+
+def ema_year_weights(protocol: SpinupProtocol = PILOT_PROTOCOL, nyear: int | None = None) -> Array:
     """Weight of each FORCING year in a 0.05-exponential mean at the end of the spin-up.
 
     The first simulated year initialises the mean (the `< -9998` branch) and every later one decays
     it by 0.95, so the end value is linear in the per-year inputs with these weights (summing to 1).
     Used only for the albedo solve, where a linear model is what is wanted; the exact replay above
-    never uses it.
+    never uses it. One weight per forcing year: `nyear` of them (default `nspinyear`), and never
+    fewer than the schedule reads.
     """
     idx, _ = protocol.schedule()
     n = idx.size
     w_sim = _KK * (1 - _KK) ** (n - 1 - np.arange(n, dtype=np.float64))
     w_sim[0] = (1 - _KK) ** (n - 1)
-    out: Array = np.bincount(idx, weights=w_sim, minlength=protocol.nspinyear).astype(np.float64)
+    length = protocol.nspinyear if nyear is None else int(nyear)
+    if length < protocol.years_needed():
+        raise ValueError(f"{length} forcing years; the schedule reads {protocol.years_needed()}")
+    out: Array = np.bincount(idx, weights=w_sim, minlength=length).astype(np.float64)
     return out
 
 
@@ -528,8 +608,11 @@ def effective_albedo(
     polar night with no shortwave at all, where the albedo does not matter -- keeps the bound it
     reached. This is a calibration of the TEMPLATE's vegetation and snow, carried to the target's
     forcing: the approximation is that the albedo does not change with the climate.
+
+    `protocol` must be the one that made `climbuf`: its year weights are what the solve inverts.
     """
-    w = ema_year_weights(protocol)
+    check_forcing_covers(forcing, protocol)
+    w = ema_year_weights(protocol, forcing.nyear)
     want = np.asarray(climbuf["mpet20"], dtype=np.float64)
     lo: Array = np.zeros(NMONTH)
     hi: Array = np.ones(NMONTH)
