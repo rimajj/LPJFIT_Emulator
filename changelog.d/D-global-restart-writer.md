@@ -19,6 +19,9 @@
   `current-api`, which calls `synthesise_cell` exactly as it stands today). The second is where
   predicted type shares, a recomputed climate buffer and a climate-derived type rule get wired in.
 - `plan` and `assemble` refuse to start without the free disk they will use, plus 10 %.
+- `census`: the tree-stem count of every template record. On `restart_1999`: 56,986 cells with a
+  stem, 10,434 without, in 36 s on 32 workers. `plan --census` then says before any work exactly
+  how many cells it will synthesise, and the cost projection prices only those.
 - Measured on the real 67,420-cell `restart_1999` (127,588,235,786 B): streamed through the writer
   in 42 s at 3.0 GB/s with 428 MB peak memory, `cmp` identical to the source; every record decoded,
   re-encoded, sharded, stitched and `cmp`'d identical to the source by the farm in identity mode.
