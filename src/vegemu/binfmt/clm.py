@@ -334,6 +334,32 @@ class ClmReader:
             out[i] = np.frombuffer(blob, dtype=h.dtype).astype(np.float64) * h.scalar
         return out
 
+    def block_years(
+        self, first_cell: int, ncell: int, first: int, last: int
+    ) -> npt.NDArray[np.float64]:
+        """A contiguous run of cells over a year range, shaped (ncell, nyear, nbands).
+
+        One read per year of the whole run -- the cells of a year are contiguous -- so a block of
+        500 cells over 99 years is 99 reads, not 49,500. Decoded exactly as `cell_years` decodes
+        one cell (widen, then times the header scalar), so row k equals `cell_years(first_cell+k)`
+        bit for bit.
+        """
+        h = self.header
+        if not (h.firstcell <= first_cell and first_cell + ncell <= h.firstcell + h.ncell):
+            raise ValueError(
+                f"cells [{first_cell}, +{ncell}) outside the file's [{h.firstcell}, +{h.ncell})"
+            )
+        if not (h.firstyear <= first <= last <= h.lastyear):
+            raise ValueError(f"years {first}-{last} outside the file's {h.firstyear}-{h.lastyear}")
+        out = np.empty((ncell, last - first + 1, h.nbands), dtype=np.float64)
+        stride = h.nbands * h.itemsize
+        for i, yr in enumerate(range(first, last + 1)):
+            offset = h.year_offset(yr) + (first_cell - h.firstcell) * stride
+            blob = self._read_at(offset, stride * ncell)
+            raw = np.frombuffer(blob, dtype=h.dtype).reshape(ncell, h.nbands)
+            out[:, i, :] = raw.astype(np.float64) * h.scalar
+        return out
+
 
 def write_clm(
     path: Path | str,

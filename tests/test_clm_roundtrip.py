@@ -248,3 +248,24 @@ def test_writer_rejects_a_wrong_shape(tmp_path: Path) -> None:
         write_clm(tmp_path / "bad.clm", h, [np.zeros((3, 4), "<f4")])
     with pytest.raises(ValueError, match="nyear"):
         write_clm(tmp_path / "bad2.clm", h, [])
+
+
+@pytest.mark.parametrize("datatype", (LPJ_SHORT, LPJ_FLOAT))
+def test_block_years_is_cell_years_for_every_cell_of_the_block(
+    tmp_path: Path, datatype: int
+) -> None:
+    """A block read is one read per year, and must decode each cell exactly as `cell_years` does."""
+    h = ClmHeader("LPJCLIM", 3, 1, 1901, 4, 0, 7, 5, scalar=0.1, datatype=datatype)
+    rng = np.random.default_rng(datatype)
+    blocks = [rng.integers(-300, 300, size=(7, 5)).astype(h.dtype) for _ in range(4)]
+    out = tmp_path / "b.clm"
+    write_clm(out, h, blocks)
+    with ClmReader(out, name="LPJCLIM") as reader:
+        got = reader.block_years(2, 4, 1902, 1904)
+        assert got.shape == (4, 3, 5)
+        for k in range(4):
+            assert np.array_equal(got[k], reader.cell_years(2 + k, 1902, 1904))
+        with pytest.raises(ValueError, match="outside the file"):
+            reader.block_years(5, 3, 1902, 1904)
+        with pytest.raises(ValueError, match="outside the file"):
+            reader.block_years(0, 2, 1900, 1902)

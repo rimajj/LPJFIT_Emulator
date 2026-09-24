@@ -19,8 +19,10 @@ import numpy as np
 import polars as pl
 import pytest
 
+from vegemu.binfmt.clm import read_grid
 from vegemu.binfmt.restart import RestartReader
 from vegemu.models import climbuf as cb
+from vegemu.models.spinup_rule import forcing_files
 from vegemu.paths import path, paths
 
 NYEAR = 30
@@ -65,6 +67,78 @@ def test_without_shuffle_the_spinup_cycles() -> None:
     idx, _ = cb.SpinupProtocol(shuffle=False).schedule()
     assert list(idx[:3]) == [0, 1, 2]
     assert np.array_equal(idx[:30], idx[30:60])
+
+
+def test_the_stored_run_is_901_shuffled_years_then_1901_1999_in_order() -> None:
+    """The stored global spin-up's protocol, and the RNG state its restart_1999 header records.
+
+    (10901, 14779, 51459) is `config->seed` in `ground_truth.restart_spinup_end`'s header: 901
+    draws from random_seed 1. Pinned here so the protocol needs no file to be checked.
+    """
+    idx, seed = cb.STORED_SPINUP.schedule()
+    assert idx.size == 1000
+    assert (idx[:901] < NYEAR).all()
+    assert list(idx[901:]) == list(range(99))
+    assert seed == (10901, 14779, 51459)
+    assert cb.STORED_SPINUP.years_needed() == 99
+
+
+def test_stopping_early_is_the_prefix_of_the_full_run() -> None:
+    full, _ = cb.STORED_SPINUP.schedule()
+    stop = cb.STORED_SPINUP.until(1699)
+    idx, seed = stop.schedule()
+    assert idx.size == 700 and np.array_equal(idx, full[:700])
+    assert stop.years_needed() <= NYEAR
+    # 700 draws, not 901: the state a 1699 restart would have carried.
+    assert seed != cb.STORED_SPINUP.schedule()[1]
+    with pytest.raises(ValueError, match="before the run"):
+        cb.STORED_SPINUP.until(999)
+
+
+def _long_forcing(nyear: int, firstyear: int = 1901) -> cb.Forcing:
+    """A forcing whose every year is distinguishable, so a wrong year index cannot hide."""
+    base = 10.0 + 8.0 * np.sin(2 * np.pi * (np.arange(cb.NDAYYEAR) - 100) / cb.NDAYYEAR)
+    temp = base[None, :] + 0.37 * np.arange(nyear, dtype=np.float64)[:, None]
+    return cb.Forcing(
+        temp=temp,
+        prec=np.full((nyear, cb.NDAYYEAR), 2.0) + 0.01 * np.arange(nyear)[:, None],
+        swdown=np.full((nyear, cb.NDAYYEAR), 150.0),
+        lwnet=np.full((nyear, cb.NDAYYEAR), -50.0),
+        lat=50.0,
+        firstyear=firstyear,
+    )
+
+
+def test_the_1999_replay_reads_the_file_years_in_order_and_needs_all_of_them() -> None:
+    f = _long_forcing(99)
+    buf, trace = cb.climate_buffer_from_forcing(f, protocol=cb.STORED_SPINUP)
+    # The last simulated year is 1999 = forcing index 98, so the daily registers are its last days.
+    assert np.array_equal(buf["temp"], f.temp[98, -31:])
+    assert list(trace.climate_index[-3:]) == [96, 97, 98]
+    with pytest.raises(ValueError, match="reads 99"):
+        cb.climate_buffer_from_forcing(_long_forcing(30), protocol=cb.STORED_SPINUP)
+    with pytest.raises(ValueError, match="starts in 1970"):
+        cb.climate_buffer_from_forcing(_long_forcing(99, 1970), protocol=cb.STORED_SPINUP)
+
+
+def test_the_1699_buffer_needs_only_the_first_30_years() -> None:
+    """Stopped at 1699 every year is a shuffled draw of 1901-1930, so extra years change nothing."""
+    stop = cb.STORED_SPINUP.until(1699)
+    short, t_short = cb.climate_buffer_from_forcing(_long_forcing(30), protocol=stop)
+    long, t_long = cb.climate_buffer_from_forcing(_long_forcing(99), protocol=stop)
+    err = cb.compare_climbuf(short, long)
+    assert all(v["max_abs"] == 0.0 for v in err.values()), err
+    assert t_short.seed_after == t_long.seed_after == stop.schedule()[1]
+
+
+def test_effective_albedo_on_the_stored_protocol_recovers_the_albedo() -> None:
+    f = _long_forcing(99)
+    made, _ = cb.climate_buffer_from_forcing(f, protocol=cb.STORED_SPINUP, albedo=0.23)
+    got = cb.effective_albedo(made, f, protocol=cb.STORED_SPINUP)
+    assert np.allclose(got, 0.23, atol=1e-6)
+    # The year weights cover the file's years, and those the schedule never reads weigh nothing.
+    w = cb.ema_year_weights(cb.STORED_SPINUP, 119)
+    assert w.size == 119 and w[99:].sum() == 0.0 and w.sum() == pytest.approx(1.0)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -246,3 +320,33 @@ def test_the_parameter_tables_match_the_model_parameter_file() -> None:
     for c, (low, high, pvd) in enumerate(cb.CROP_VERNALISATION):
         assert (low, high) == pair(crops[c], "tv_opt")
         assert pvd == num(crops[c], "pvd_max")
+
+
+@pytest.mark.needs_real_data
+@pytest.mark.parametrize("cell", [42490, 12045, 52059])
+def test_a_stored_restart_1999_buffer_is_reproduced_from_the_global_forcing(cell: int) -> None:
+    """The stored spin-up's protocol, replayed from the global forcing to 1999, against its own
+    restart_1999 record: bit-exact on every forcing-determined field, and the header's RNG state.
+    Three of the biome reference cells (temperate, tropical, boreal); the SLURM check in
+    `scripts/spinup_product.py --stage climbuf-check` does a stratified sample of the globe."""
+
+    restart = path("ground_truth.restart_spinup_end")
+    if not restart.exists():
+        pytest.skip("the stored spin-up restart is not present")
+    reader = RestartReader(restart)
+    with reader:
+        rec = reader.read(cell)
+    real, frac = rec["climbuf"], float(rec["stands"][0]["frac"])
+    lat = float(read_grid(path("inputs.coord"))[cell, 1])
+    f = cb.read_forcing(forcing_files(), cell, lat)
+    own = cb.effective_albedo(real, f, protocol=cb.STORED_SPINUP, stand_frac=frac)
+    ours, trace = cb.climate_buffer_from_forcing(
+        f, protocol=cb.STORED_SPINUP, albedo=own, aetp_mean=float(real["scalars"][3]),
+        stand_frac=frac,
+    )  # fmt: skip
+    assert trace.seed_after == tuple(reader.restart.seed)
+    err = cb.compare_climbuf(ours, real)
+    for name in EXACT:
+        assert err[name]["max_abs"] == 0.0, f"{name}: {err[name]}"
+    for name in ("V_req", "V_req_a"):
+        assert err[name]["max_rel"] <= 1e-12, f"{name}: {err[name]}"
