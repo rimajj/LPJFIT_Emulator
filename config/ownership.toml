@@ -66,6 +66,17 @@ globs = ["experiments/**"]
 owner = "X"
 kind = "exclusive"
 
+[[rule]]
+# X owns the figures too, for the same reason: `scripts/plot_validation.py` describes them as
+# "every figure that says what the emulator does and does not do", i.e. each one IS a claim, and
+# the claims are X's. The script stays shared (any line may improve it); what it writes into the
+# repository is X's, and the integrator writes it too. Twelve PNGs were tracked here with NO rule,
+# so `unowned = "deny"` refused any commit that regenerated one -- found 2026-09-23 by running the
+# checker over every tracked path, which reported figures/ as the only unowned directory.
+globs = ["figures/**"]
+owner = "X"
+kind = "exclusive"
+
 # ---------------------------------------------------------------------------
 # Shared, additive-only: any line may ADD here; nobody restructures.
 # ---------------------------------------------------------------------------

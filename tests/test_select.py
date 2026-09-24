@@ -238,3 +238,86 @@ def test_a_tier_too_small_to_cover_the_tiles_is_refused() -> None:
     """Silently dropping tiles would be exactly the density bias the design exists to remove."""
     with pytest.raises(ValueError, match="cannot cover"):
         pilot_cells(50)
+
+
+# ------------------------------------------------------------------------------------------------
+# Tier scaling and nesting (mid-tier readiness)
+# ------------------------------------------------------------------------------------------------
+
+
+def _pilot_v2_cells_csv() -> Path:
+    return Path(str(paths()["scratch"]["corpus"])) / "pilot-v2-constco2" / "cells.csv"
+
+
+@real_data
+@pytest.mark.needs_real_data
+@pytest.mark.slow
+def test_the_pilot_selection_is_unchanged_byte_for_byte(tmp_path: Path) -> None:
+    """The scaled cap is 3 at n = 200, so the pilot's cells.csv -- inside its plan hash -- must
+    come out identical to the one pilot-v2-constco2 actually ran."""
+    ran = _pilot_v2_cells_csv()
+    if not ran.is_file():
+        pytest.skip("pilot-v2-constco2 is not on disk")
+    sel = pilot_cells(200)
+    assert sel.max_per_tile == MAX_PER_TILE
+    sel.table.write_csv(tmp_path / "cells.csv")
+    assert (tmp_path / "cells.csv").read_bytes() == ran.read_bytes()
+
+
+@real_data
+@pytest.mark.needs_real_data
+@pytest.mark.slow
+def test_a_fixed_cap_of_three_cannot_hold_a_thousand_cells() -> None:
+    """The silent truncation, reproduced -- and now refused instead of returned."""
+    with pytest.raises(ValueError, match="could place only 472"):
+        pilot_cells(1000, max_per_tile=3)
+
+
+@real_data
+@pytest.mark.needs_real_data
+@pytest.mark.slow
+def test_the_mid_selection_nests_the_pilot() -> None:
+    ran = _pilot_v2_cells_csv()
+    if not ran.is_file():
+        pytest.skip("pilot-v2-constco2 is not on disk")
+    pilot = [int(c) for c in pl.read_csv(ran)["cell"].to_list()]
+    sel = pilot_cells(1000, include=pilot)
+    assert sel.table.height == 1000 and sel.table["cell"].n_unique() == 1000
+    assert set(pilot) <= set(sel.cells())
+    assert sel.tiles_covered == sel.tiles_populated
+    counts = np.bincount(sel.table["tile"].to_numpy())
+    assert counts.max() <= sel.max_per_tile
+    stages = dict(zip(*np.unique(sel.table["stage"].to_numpy(), return_counts=True), strict=True))
+    assert stages["biome"] + stages["nested"] == 200
+
+
+def _patched(monkeypatch: pytest.MonkeyPatch, n: int = 60, ntile: int = 6) -> None:
+    import vegemu.corpus.select as sel_mod  # noqa: PLC0415 -- the module whose global is patched
+
+    frame = _frame(n, ntile).with_columns(tile=pl.Series(np.arange(n) % ntile))
+    monkeypatch.setattr(sel_mod, "eligible_cells", lambda version="v0": frame)
+
+
+def test_nested_cells_are_forced_in_and_labelled(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patched(monkeypatch)
+    sel = pilot_cells(20, force_biome=False, include=[3, 17, 41])
+    assert {3, 17, 41} <= set(sel.cells())
+    stage = dict(zip(sel.table["cell"].to_list(), sel.table["stage"].to_list(), strict=True))
+    assert [stage[c] for c in (3, 17, 41)] == ["nested"] * 3
+    assert sel.nested == 3
+    assert sel.as_dict()["nested_cells"] == 3
+
+
+def test_a_nested_cell_that_is_not_eligible_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patched(monkeypatch)
+    with pytest.raises(ValueError, match="not eligible"):
+        pilot_cells(20, force_biome=False, include=[3, 9999])
+
+
+def test_a_short_selection_is_refused_not_returned(monkeypatch: pytest.MonkeyPatch) -> None:
+    """6 tiles x an explicit cap of 2 hold 12 cells; asking for 20 must raise, not return 12."""
+    _patched(monkeypatch)
+    with pytest.raises(ValueError, match="could place only 12"):
+        pilot_cells(20, force_biome=False, max_per_tile=2)
+    # ...and the scaled default cap simply makes room.
+    assert pilot_cells(20, force_biome=False).table.height == 20

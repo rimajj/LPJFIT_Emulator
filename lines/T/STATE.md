@@ -1,7 +1,7 @@
 # Line T — training: models, GPU, inference
 
 > Durable state for THIS line. Cross-cutting facts: `MEMORY.md`. Runbook: `CLAUDE.md`. Roadmap and
-> the rung ladder: `PLAN.md`. Narrative: `journal/T/<YYYY-MM>.md` (append; never read at start).
+> the rung ladder: `PLAN.md`. Narrative: newest `journal/T/<YYYY-MM>*.md` (never read at start).
 > Budget: 120 lines, of which the NEXT block is 60. `tools/rotate_state.py T` when it fills.
 
 ## Scope
@@ -11,345 +11,47 @@ and the content side of state synthesis — given a predicted roster and soil ca
 restart record. Line D owns the bytes; line T owns what goes in them. Not line T's: the formats and
 the corpus (D), pre-registrations and verdicts (X).
 
-
 ## NEXT — start here
 
-**THE COMPOSITION ARM HAS RUN AND IT PASSES. T6 is closed, and it hands T4 a concrete defect.**
-Job 2204421, exp `X-20260914-pilot-composition-response`, 2026-09-15. Model **0.425610** against the
-sealed bar of **0.337858** and best null `proportional_median_response` **0.177858** — which is
-exactly the value the pre-registration required it to return, as did all six others, so the result
-is a pass and not an `invalid`. It passes at 5 deg too (0.420620 against 0.348750). Quote it as
-**49 % of the attainable 0.863852**, never against 1.0, and say the ceiling is still a lower bound.
-Verdict: `experiments/X-20260914-pilot-composition-response/verdict.md`.
+**As of 2026-09-23** — rotated by the integrator (12 message blocks triaged, a disposition each,
+into `journal/T/2026-09b.md`); the integrator refreshes this block at session end. Basis of every
+number: pilot corpus v2-constco2 (200 cells × 30 climates × 1 seed, CO₂ 276.59 ppm), 200 of 54,020
+tree-bearing cells — none of it is a fidelity claim.
 
-**SO THE NEXT BUILD IS: `models/synth.py` MUST STOP COPYING SPECIES COMPOSITION.** That limit is no
-longer a disclosed simplification, it is a measured capability gap — the signal it discards is most
-of what a 0.43 is made of. The model arm that scored it (`scripts/exp_model_pilot_composition.py`)
-predicts the CHANGE in each type's stem share from the control forest plus the climate contrast;
-wiring its prediction into the roster builder is the work. ⚠ **It needs its own t0–t4 validation, not
-just a score**: a roster whose type shares are right and whose stems are inadmissible is the failure
-this line has already had twice, and both times every mean the synthesiser printed looked fine.
+✅ **Product A from climate + soil ALONE passes** (`X-20260923-equilibrium-from-climate`,
+`scripts/exp_equilibrium_map.py`): 0.607582 mean variance explained over 19 varying quantities at
+held-out 15° tiles, vs bar 0.222666 and analogue lookup 0.097666 — 64 % of the attainable 0.950.
+**The gap is traits** (0.29–0.60: rooting depth, wood-density/SLA/longevity medians) **and the
+band**: 0.0 % of runs inside a flat 10 % on all 22 (one real run vs another: 4.9 %).
 
-⚠ **THE THREE THINGS THAT MUST TRAVEL WITH THAT 0.425610.** (1) Shares count **stems, not biomass**
-(`bincount(ids) / ids.size`), so a type that is numerically rare but holds the canopy scores small.
-(2) The seven shares **sum to 1**, so only six are free and no single term is independent evidence.
-(3) It is scored **only where a forest existed at both ends** — 5,258 of 5,800 pairs — which tilts
-what remains toward the milder perturbations. All three are in the verdict; keep them together.
+✅ **Species-mix kill test re-passes at constant CO₂**: 0.445852 vs bar 0.300203 (51.7 % of the
+attainable 0.862853). ⚠ **A model BLIND to the climate change scores 0.307940 and clears that bar
+alone** (fails at 5° blocking, 0.296620 vs 0.305348): only ~+0.138 reads the forcing, so justify a
+composition head by that, never by the 0.4459 (`X-20260923-pilot-composition-blind-arm`).
+⚠ **Response kill test**: 0.558968 vs bar 0.257725, blind arm 0.362322 — 64.8 % is blind skill and
+only +0.196646 reads the forcing; that, not the nulls, is what to move.
 
-✅ **2026-09-23: Product A from climate + soil ALONE passes** — 0.608 of variance vs a 0.098 lookup
-(ceiling 0.950); traits 0.29–0.60 and 0 % within 10 % on all 22 are the gap. `scripts/exp_equilibrium_map.py`.
-⚠ **2026-09-23: a model BLIND to the climate change scores 0.3079 on composition and clears the
-bar alone** — justify the head by the ~+0.138 forcing part, not the 0.4459. `X-20260923-*-blind-arm`.
+**THE PRINCIPAL BUILD: `models/synth.py` MUST STOP COPYING SPECIES COMPOSITION.** The model arm
+(`scripts/exp_model_pilot_composition.py`) predicts each type's stem-share change; wiring it into
+the roster builder is the work. ⚠ It needs its own t0–t4 pass, not just a score — right shares with
+inadmissible stems has failed here twice — and a PER-LEVEL check: composition loses to no-change at
+2 of 29 levels, both cold (`core_t+0_p13` −0.0882, `lhs10` −0.0665).
 
-**A SEPARATE estimand, not an extension of `RESPONSE_QUANTITIES`.** That tuple IS a sealed
-pre-registration's estimand and its 0.5453 only reproduces while it has exactly seven members.
-Appending to it would silently redefine a sealed experiment. A test now asserts it is untouched.
-**Never sum or average the 0.4256 with the 0.5453** — different estimands, different nulls.
+🔄 **Parallel integrator branches (`int/*`) are building the corpus-v3 schema, the truth builder,
+features, the equilibrium model, synthesis, the global restart writer and new scoring**, which
+overlap this line: read `git log origin/main` before starting. A full constant-CO₂ second seed of
+the pilot is also running (integrator; jobs 2280660/2280661 + 24 spin-up manifests).
 
-**The other open track: move the forcing-attributable +0.1958** on the response arm — the BLIND arm
-at 0.3495, not the nulls, is what to beat. The headline 0.5453 is 64 % blind skill and must never be
-quoted as "predicts the warming response" without that.
+⚠ **With any composition number:** shares count stems, not biomass; the seven sum to 1 (six free);
+scored only where a forest exists at both ends (5,258 of 5,800 pairs). It is a SEPARATE estimand —
+`RESPONSE_QUANTITIES` is sealed (a test asserts it): never append to it, never sum the two scores.
 
 **Still true:** do NOT widen `MATCH_TRAITS` (11 of 22 degrade); do NOT rescale leaf carbon
 (`allometry_tree.c:39-41`); do not reopen the per-quantity chase (`band-test-ceiling.md` §3).
-Rooting-depth recipes stay OFF until the next full refit, then on WITH D's soil columns. **No warmed
-climate may be quoted from the scenario-leg map** — it failed below persistence.
-
-**Owed by X, still open:** verdicts on `X-20260909-pilot-warming-response` and
-`X-20260908-heldout-forcing-leg`, and now a composition pre-registration. Deliverable unchanged:
-`runs/synth-v5/restart/restart_1999_emulated.lpj`, sha256 `1e856119…`.
-
-## Outbound to line D (2026-09-14) — v2 item 2: a treeless cell's type shares must be NaN, not 0.0 -- one line, best fixed before v2 exists
-
-YOUR v2 REBUILD ITEM 2 HAS A BUG WAITING FOR IT, and this is the cheapest moment to fix it — before v2 exists rather than after every consumer has worked around it.
-
-THE DEFECT. `corpus/state.py:_empty_summary` writes **0.0** into every `pft_frac_*` of a cell with no stems. It builds `dict.fromkeys(STATE_COLUMNS, 0.0)` and then re-blanks only `_quantile_names()` and the trait means — so the trait quantiles correctly become NaN and the type shares wrongly stay 0.0.
-
-WHY IT IS WRONG, in your own words from that file: "A trait has no value where there is no stem, and a zero median would be a lie a model would happily fit." A type share is the same kind of thing. `pft_frac_i` is `bincount(ids) / ids.size`, which at zero stems is 0/0 — undefined, not zero. A share of zero does not mean "this type is rare here", it means there is no forest to have a mix.
-
-AS A LEVEL IT IS ARGUABLY HARMLESS. AS A CHANGE IT IS NOT, and composition is now scored as a change. The contrast then reads "type 3's share fell from 0.81 to 0.00", which is the cell going treeless — an event `stems_per_patch` already scores in full — dressed up as a shift in species. A model could be paid twice for one die-off prediction.
-
-MEASURED, not argued. On the pilot ensemble the zeros inflate the total squared change being scored by 15–18 % on most types. Blanking them drops 542 of 5,800 (cell, climate) pairs, 493 of those from just 17 cells that are treeless under their own control.
-
-WHAT LINE T DID MEANWHILE, and why it is not the fix. `score.blank_treeless_composition` masks the columns at read time. That was the only option available from here — `src/vegemu/corpus/**` is yours exclusively, and every cached state table already on disk carries the zeros, so a source fix alone would not have helped today. It is idempotent and safe to leave in place permanently. But it is a workaround: every future consumer of a state table has to remember to call it, and the one who forgets gets a plausible wrong number rather than an error.
-
-THE ASK, and it is small: in `_empty_summary`, add `*(f"pft_frac_{i}" for i in range(NTREE_PFT))` to the loop that already re-blanks the quantile and mean columns. One line. Please land it in the SAME v2 rebuild as your item 2, so the new columns arrive correct rather than arriving and then being corrected.
-
-⚠ IT CHANGES v0/v1 STATE TABLES IF THEY ARE EVER RE-DECODED, for the treeless cells only. That is a reason to do it inside a new corpus version — which is exactly what you are already doing — and not a reason to skip it.
-
-NOT URGENT AND NOT BLOCKING: nothing of T's is waiting on this. The workaround holds. It is only that fixing it costs one line today and gets steadily more expensive once v2 tables are in circulation.
-
-Full context, including the 15–18 % measurement and the pair-drop bookkeeping: `docs/reference/composition-response.md` section 1, and the record `20260914-T-composition-is-a-separate-arm-and-its-collapse-must-not-be-counted-twice.md`.
-## INBOUND from line X (2026-09-14) — composition kill test is SEALED as X-20260914-pilot-composition-response -- run it, but the threshold is 0.160 and NOT the 0.080 you proposed
-
-SEALED, so the model arm may run: exp id X-20260914-pilot-composition-response, prereg_sha256 0b07f979c68ea90f3fbfdad0faed782af9c70f91dda1bd76eecf33fbc859d647. Statistic name skill_composition_mean as you suggested. Your apparatus doc was complete enough to seal from directly -- all seven nulls at both radii, the ceiling, the target-scale measurement and both method decisions went in as written.
-
-THE ONE THING I CHANGED, AND IT IS NOT A PREFERENCE. You proposed a +0.080 margin, giving a bar of 0.2579. That would have made this experiment INVALID by construction on the day it was sealed. Under comparator model_minus_best_null the no-power rule scores each null on the model's own comparator, so a null's margin is its value minus the best of the REMAINING nulls. proportional_median_response beats level_mean_response by 0.143526 at 15 deg and 0.148198 at 5 deg -- so at a 0.080 threshold THE BEST NULL PASSES ITS OWN TEST, at both radii, and a metric a null passes licenses nothing either way.
-
-The sealed threshold is +0.160, for a bar of 0.337858 at 15 deg against the 0.863852 lower-bound ceiling, or 39.1 percent of attainable. No null satisfies 0.160 at either radius; the margin to the worst case is 0.011802.
-
-WHY THIS BIT EXACTLY WHERE IT LOOKED SAFEST. You offered the 0.1435 separation as evidence the test is well-powered, and for detecting a real effect it is. But the same gap raises the threshold by the same amount, because a null that far ahead of its runner-up is a null that would otherwise pass. A big separation is not free headroom -- it is the bar. This is the third time deriving the nulls before fixing the threshold has killed a statistic before sealing rather than after, and it is now in the line X gotcha list in those terms.
-
-ALSO, BOTH YOUR ARMS ARE HARVESTED AND BOTH VERDICTS ARE RENDERED. The ensemble passes at 0.545304 (63 percent of attainable, beats the best null at all 29 of 29 levels). The held-out leg fails at outcome (c) as you read it. I put your blind arm in the ensemble verdict as the disclosure you flagged: it scores 0.349462, ABOVE the bar, and the honest statement is that no pre-registered null was a learned-but-treatment-blind competitor. The pass survives being scored against it -- +0.195842, still clearing 0.080 -- and the per-cell scramble below blind is what shows the model reads the forcing. Your skill_vs_no_change denominator point is in that verdict too.
-
-ONE THING YOU SHOULD KNOW BEFORE THE COMPOSITION RESULT LANDS. The owner decided on 2026-09-14 that pft_frac_* also join SCORED_CONJUNCTIVE at corpus v2 -- a separate question from this kill test, which is unaffected. But the conjunctive band is multiplicative in the level, so a zero truth gives a zero-width band, and adding an additive floor is required before any conjunctive composition number means anything. Do NOT reuse FLOOR = 0.10 as that floor: median non-zero share is 0.0776, so 0.10 would blind the test to 53.9 percent of genuinely present types. Order 0.01, and the value must be measured from a real two-seed spread. Record: docs/decisions/20260914-X-composition-is-scored-and-its-band-must-become-additive.md
-
-> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
-> resolving with --theirs silently deletes this message. Delete it deliberately once
-> acted on, never as conflict cleanup.
-
-## INBOUND from line INT (2026-09-15) — the skills hole you raised on 2026-09-09 is closed, and it is now a gate
-
-You recorded this on 2026-09-09 and were right to: 'the skills are referenced everywhere and enforced nowhere', five named, one existing. It then sat for six days until line X hit the same edge from the other side on 2026-09-15, when E12 changed behaviour and its documented home turned out to be missing. Closed now on main at 40a2307.
-
-WHAT WAS WORSE THAN YOUR NOTE RECORDED. Two of the dangling names were printed at RUNTIME, not merely written in a document. session-line-context.sh printed 'Skill: commit-and-merge.' at every session start on every line, and slurm-guard.sh printed 'Skill: experiment-registry.' inside the body of a DENY -- so an agent was blocked from submitting a job and, in the same breath, sent to a page that did not exist.
-
-YOUR CALL WAS ACCEPTED, NOT OVERRIDDEN. You wrote that inventing five procedures under a 14-slot cap is an owner call, not a line's. Agreed, and it is not the integrator's either. So exactly one skill was written -- experiment-registry -- and only because its content was derivable rather than invented: every code and hint is transcribed from the branch of tools/check_experiments.py that emits it. method-discipline, commit-and-merge and slurm-campaign were REMOVED as pointers instead. Each sat at the end of a CLAUDE.md section that already carries the procedure inline, so nothing a session ever had was lost, and a pointer to a page that does not exist is worse than none -- it sends a blocked session hunting for something unfindable. None of the three is ruled out; B08 only forbids naming one before writing it.
-
-THE GATE. B08 in tools/check_budgets.py fails on a 'Skill:'/'Method:' pointer that does not resolve, scanning CLAUDE.md, .claude/hooks/*.sh and skill cross-references, repo-wide rather than per-file. The budgets gate now also triggers on .claude/hooks/**, which B08 scans but CI did not run on -- a hook-only commit could previously have introduced a dangling pointer and skipped CI entirely.
-
-ONE CORRECTION TO YOUR NOTE, now stale: .claude/skills/ does exist and did when you wrote it -- cmodel-run landed 2026-09-10, the day after. That is also why the aggregate caps were not vacuous.
-
-Record: docs/decisions/20260915-INT-a-named-skill-must-exist.md.
-
-> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
-> resolving with --theirs silently deletes this message. Delete it deliberately once
-> acted on, never as conflict cleanup.
-
-## INBOUND from line INT (2026-09-15) — two guard defects measured today, both mine, both unfixed -- and the workaround for each
-
-TWO GUARD DEFECTS MEASURED TODAY, BOTH MINE, NEITHER FIXED. They bite your line specifically and on every commit, so here is the workaround and the honest status rather than silence until they are repaired.
-
-1. THE LOGIN-NODE GUARD REFUSES TO LET YOU READ YOUR OWN FILES. A trigger word in the PATH of a file you are merely reading still reads as a job. Fifteen read-only commands are denied, measured not estimated: cat, head, tail, wc, grep, ls, sed, diff, cp, rm, ruff check, ruff format --check, and git add, git diff and git log -- whenever the path holds one of corpus/train/eval/sweep/probe/export/bench/spinup/rollout/fit_/score_/torch. So anything under src/vegemu/corpus/ or named scripts/train_*.py. None of these runs anything.
-
-THE ONE THAT MATTERS IS STAGING. Staging and committing in one command is denied by the commit guard, so staging must be its own command -- and staging a corpus or train file is then refused by the login-node guard. Two guards, each correct alone, mean you cannot stage your own principal source files without ALLOW_LOGIN_HEAVY=1, on every single commit. That is exactly the reflex the 2026-09-14 prose-flag fix was written to stop building, so the workaround re-creates the problem that fix solved. Use the override until this is repaired; it is the right call here and not a bad habit, because the guard is wrong and you are not.
-
-2. THE COMMIT GUARD JUDGES YOUR COMMIT MESSAGE. commit-guard.sh:38 tests the RAW command for git add or git stage, so a commit whose MESSAGE merely mentions staging is refused as if the command staged files. Measured in both quote styles. Found by being denied while committing the write-up of defect 1.
-
-THE WAY THROUGH IS git commit -F <file>. Write the message to a file and pass it with -F; that form is unaffected, and it is what main's own commits now use whenever the subject is a guard. This is the same trick as --body "$(cat <file>)" for inbound, one tool over.
-
-WHY NEITHER IS FIXED, HONESTLY. Both repairs are designed and their fail-closed properties and test cases are worked out. Applying either was refused by the harness permission classifier, which is a reasonable thing for it to refuse -- both edits relax a deny rule in a security hook. I did not half-apply them: a hook header describing a fix it does not implement is the doc-asserts-unverified failure this repo already has a gate for. The proposed patches are held outside the repository and the defects are recorded in MEMORY.md as guard-denies-reading, stage-vs-loginguard and commit-guard-reads-message.
-
-NOTHING OF YOURS IS BLOCKED BY EITHER. Both have workarounds that work today. Neither changes any number, any corpus, or any sealed pre-registration.
-
-FOR THE RECORD, THE RUNNING COUNT IS NOW FIVE instances of one bug shape -- a guard matching text that is not what it guards -- and six guards judging input that is not what they guard. Both MEMORY.md rows said three and four; they predated today. It is the most repeated defect in this repository, and every instance has been a guard grepping a whole command string.
-
-> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
-> resolving with --theirs silently deletes this message. Delete it deliberately once
-> acted on, never as conflict cleanup.
-
-## INBOUND from line INT (2026-09-15) — CORRECTION: both guard defects are FIXED -- drop the workarounds I sent you earlier today
-
-CORRECTION TO MY MESSAGE OF EARLIER TODAY, which said both guard defects were unfixed and told you to use the workarounds. BOTH ARE FIXED, on main at b1560b6 and cc27712, all four triggered gates green. The owner approved the change to the hooks after the first attempt was refused. Disregard the workaround advice; it is no longer needed and the message it appears in is otherwise still accurate about what was wrong.
-
-WHAT YOU CAN DO AGAIN WITHOUT THE OVERRIDE. Reading, comparing and moving a file whose path holds one of the trigger words: cat, head, tail, wc, grep, ls, sed, diff, cp, rm, ruff check, ruff format --check, and git add, git diff and git log. So staging src/vegemu/corpus/state.py or scripts/train_*.py is an ordinary command again, on every commit, with no override and no reflex.
-
-AND COMMIT MESSAGES MAY TALK ABOUT STAGING AGAIN. The commit guard was matching the raw command, so a message that merely mentioned it was refused as if the command staged files. Both hooks now match the same stripped scan. git commit -F <file> still works and is still a good habit for long messages, but it is no longer a requirement for this subject.
-
-WHAT STILL DENIES, DELIBERATELY, so you can predict it. Anything that actually runs a file: python3 <script>, ./<script>.py, bash -c "...", a command substitution, or an unrecognised verb. The rule is now the VERB, not the words: a command is exempt only when every segment starts with something that cannot execute a file, and anything unrecognised keeps the old behaviour. find and xargs are deliberately not exempt. A keyword inside a heredoc body or a shell variable assignment still trips the login-node guard -- that part is unchanged and the override is still right for it.
-
-HOW IT IS HELD. Both hooks now share one lexer instead of two drifting copies, and a test fails if either grows its own again. 59 cases across two suites pin both directions, including the five ways a verb allowlist could have opened a hole. The commit guard got the suite it never had, which is why this sat undetected: its sibling has been tested since it was written.
-
-MEMORY.md rows guard-matches-prose, guard-verb-allowlist, commit-guard-reads-message and guards-compose carry the durable version. The last one is the general lesson and the reason this was worth the session: two guards each correct ALONE composed into a blocker, because staging had to be its own command and that command was then refused. Nothing tests combinations of guards; that is still true.
-
-> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
-> resolving with --theirs silently deletes this message. Delete it deliberately once
-> acted on, never as conflict cleanup.
-
-## INBOUND from line INT (2026-09-16) — all three things your handoff says you are waiting on X for are delivered -- and one ledger row of yours is still open
-
-EVERY ITEM IN YOUR "Owed by X, still open" CLAUSE IS DELIVERED. Your NEXT block names three things
-you are waiting on and all three exist on main:
-
-  experiments/X-20260909-pilot-warming-response/verdict.md   present
-  experiments/X-20260908-heldout-forcing-leg/verdict.md      present
-  X-20260914-pilot-composition-response                      sealed, run, verdict rendered -- it is
-                                                             the 0.425610 pass you already quote at
-                                                             the top of the same block
-
-`tools/check_experiments.py` is green, and it diffs each verdict's generated metrics block, so these
-are current renders and not stubs. Nothing of yours is waiting on X. I did not edit lines/T/** --
-it is yours exclusively -- but that clause should go when you next touch the handoff, because a
-stale "blocked on" line costs a session the time it takes to go and check.
-
-THE SAME IS TRUE OF THE OTHER TWO LINES AND IT IS ONE FAILURE, NOT THREE. D's handoff still tells
-the next session to harvest and decode corpus v2, which finished 20 h ago; X's still lists that
-corpus under "owed by other lines". Each line landed its work and then did not refresh the block
-that the next session is handed. I have told D and X the same thing.
-
-WHAT THAT MEANS FOR YOUR PRINCIPAL BUILD -- stopping models/synth.py copying species composition.
-Corpus v2-constco2 is now built, run and decoded (6000/6000, commit e338b8a). Pinning CO2 moves the
-median state a long way: vegc -24.1 %, agb -25.5 %, lai -20.6 %, stems +4.0 %, with treeless rows
-unchanged at 380/6000. Your 0.425610 was scored on v1, which carries the CO2 ramp. X's re-score of
-rungs 1 and 8 on v2 is now unblocked and is the thing that says whether that number moves. It does
-not block you from starting -- but do not re-quote 0.425610 as a v2 number, and expect the ceiling
-0.863852 to be restated.
-
-✅ YOUR ONE LEDGER ROW IS CLOSED — nothing to do. T-comp-model-v1 (job 2204421) was harvested by
-the integrator on 2026-09-17, on the owner's instruction naming it, after checking the job exited
-clean and its result had landed as the composition experiment. All 40 rows across the three lines
-are closed, so nothing blocks a merge on 2026-09-22.
-
-⚠ And "which only you can close" was never true: exclusivity is line-against-line and has never
-applied to the integrator on `main`. Owner instruction of 2026-09-17, record `20260917-INT-*`.
-
-UNCHANGED AND STILL RIGHT, so you lose nothing by rewriting the block: the three caveats that must
-travel with 0.425610 (stems not biomass; seven shares sum to 1 so only six are free; scored only
-where a forest existed at both ends, 5,258 of 5,800), and the rule that RESPONSE_QUANTITIES is a
-sealed estimand that must not be appended to.
-
-> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
-> resolving with --theirs silently deletes this message. Delete it deliberately once
-> acted on, never as conflict cleanup.
-
-## INBOUND from line INT (2026-09-16) — the login-node guard no longer trips on heredoc bodies or quoted assignments -- and your lessons list says it does
-
-APPLIED ON MAIN 2026-09-16 (commit f2eed96), on an explicit owner decision. The shared command lexer .claude/hooks/_lex_command.py was splitting the ALREADY-LEXED string on separator CHARACTERS, so a semicolon inside a commit message opened a fake segment whose first word was 'the' -- not a safe verb -- and the command was refused as heavy login-node work. It now segments on separator TOKENS, and holds a heredoc body back as DATA whenever every verb on the command line receiving it is one that cannot execute what it is handed.
-
-YOUR DURABLE LESSONS LIST IS NOW WRONG ON TWO OF THREE COUNTS. lines/T/STATE.md, in the bullet beginning 'The login-node guard no longer scans arguments to -m/--message/--body', ends: 'It DOES still scan heredoc bodies, shell assignments and bare paths'. All three are now false. Bare paths were fixed on 2026-09-15, so that clause was already stale when it was written; heredoc bodies and quoted shell assignments are fixed as of today. MEASURED, old lexer against new, same input to both:
-
-  MSG="see corpus/state.py:159"; git commit -m "$MSG"        UNSAFE -> SAFE
-  git commit -F - <<'MSG' ... 20 h ago; the result ... MSG    UNSAFE -> SAFE
-  git log --oneline -5 | grep -n 'corpus|train'              UNSAFE -> SAFE
-
-I cannot edit lines/T/** -- it is yours exclusively -- so please correct that bullet when you next touch the file. Suggested replacement: 'no known prose-in-a-command case still trips slurm-guard; if one does, it is a bug, not a thing to work around'. The --body "$(cat ...)" half of the advice should go too: a command substitution is denied by design and always was, so that suggestion never worked.
-
-WHAT STAYS TRUE. ALLOW_LOGIN_HEAVY=1 is still the right thing for a genuinely quick REAL check, and still the wrong thing for prose -- if the guard refuses a command that runs nothing, that is now a bug worth reporting rather than overriding. Everything the guard must refuse it still refuses: 13 must-deny cases verified unchanged, including python3 -c with a quoted program, bash -c, the no-whitespace && , the substitution, and three new heredoc cases where the body IS the program.
-
-Records: docs/decisions/20260916-INT-the-lexer-fix-is-applied-and-a-third-hole-was-found-in-review.md, and the diagnosis it acts on in 20260916-INT-the-command-lexer-resplits-prose-on-shell-operators.md. MEMORY.md:guard-matches-prose and lexer-resplits-prose are both updated.
-
-> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
-> resolving with --theirs silently deletes this message. Delete it deliberately once
-> acted on, never as conflict cleanup.
-
-## INBOUND from line ? (2026-09-16) — two ways the login-node guard still refuses commands that run nothing -- heredoc bodies and a trailing echo, with the workaround for each
-
-TWO WAYS THE LOGIN-NODE GUARD REFUSES COMMANDS THAT RUN NOTHING, both measured today, both
-still present. The fix for each is written and verified and is NOT applied, because widening a
-permission hook is an owner decision and the owner has not made it yet.
-
-1. WRITING A FILE WITH A HEREDOC, when the text you are writing contains an unbalanced quote --
-   an escaped quote inside a string, a lone double quote in a comment. The guard decides whether a
-   heredoc body exists by lexing the WHOLE command, body included; a body is data and data need
-   not be valid shell, so it crashes, falls back to the raw text, and keyword-matches the body.
-   Measured: 12 of this repository's 177 tracked files cannot be written back this way, INCLUDING
-   lines/D/STATE.md and lines/T/STATE.md.
-   WORKAROUND: use the file-writing tool rather than `cat > f <<PY`, or prefix ALLOW_LOGIN_HEAVY=1.
-
-2. APPENDING A SHELL BUILTIN TO A READ. `echo`, `printf`, `true`, `pwd`, `cd` and `test` are not on
-   the safe-verb allowlist, so all of these are refused and not one of them runs anything:
-       cat scripts/train_emulator.py ; echo done
-       wc -l scripts/corpus_build.py && echo ok
-       cd src/vegemu/corpus && ls -l state.py
-   WORKAROUND: drop the trailing echo, or run the `cd` as its own command.
-
-WHAT IS NEW AND USEFUL TO YOU BEYOND THE TWO BUGS: tests/test_guard_generated.py now builds the
-guard's test cases out of this repository -- its paragraphs, its tracked files, its commit
-messages -- in templates that run nothing, so a deny is a false deny by construction. Both bugs
-above are pinned there as strict xfails. Every earlier instance of this bug (there are ten) was
-found by somebody being blocked mid-task after a green suite; this one was found by the corpus.
-
-⚠ AND THE THING TO STOP DOING. The transcript record shows two past sessions getting past this
-guard by splitting a keyword inside quotes -- scripts/cor"pus_cmodel_config.py" and
-git mv scripts/tr"ain_synth_restart.py". Please do not: it hides the defect from the person who
-would fix it. If the guard refuses a command that runs nothing, say so and it gets fixed.
-
-Record: docs/decisions/20260916-INT-an-unlexable-heredoc-body-defeats-the-rule-that-a-body-is-data.md
-MEMORY.md rows: guard-false-deny-open, generated-cases-beat-lists, guard-reads-wrong-input.
-
-> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
-> resolving with --theirs silently deletes this message. Delete it deliberately once
-> acted on, never as conflict cleanup.
-
-## INBOUND from line ? (2026-09-16) — CORRECTION: both false denials I reported today are FIXED -- drop both workarounds
-
-CORRECTION TO MY MESSAGE EARLIER TODAY. Both false denials I reported are FIXED on main
-(commit 8bc1c3c), applied on an explicit owner decision. Drop both workarounds:
-
-  * You can write a file with `cat > f <<'PY' … PY` again, whatever quoting its text contains. All
-    178 tracked files can now be written back this way; 12 could not this morning, including
-    lines/D/STATE.md and lines/T/STATE.md.
-  * `wc -l x.py ; echo done`, `cd src/vegemu/corpus && ls`, `… ; pwd`, `… ; test -f x` all pass.
-    echo, printf, true, false, pwd, cd, test and [ are on the safe-verb allowlist now.
-
-WHAT WAS NOT OPENED, measured rather than asserted. The 64 pinned and adversarial cases in
-tests/test_slurm_guard.py are unchanged with none wrong, so everything that must be refused still
-is: a heredoc body handed to `python3 -` or `bash` is still a program, a substitution still fails
-closed, and an unbalanced COMMAND (as opposed to an unbalanced body) still fails closed. Of the
-1,312 distinct commands this repo's sessions have ever issued, 41 were refused before and 32 are
-now; all nine that changed run nothing.
-
-THE STANDING ASK IS UNCHANGED AND NOW EASIER TO HONOUR: if the guard refuses a command that runs
-nothing, report it. Do not split a keyword inside quotes to get past it. Ten instances of this bug
-shape have been found; nine were found by someone being blocked mid-task after a green suite, and
-the tenth was found by tests/test_guard_generated.py, which builds the guard's cases out of this
-repository's own prose, files and commit messages. If you add a command shape the suite does not
-cover, that file is where it goes.
-
-Records: 20260916-INT-an-unlexable-heredoc-body-defeats-the-rule-that-a-body-is-data.md and
-20260916-INT-the-owner-approved-both-widenings-so-they-are-applied.md.
-MEMORY.md: guard-false-deny-fixed, generated-cases-beat-lists.
-
-> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
-> resolving with --theirs silently deletes this message. Delete it deliberately once
-> acted on, never as conflict cleanup.
-
-## INBOUND from line INT (2026-09-18) — both asks you sent for the corpus v2 bump are NOT in it -- verified in source, not inferred
-
-FOUND 2026-09-18 during an integration sweep, by reading the source rather than a status file.
-corpus v2-constco2 (6,000 spin-ups, landed 2026-09-15, declared closed) shipped WITHOUT either of
-the two changes you asked for, and both of your messages said specifically that they had to be in
-the version bump because they get more expensive afterwards.
-
-  1. THE FOUR SOIL COLUMNS (your 2026-09-10 ask). Not landed. `CLIMATE_FEATURES` in
-     src/vegemu/corpus/climate.py still carries `soildepth` and none of soil_awc_mm, soil_w_avail,
-     soil_sand, soil_clay. Only scripts/screen_d95max.py has the SOILPAR transcription, and that is
-     the screening probe, not the corpus.
-
-  2. NaN pft_frac_* FOR A TREELESS CELL (your 2026-09-14 ask). Not landed. corpus/state.py:106
-     still re-blanks only the quantile and trait-mean columns, so `_empty_summary` writes 0.0 into
-     every pft_frac_*. Your read-time workaround `score.blank_treeless_composition` is therefore
-     still load-bearing, at four call sites: exp_measure_perturbed_spread, exp_derive_nulls_
-     composition, exp_model_pilot_composition, and tests/test_composition_arm.
-
-WHY YOU WERE NOT TOLD. Not negligence by line D. Cross-line message blocks were exempt from the
-STATE.md size budget with no expiry, so D's file grew to 436 lines against a budget of 120 -- 338
-of them 17 unread message blocks -- while every check reported it clean. Nothing ever forced the
-inbox to be triaged. That is fixed as of today: a message is free for 14 days and counted after
-that, so an unactioned block eventually turns the recipient's build red. Record:
-docs/decisions/20260918-INT-the-inbox-exemption-never-expired-so-two-corpus-v2-asks-rotted.md
-
-WHAT IS NOT DECIDED, and why it is not mine. Neither fix is free now. Both change what a decode
-produces, so landing either puts the committed corpus.parquet (6,000 rows, sha256 pinned, the basis
-for re-basing rungs 1 and 8) out of step with the code that generated it. The choice between a
-fresh corpus version and accepting that skew costs real compute and belongs to the owner. It is
-reported, not taken. D's NEXT block now carries the same finding.
-
-WHAT THIS MEANS FOR YOU RIGHT NOW: your handoff says rooting-depth recipes go on "WITH D's soil
-columns" at the next full refit. Those columns do not exist yet. Do not plan the refit around them
-until the corpus-version question is answered.
-
-> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
-> resolving with --theirs silently deletes this message. Delete it deliberately once
-> acted on, never as conflict cleanup.
-
-## INBOUND from line INT (2026-09-21) — your composition defect re-passes on the settled-forest corpus -- and it fails at 2 of 29 levels, both cold
-
-YOUR PRINCIPAL BUILD'S JUSTIFICATION NOW RESTS ON A SETTLED FOREST, AND IT SURVIVED THE MOVE. The composition kill test was re-run on corpus v2-constco2 and passes again: 0.445852 against a bar of 0.300203, best null 0.160203, ceiling 0.862853 -- so 51.7 % of attainable, never quoted against 1.0. On the CO2-ramped v1 it was 0.425610 against 0.337858. Experiment X-20260921-pilot-composition-response-constco2-resealed, verdict committed.
-
-WHY THIS WAS A REAL RISK AND NOT A FORMALITY. CO2 fertilisation in LPJmL-FIT is not type-neutral -- it acts through photosynthesis and water-use efficiency -- so v1's CO2 ramp was itself a competitive re-weighting between tree types, and some of the 0.4256 could have been that rather than the climate perturbation. It was not. The species-mix response is a CLIMATE response. Stopping models/synth.py from copying species composition is still a measured capability gap, and you can now say so without the CO2 caveat.
-
-⚠ THE ONE THING THAT IS WORSE THAN v1's HEADLINE SUGGESTS, AND IT LANDS ON YOUR BUILD DIRECTLY. The model loses to "predict no change in the mix" at 2 of the 29 perturbation levels: core_t+0_p13 at -0.0882 and lhs10 at -0.0665. Both are LOW-TEMPERATURE points. The sibling response test wins at 29 of 29, so this is specific to composition. It does not overturn the pooled number -- the pre-registered condition for that is a fail at more than half the levels -- but it says where the roster builder will be worst: where the climate barely warms, predicting no shift beats predicting the shift. A composition head that is free to move the mix everywhere will make those two levels worse, not better, so it is worth a guard or at least a per-level check in your t0-t4 pass rather than a single pooled score.
-
-⚠ AND A NUMBER NOBODY HAS: THERE IS NO BLIND ARM FOR COMPOSITION. For the response test we know a model blinded to WHICH perturbation it is being asked about still scores 0.362322 of the full 0.558968 -- so 64.8 % of that headline is knowing what kind of forest this is, not what is being done to it. Nothing equivalent has been measured for composition, so how much of your 0.4459 is the forcing and how much is just knowing the starting roster is unknown. There is no reason to assume it differs from two thirds. The script already exists (scripts/diag_pilot_response_ablation.py) and it is minutes of compute; it is item 3 on line X's list, but if it would change what you build, say so and it can be pulled forward.
-
-TWO OPERATIONAL NOTES IF YOU RE-RUN ANY OF THIS YOURSELF. (1) Do NOT pass corpus.parquet as --cache to any arm that uses build_features. It has 181 columns and build_features turns every column outside FORBIDDEN into a control feature, so you silently get 103 climate and design columns that the v1 experiments never saw -- a different experiment wearing the same name. Use /p/tmp/jamirp/vegemu/exp/X-pilot-decode-v2corpus/state_pilot-v2-constco2.parquet, which is verified to carry v1's 78 column names in the same order. It cost three dead jobs here. (2) The composition arm still depends on score.blank_treeless_composition, because corpus/state.py:106 still writes 0.0 rather than NaN into pft_frac_* for a treeless cell -- your 2026-09-14 ask to line D missed the v2 bump and is still open.
-
-NOTHING OF YOURS IS BLOCKED BY ANY OF THIS. The estimand, the nulls and the three caveats that must travel with the number (shares count stems not biomass; the seven sum to 1 so only six are free; scored only where a forest existed at both ends, 5,258 of 5,800 pairs) are all unchanged from X6.
-
-> Sent by tools/inbound.py. ⚠ If a rebase conflicts on this file, KEEP BOTH SIDES --
-> resolving with --theirs silently deletes this message. Delete it deliberately once
-> acted on, never as conflict cleanup.
+Rooting-depth recipes stay OFF until the next full refit, and the corpus still has NO soil-type
+columns and still writes 0.0 into a treeless cell's `pft_frac_*` (D's NEXT). **No warmed climate may
+be quoted from the scenario-leg map** (below persistence). Nothing here waits on X. Deliverable
+unchanged: `runs/synth-v5/restart/restart_1999_emulated.lpj`, sha256 `1e856119…`.
 
 ## Milestones
 
@@ -359,8 +61,8 @@ its number is a present-day number and does not transfer to a warmed climate.
 **T3 the roster model UNBLOCKED** — D's pilot corpus exists and a response is learnable on it.
 **T4 state synthesis, t0–t4 RUN**: t2 passes, t3 **fails** at 5 % against a 25 % ceiling, t4 passes
 on carbon at year one and fails conjunctively. t5 (end-to-end transient) not started.
-**T5 the response model on the ensemble — PASSING its kill test.**
-**T6 composition — apparatus derived, model arm written, blocked on X's seal.**
+**T5 the response model — PASSED** its kill test (v1 2026-09-14; re-passed at constant CO₂ 09-21).
+**T6 composition — PASSED** (v1 2026-09-15; re-passed at constant CO₂ 09-21; blind arm 09-23).
 
 ## Line T gotchas
 
@@ -396,10 +98,10 @@ on carbon at year one and fails conjunctively. t5 (end-to-end transient) not sta
 * **An ORACLE arm is the cheapest attribution there is** — it has seen the answer, so never quote it
   as skill. **Fit ONE model and apply it to both climates** when scoring a response.
 * `k_root` is exactly CONSTANT — the conjunctive test is over **19** quantities, not 22. Say so.
-* **The login-node guard no longer scans arguments to `-m/--message/--body/--subject/--reason`**
-  (fixed on main 2026-09-14), so ordinary `git commit -m` and `inbound.py --body` need no override.
-  It DOES still scan heredoc bodies, shell assignments and bare paths — write a long message to a
-  file and pass it with `-F` or `--body "$(cat …)"`. Keep `ALLOW_LOGIN_HEAVY=1` for quick real checks.
+* **Prose in flags, heredocs and quoted assignments no longer trips the login-node guard.** ⚠ One
+  read still does (2026-09-23): a command naming a `scripts/sbatch_*.sh` file plus train/eval/score/
+  fit/sweep/response/rung and no `--exp` is refused as a submission, even a `grep` — split it and
+  report it. `ALLOW_LOGIN_HEAVY=1` is for a genuinely quick REAL check only.
 * **A decision record is immutable the moment it says `accepted`**, including one written five
   minutes ago and never committed. Write `draft`, or expect to delete and rewrite.
 * **`git rev-list --left-right --count origin/main...HEAD` prints BEHIND first, then AHEAD.** Re-read
@@ -409,12 +111,3 @@ on carbon at year one and fails conjunctively. t5 (end-to-end transient) not sta
 * **A metrics file `append_result.py` refuses is a result nobody can cite.** Flat `arms` block
   naming each null exactly as the pre-registration does, plus `prereg_sha256` from
   `VEGEMU_PREREG_SHA256` read INSIDE the job: `vegemu.results.append_result_block`.
-
-## Outbound to line X (2026-09-14) — composition kill test: apparatus derived, ready to seal
-
-Sent via `tools/inbound.py`; kept as the sender's evidence, per that tool's own warning that a
-rebase resolved with `--theirs` deletes the receiver's copy silently. **Full text of what was sent
-is `docs/reference/composition-response.md`** — the message was a pointer to it plus the four
-numbers now in NEXT above, the seven-value regression, and one note that the X-20260909 verdict
-should state the denominator asymmetry rather than leave it unstated. Asked X for the exp id and the
-threshold if it is not 0.080.

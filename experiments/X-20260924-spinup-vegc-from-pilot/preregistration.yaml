@@ -1,0 +1,171 @@
+schema_version: 1
+
+exp_id: X-20260924-spinup-vegc-from-pilot
+line: X
+
+status: sealed
+
+title: "TRAINED ONLY ON THE PILOT, IS THE EMULATOR AS GOOD AS A RERUN AT THE STORED SPIN-UP'S CONSTANT-CO2 EQUILIBRIUM, ON EVERY CELL?"
+question: >
+  The owner, 2026-09-24: "you dont need new runs. there is spinup ... available already. in the
+  spinup only the years until the onset of rising co2 levels should be used ... for now make the
+  emulator work for the spinup with constant co2." And the pass rule the owner chose the same day:
+  the emulator must be AS GOOD AS A RERUN of the original model, cell by cell, on the 56,986 cells
+  that carry any stem, at 25 patches.
+
+  The stored global spin-up (seeds 1 and 2, model years 1000-1999) recycles the 1901-1930 climate
+  and holds CO2 at 276.59 ppm until model year 1699. Of those constant-CO2 years it kept, per cell,
+  only vegetation carbon. So this is the all-cell test that exists: shown only a cell's 1901-1930
+  climate and its soil, the emulator trained ONLY on the 200-cell constant-CO2 pilot (single-cell
+  spin-ups under 30 perturbed 1970-1999 climates) predicts that cell's equilibrium vegetation
+  carbon, and it is scored exactly the way a second run of the model would be scored.
+
+  THE FALSIFIABLE CLAIM: D = frac(emulator) - frac(rerun) >= -0.02, i.e. across the 56,986 cells
+  the emulator lands inside the acceptance band at most 2 cells in 100 less often than a second run
+  of LPJmL-FIT does.
+
+  ⚠ WHAT A PASS WOULD NOT SAY: nothing about tree counts, traits or soil carbon (not stored for
+  these years; they stay a pilot test), nothing about a warmed climate (1901-1930 is the only
+  climate here), and nothing about the restart file (this scores the map's vegetation-carbon head,
+  not a synthesised restart).
+
+estimand:
+  name: asgood_vegc_spinup
+  definition: >
+    Rows: the 56,986 cells with any stem in the stored restart_1999, seed 1 (the owner's acceptance
+    set), each in a 15-degree tile the pilot covers (asserted). Truth per seed k in {1, 2}: T_k =
+    that seed's mean total vegetation carbon (netCDF VegC, trees + grass, gC/m2) over model years
+    1450-1699. Band per cell: w = max(0.10, s), s = |H_1 - H_2| / mean(H_1, H_2), where H_k is seed
+    k's mean over the EARLIER, DISJOINT years 1200-1449, so the pair being scored never sets its
+    own tolerance; s = 0 where mean(H) <= 1 gC/m2. An arm x passes against T_k if |x - T_k| <= w *
+    |T_k|; its per-cell score is the mean over k = 1, 2. frac(x) = the mean per-cell score over the
+    56,986 cells. frac(rerun) scores T_2 against T_1 and T_1 against T_2 with the same w.
+
+    THE STATISTIC: D(x) = frac(x) - frac(rerun). Higher is better; 0 means exactly as good as a
+    rerun; the emulator predicts one value per cell and is scored against both seeds.
+
+    THE EMULATOR (model arm): one LightGBM regressor per fold with the sealed recipe's
+    hyperparameters (scripts/exp_model_pilot_response.PARAMS, as in
+    X-20260923-equilibrium-from-climate), fitted on log1p of each pilot row's two-seed mean of its
+    1200-1699 VegC window mean, from the same 91 features (86 CLIMATE_FEATURES + 5 soil columns),
+    on the pilot cells of the other four folds (all 30 climates each); predictions are expm1,
+    clipped at 0. Each global cell is predicted by the model of its own tile's fold.
+
+    REPORTED BESIDE THE STATISTIC, NEVER DECIDED ON, with every null beside it: frac(x); variance
+    explained on log1p against the two-seed mean (T_1 + T_2) / 2; the share inside a FLAT 10 % of
+    that mean; D per latitude band; a 90 % interval on D from 1,000 bootstrap resamples of whole
+    15-degree tiles (seed 7).
+  reference_basis: >
+    The stored global LPJmL-FIT 5.6.004 spin-up, Historical ground truth, Feb-05 2026 binary,
+    npatch 25, seeds 1 and 2, model years 1000-1999, 67,420 cells; CO2 276.59 ppm (the getco2.c
+    clamp) for model years < 1700, which is the only part used. Recycled climate: the first 30
+    years (1901-1930) of GSWP3-W5E5 v3 forcing. Per-cell target from vegc_spinup_1999.nc via
+    scripts/spinup_target.py --stage truth (spinup_truth.parquet sha256 37391b3f70c12995...).
+    Inputs: that 1901-1930 window's 86 CLIMATE_FEATURES + 5 soil columns joined as in
+    exp_equilibrium_map.load (climate_spinup.parquet sha256 cc1f795157f19e59...). Training: pilot
+    corpus v2-constco2 (200 cells x 30 climates, single-cell spin-ups, Aug-12 binary, constant CO2
+    276.59 ppm) with its full second seed pilot-v2-constco2-s2; targets from each run's own
+    vegc_spinup_*.nc (pilot_trajectory_stats.parquet sha256 745197c70804b209...). 56,986 cells
+    scored, level (a share of cells inside a band), the statistic a difference of two shares.
+  units: dimensionless
+  kind: ratio
+
+data:
+  corpus: /p/tmp/jamirp/vegemu/corpus/spinup-constco2
+  corpus_sha256: "37391b3f70c12995b80f04cf6a8bb61f27cf1b321c2e5b5dd9975280221d56d9"
+  plan_sha256: "bad787ade3fc609b25cf8ebc87dfd0978e4a869068d9408c73945ec3dc667f99"
+  n_rows: 56986
+
+  split:
+    kind: blocked_spatial
+    k: 5
+    seed: 42
+    block_degrees: [15]
+
+  leakage_checks:
+    - "Folds: the sealed pilot folds (vegemu.score.blocked_spatial_folds, 15 deg, k=5, seed 42) give a tile -> fold map; each global cell is predicted by the model trained on the pilot cells of the OTHER four folds, so no pilot cell from the predicted cell's own tile trains its prediction. The script asserts every scored cell's tile has a fold and that no tile is split across folds."
+    - "The model never sees the stored spin-up: not its targets, not its cells, not its 1901-1930 climate. Its training rows are pilot rows only."
+    - "The feature set is exactly the sealed experiment's 91 (FEATURES of exp_equilibrium_map.py); cell, lon, lat, tile, point and the five design axes are not features."
+    - "No state or truth enters an input. The two halves of the truth window are used only for the truth (1450-1699) and the band (1200-1449), never as features."
+    - "The analogue null standardises its eight features on each fold's TRAINING rows only."
+    - "CO2 is never a feature; the target is the constant-CO2 stretch only (invariant 8)."
+
+# Measured by scripts/exp_spinup_vegc.py --arm nulls --pool pilot, job 2286364, 2026-09-24, before
+# this file was written and before any model was fitted; output nulls.json sha256 40a979061ded6fed...
+# Every null is a deterministic function of the inputs and the folds (the shuffle is seeded), and
+# the model job recomputes nothing: it reads this nulls.json, so each value is the one below.
+nulls:
+  - id: training_mean
+    description: "Every cell gets the mean (on log1p) of the pilot training rows' targets: the average forest."
+    expected:
+      statistic: asgood_vegc_spinup
+      value: -0.812129
+      tolerance: 0.001
+      derivation: "Measured, job 2286364: frac 0.0466, D -0.812129, tile-bootstrap 90 % [-0.8267, -0.7960]."
+
+  - id: nearest_analogue
+    description: >
+      THE BEST NULL. Copy the target of the climatically nearest pilot TRAINING row over the fixed
+      eight-feature analogue set of vegemu.nulls, standardised on the training rows: what
+      space-for-time lookup buys from the pilot.
+    expected:
+      statistic: asgood_vegc_spinup
+      value: -0.675043
+      tolerance: 0.001
+      derivation: "Measured, job 2286364: frac 0.1837, D -0.675043, [-0.6993, -0.6504]; variance explained on log1p 0.576."
+
+  - id: nearest_geographic
+    description: "Copy the CONTROL-climate target of the nearest pilot training cell (unit sphere): the address null."
+    expected:
+      statistic: asgood_vegc_spinup
+      value: -0.734821
+      tolerance: 0.001
+      derivation: "Measured, job 2286364: frac 0.1239, D -0.734821, [-0.7548, -0.7143]."
+
+  - id: shuffled
+    description: "The two-seed mean truth of the held-out fold, permuted within that fold (seed 20260924): a random real forest."
+    expected:
+      statistic: asgood_vegc_spinup
+      value: -0.814753
+      tolerance: 0.001
+      derivation: "Measured, job 2286364: frac 0.0440, D -0.814753, [-0.8278, -0.8011]."
+
+decision_rule:
+  statistic: asgood_vegc_spinup
+  comparator: model_absolute
+  pass_if: ">= -0.02"
+  arms: [model, training_mean, nearest_analogue, nearest_geographic, shuffled]
+  multiplicity: none
+  power_note: >
+    THE RULE IS THE OWNER'S, THE MARGIN IS STATED HERE BEFORE ANY MODEL. "As good as a rerun" is
+    read as non-inferiority with a margin of 2 cells in 100: D >= -0.02, i.e. frac(emulator) >=
+    frac(rerun) - 0.02 = 0.838711. The margin is fixed a priori and not tuned to any arm. Under
+    model_absolute every null is judged on its own D; the best, nearest_analogue, is at -0.675043,
+    so no null satisfies the rule and the estimand has power. If any null returned a different
+    value the outcome would be `invalid`.
+
+  ceiling_note: >
+    ⚠ THE REFERENCE IS THE RERUN, NOT 1.0: frac(rerun) = 0.858711 (a second run of the model lands
+    inside the band in 85.9 % of cells), and its variance explained on log1p against seed 1 is
+    0.995. The band is the bare 10 % floor in 82.8 % of cells. An emulator of the ensemble MEAN can
+    in principle beat a rerun (its error does not carry a second realisation), so D > 0 is possible.
+
+  outcomes_note: >
+    PRE-NAMED BEFORE THE RUN. (a) D >= -0.02: on vegetation carbon the pilot-trained emulator is as
+    good as a rerun at the stored spin-up's constant-CO2 equilibrium on every cell -- the first
+    all-cell acceptance result, for ONE quantity. (b) -0.675043 < D < -0.02: it beats every
+    information-free competitor but is not rerun-grade; report D, frac, and where it fails
+    (latitude, low-carbon cells). (c) D <= -0.675043: no better than an analogue lookup from the
+    pilot. ⚠ (b) and (c) are not evidence that the map cannot be learned; the pilot is 200 cells and
+    single-cell runs, and the sibling X-20260924-spinup-vegc-from-spinup measures what the
+    reference's own one-climate-per-place data allows.
+
+compute:
+  launcher: scripts/sbatch_py.sh
+  tag: X-spinveg-model-pilot
+  partition: priority
+  est_core_hours: 1
+
+outputs:
+  - path: /p/tmp/jamirp/vegemu/exp/X-20260924-spinup-vegc-from-pilot/metrics.json
+    kind: metrics

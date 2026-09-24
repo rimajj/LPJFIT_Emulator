@@ -529,6 +529,70 @@ def pilot_design(n: int = 30, seed: int = DESIGN_SEED) -> list[Perturbation]:
     return design
 
 
+def _unit(p: Perturbation) -> npt.NDArray[np.float64]:
+    """A design point's five coefficients mapped back onto [0, 1] per axis."""
+    vals = (p.dtemp, p.fprec, p.sprec, p.frad, p.fiav)
+    return np.array(
+        [(v - lo) / (hi - lo) for v, (lo, hi) in zip(vals, AXIS_RANGE.values(), strict=True)]
+    )
+
+
+def nested_design(n: int = 100, base_n: int = 30, seed: int = DESIGN_SEED) -> list[Perturbation]:
+    """`n` climates whose first `base_n` ARE `pilot_design(base_n)`, point for point, name for name.
+
+    WHY NOT `pilot_design(100)`. Its hypercube is drawn afresh for 88 points, so it shares only the
+    control and the 11-point core with the pilot's 30 -- the pilot's 18 hypercube climates would
+    appear nowhere in the mid tier, and no pilot row could be compared with a mid-tier row at the
+    same climate. Here the base design is kept whole and extended.
+
+    HOW IT EXTENDS. An AUGMENTED Latin hypercube over all `n - 12` free points: on each axis the
+    `n - 12` equal strata are listed, the ones the base points already occupy are struck out, and
+    the new points take distinct strata from what is left -- one uniform draw inside each, paired
+    across axes by independent permutations. So the union is as close to one hypercube of the full
+    size as a fixed subset allows: every stratum holds at most one point unless two base points
+    already shared one. Rolled by hand, like `_latin_hypercube`, so the design depends on nothing
+    but `seed`, `base_n`, `n` and this file.
+
+    New points are named on from the base: `lhs18`, `lhs19`, ... after the pilot's `lhs00-lhs17`.
+    """
+    base = pilot_design(base_n, seed)
+    if n < base_n:
+        raise ValueError(f"n={n} is smaller than the {base_n}-point base design it must contain")
+    base_free = [p for p in base if p.name.startswith("lhs")]
+    extra = n - base_n
+    if not extra:
+        return base
+    total = len(base_free) + extra
+    rng = np.random.default_rng([seed, base_n, n])
+    used = np.array([_unit(p) for p in base_free]).reshape(len(base_free), len(AXIS_RANGE))
+    cube = np.empty((extra, len(AXIS_RANGE)), dtype=np.float64)
+    for j in range(len(AXIS_RANGE)):
+        taken = np.unique(np.clip((used[:, j] * total).astype(np.int64), 0, total - 1))
+        free = np.setdiff1d(np.arange(total), taken)
+        strata = rng.permutation(free)[:extra]
+        cube[:, j] = (strata + rng.random(extra)) / total
+    design = list(base)
+    names = list(AXIS_RANGE)
+    for i in range(extra):
+        vals: dict[str, float] = {}
+        for j, key in enumerate(names):
+            lo, hi = AXIS_RANGE[key]
+            vals[key] = round(float(lo + cube[i, j] * (hi - lo)), 4)
+        design.append(
+            Perturbation(
+                f"lhs{len(base_free) + i:02d}",
+                dtemp=vals["dtemp"],
+                fprec=vals["fprec"],
+                sprec=vals["sprec"],
+                frad=vals["frad"],
+                fiav=vals["fiav"],
+            )
+        )
+    if any(p.hold_huss_diagnostic for p in design):  # pragma: no cover -- structural guard
+        raise AssertionError("a design point must never carry the hold-huss diagnostic flag")
+    return design
+
+
 def design_by_name(name: str, n: int = 30, seed: int = DESIGN_SEED) -> Perturbation:
     """One design point by name, so a run directory can be rebuilt from its own provenance file."""
     for pert in pilot_design(n, seed):
