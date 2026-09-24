@@ -99,18 +99,41 @@ def main() -> int:
         "table_sha256": hashlib.sha256(dest.read_bytes()).hexdigest(),
         "decoder": "vegemu.corpus.state.single_cell_state",
     }
-    if args.compare and Path(args.compare).exists():
-        other = pl.read_parquet(args.compare).with_columns(pl.col("cell").cast(pl.Int64))
-        cols = [c for c in frame.columns if c in other.columns and c not in ("name",)]
-        a = frame.select(cols).sort(["cell", "point"])
-        b = other.select(cols).sort(["cell", "point"])
-        report["compare"] = {"path": args.compare, "columns": len(cols), "equal": a.equals(b)}
+    if args.compare:
+        report["compare"] = compare_tables(frame, Path(args.compare))
     (out / f"replicate_s{args.seed}_states.json").write_text(json.dumps(report, indent=2))
     print(json.dumps({k: v for k, v in report.items() if k != "failures"}, indent=2))
     if failed:
         print(f"⚠ {len(failed)} runs not usable, e.g. {failed[0]}", file=sys.stderr)
         return 1
+    if args.compare and not report["compare"]["equal"]:
+        print(f"⚠ not equal to {args.compare}: {report['compare']}", file=sys.stderr)
+        return 1
     return 0
+
+
+def compare_tables(frame: pl.DataFrame, path: Path) -> dict[str, Any]:
+    """Equal on EVERY column this reader wrote (bar `name`), or not equal.
+
+    Never on the overlap alone: two tables whose state columns are named differently overlap only
+    on (cell, point), and an equality over those two columns would read as "the decodes agree".
+    A missing table is not equal either, rather than a comparison silently skipped.
+    """
+    if not path.exists():
+        return {"path": str(path), "equal": False, "error": "no such table"}
+    other = pl.read_parquet(path).with_columns(pl.col("cell").cast(pl.Int64))
+    want = [c for c in frame.columns if c != "name"]
+    missing = [c for c in want if c not in other.columns]
+    if missing:
+        return {"path": str(path), "equal": False, "missing_in_other": missing}
+    a = frame.select(want).sort(["cell", "point"])
+    b = other.select(want).sort(["cell", "point"])
+    return {
+        "path": str(path),
+        "columns": len(want),
+        "rows": [a.height, b.height],
+        "equal": a.equals(b),
+    }
 
 
 if __name__ == "__main__":
