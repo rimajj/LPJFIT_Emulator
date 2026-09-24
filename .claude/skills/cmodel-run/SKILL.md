@@ -104,7 +104,8 @@ anyway: logs from before the fix still carry the decoy.
 ## Reading a silent job
 
 * **Python** block-buffers stdout, so a healthy Python job's log is empty until it exits — judge it
-  by `sacct` CPU time, never by log length.
+  by CPU time, never by log length: `sstat -j <id>.batch` while it runs (`sacct` reads 0 for a
+  running step), `sacct` once it has ended (`docs/reference/cluster.md` trap 1).
 * **The C model is the opposite**: it writes output files within ~15 seconds. A zero-byte log and
   an empty `output/` a minute in is a dead job, not an early one. Do not wait it out.
 

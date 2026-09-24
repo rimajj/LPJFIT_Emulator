@@ -12,26 +12,34 @@ The QOS must **match** the partition, and omitting it fails at submit time with
 `Invalid qos specification` — which reads like a permissions problem rather than a missing field.
 `scripts/sbatch_py.sh` derives the default from the partition for exactly that reason.
 
-| partition | nodes | per-job cap | use it for |
+| partition | nodes | cap | use it for |
 |---|---|---|---|
-| `standard` | 180 | up to 2048 CPU | anything large; the default |
-| `priority` | 60, usually mostly idle | **64 CPU / 350 GB**, not raisable | anything that would otherwise queue — it starts almost immediately |
+| `standard` | 180 | up to 2048 CPU per job | anything large; the default |
+| `priority` | 60, **not idle** (below) | **64 CPU and 10 running jobs PER USER**, not per job | small jobs that would otherwise queue |
 | `gpu` | 12 × 4 GPUs | — | training |
 
 | QOS | wall | CPU | pair with |
 |---|---|---|---|
-| `short` | 1 day | 2048 | `standard` (our default) |
-| `medium` | 7 days | 1024 | a campaign needing more than a day per job |
-| `long` | 30 days | 32 | rare |
-| `priority` | 1 day | — | `priority` partition |
+| `short` | 1 day | 2048 per job | `standard` (our default) |
+| `medium` | 7 days | 1024 per job | a campaign needing more than a day per job |
+| `long` | 30 days | 32 per job | rare |
+| `priority` | 1 day | 64 per USER, 10 jobs per user; 6144 over all users | `priority` partition |
 | `gpushort` / `gpumedium` / `gpulong` | 1 / 7 / 30 days | — | `gpu` |
+
+⚠ **`priority`'s 64 CPUs are ONE budget shared by all of your running jobs there** — corrected
+2026-09-23 from `sacctmgr show qos priority`: `MaxTRESPerUser=cpu=64`, `MaxJobsPerUser=10`,
+`GrpTRES=cpu=6144`, `Flags=DenyOnLimit`, and no per-job limit at all. So two 48-CPU jobs do not
+both start — one runs, the other waits for it — and an 11th running job waits however small.
+Several parallel sessions submitting there share that one budget. And it is **no longer
+"usually mostly idle"**: at 2026-09-23 14:30, 5,917 of its 7,680 CPUs were allocated (77 %;
+`sinfo -p priority -o %C`), so check before counting on an immediate start.
 
 Nodes are 128 CPU / ~700 GB, and memory is strictly proportional to CPUs
 (`DefMemPerCPU = MaxMemPerCPU = 5468 MB`, `SelectTypeParameters=CR_CPU_MEMORY`). So `priority`'s
-64-CPU cap is a **350 GB ceiling** and is not negotiable — anything needing more memory goes to
+64 CPUs are a **350 GB ceiling per user**, not negotiable — anything needing more memory goes to
 `standard`. A pending job can be moved with
-`scontrol update job <id> Partition=priority QOS=priority`; it is rejected if it asks for >64 CPU,
-which is the tell.
+`scontrol update job <id> Partition=priority QOS=priority`; `DenyOnLimit` rejects one that alone
+asks for >64 CPU, which is the tell.
 
 Account: `waldspektrum`.
 
@@ -41,15 +49,25 @@ Account: `waldspektrum`.
 
 **1. A silent log does not mean a hung job.** Python (and Julia) block-buffer stdout to a file, so a
 perfectly healthy job's log stays empty until it exits. A predecessor session nearly killed a
-22-minute probe over this. **Judge a silent job by `sacct` CPU time**, never by log length:
+22-minute probe over this. **Judge a silent job by CPU time, never by log length — `sstat` while it
+runs, `sacct` once it has ended:**
 
 ```bash
-sacct -j <jobid> --format=JobID,State,TotalCPU,Elapsed,MaxRSS,ExitCode
+sstat -j <jobid>.batch --format=JobID,AveCPU,MaxRSS          # RUNNING: AveCPU grows if it is alive
+sacct -j <jobid> --format=JobID,State,TotalCPU,Elapsed,MaxRSS,ExitCode   # ENDED: the authority
 ```
 
-`tools/campaigns.py status` does this for you and says so in its output every time. Our wrapper also
-sets `PYTHONUNBUFFERED=1`, so this bites less here than it did there — but `sacct` is still the
-authority.
+⚠ **`sacct` reports `TotalCPU 00:00:00` for a step that is still running** — it only counts steps
+that have ENDED — so on a single-step job (every `sbatch_py.sh` job) it reads zero for the job's
+whole life, healthy or hung, and cannot tell the two apart. Measured 2026-09-23 on job 2280681:
+at 25 s elapsed `sacct` gave `TotalCPU 00:00:00` for the job and its batch step while
+`sstat -j 2280681.batch` gave `AveCPU 00:00:12`; by 4 min 44 s the job's `TotalCPU` read 04:00:31,
+all of it from its 250 `srun` steps that had already finished, and the running batch step still
+read 00:00:00. For a job whose work is in `srun` steps, `sstat -j <jobid>.<step>` reads a step
+that is still running (it errors on one that has ended). ⚠ `tools/campaigns.py status` and `probe`
+still read liveness from `sacct` `TotalCPU`, so for a RUNNING job their "liveness" line shows zero
+and means nothing; use `sstat`. Our wrapper also sets `PYTHONUNBUFFERED=1`, so a silent log bites
+less here than it did in the predecessor.
 
 **2. The opposite trap, for the C model: a zero-byte log after minutes IS a dead job.** A healthy
 2048-task run creates its output files within **~15 seconds** (~833 MB across 7 files). A member
