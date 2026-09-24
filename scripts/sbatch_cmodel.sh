@@ -177,11 +177,14 @@ fi
 NRUNS=1
 if [[ -n "$MANIFEST" ]]; then NRUNS=$(grep -c . "$MANIFEST"); fi
 NTASKS="${NTASKS:-$NRUNS}"
-if (( NTASKS > NRUNS )); then
+# ⚠ THE CLAMP IS FOR A MANIFEST ONLY. A single config is ONE run however many tasks it asks for:
+# `mpirun` spreads its cells over all NTASKS (the documented `NTASKS=` knob), so clamping it to
+# NRUNS=1 would silently serialise a multi-cell MPI run onto one CPU and blow its TIME.
+if [[ -n "$MANIFEST" ]] && (( NTASKS > NRUNS )); then
   echo "sbatch_cmodel: NTASKS=$NTASKS exceeds the $NRUNS runs; allocating $NRUNS (the rest would idle)." >&2
   NTASKS=$NRUNS
 fi
-if (( NTASKS < NRUNS )); then
+if [[ -n "$MANIFEST" ]] && (( NTASKS < NRUNS )); then
   echo "sbatch_cmodel: PACKED farm -- $NRUNS members through $NTASKS CPUs, at most $NTASKS in flight."
   echo "  TIME must cover the manifest's CPU / $NTASKS plus its longest member, or members are lost."
 fi

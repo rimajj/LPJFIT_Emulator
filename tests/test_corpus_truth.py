@@ -257,3 +257,85 @@ def test_completion_line_of_another_binary_does_not_count(tmp_path: Path) -> Non
         tmp_path / "b", nmember=2, maxpar=2, binary=name, prints="lpjmlXpre_dgrassXbak"
     )
     assert rc != 0 and "completion line: 0 of 2" in out, out
+
+
+# ------------------------------------------------------------------------------------------------
+# the outer wrapper's NTASKS, driven with a fake sbatch that records its call and then FAILS, so
+# the wrapper stops before its ledger write and nothing reaches the cluster or the campaign ledger
+# ------------------------------------------------------------------------------------------------
+
+FAKE_SBATCH = """#!/usr/bin/env bash
+printf '%s\\n' "$@" > "$SBATCH_ARGS"
+cat > "$SBATCH_BODY"
+exit 1
+"""
+
+
+def _submit(tmp_path: Path, argv: list[str], **knobs: str) -> tuple[int, str, list[str], str]:
+    """Run `sbatch_cmodel.sh` up to its `sbatch` call; return (rc, stdout+stderr, args, body)."""
+    bindir = tmp_path / "bin"
+    bindir.mkdir(parents=True, exist_ok=True)
+    (bindir / "sbatch").write_text(FAKE_SBATCH)
+    (bindir / "sbatch").chmod(0o755)
+    # The wrapper resolves its paths with `python3 tools/_paths.py`; pin that to this interpreter so
+    # the test does not depend on which `python3` the runner's PATH happens to hold.
+    (bindir / "python3").write_text(f'#!/usr/bin/env bash\nexec "{sys.executable}" "$@"\n')
+    (bindir / "python3").chmod(0o755)
+    args_file, body_file = tmp_path / "sbatch_args.txt", tmp_path / "sbatch_body.txt"
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("LPJ_", "SBATCH", "SLURM"))}
+    for k in ("NTASKS", "TIME", "PARTITION", "QOS", "EST_CORE_HOURS", "HARVEST_BY", "EXPECT"):
+        env.pop(k, None)
+    env.update(
+        PATH=f"{bindir}:{os.environ['PATH']}",
+        SBATCH_ARGS=str(args_file),
+        SBATCH_BODY=str(body_file),
+        **knobs,
+    )
+    proc = subprocess.run(
+        ["bash", str(ROOT / "scripts" / "sbatch_cmodel.sh"), *argv],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    args = args_file.read_text().splitlines() if args_file.is_file() else []
+    body = body_file.read_text() if body_file.is_file() else ""
+    return proc.returncode, proc.stdout + proc.stderr, args, body
+
+
+def _manifest(tmp_path: Path, n: int) -> Path:
+    m = tmp_path / "farm" / "manifest.tsv"
+    m.parent.mkdir(parents=True)
+    m.write_text("".join(f"m{i}\tcfg_{i}.js\t{tmp_path / 'farm' / f'm{i}'}\n" for i in range(n)))
+    return m
+
+
+def test_wrapper_single_run_keeps_the_callers_ntasks(tmp_path: Path) -> None:
+    """A single config is ONE run that `mpirun` spreads over NTASKS: it must never be clamped."""
+    cfg = tmp_path / "run" / "lpjml.js"
+    cfg.parent.mkdir()
+    cfg.write_text("{}\n")
+    rc, out, args, body = _submit(tmp_path, ["D-rev-x", str(cfg), str(cfg.parent)], NTASKS="4")
+    assert rc != 0 and "submitted" not in out, out
+    assert "--ntasks=4" in args, (args, out)
+    assert "mpirun" in body
+    rc, out, args, _ = _submit(tmp_path / "b", ["D-rev-x", str(cfg), str(cfg.parent)])
+    assert "--ntasks=1" in args, (args, out)
+
+
+def test_wrapper_manifest_defaults_to_one_cpu_per_member(tmp_path: Path) -> None:
+    """The corpus pipeline sets no NTASKS: the farm must allocate one CPU per member, as before."""
+    m = _manifest(tmp_path, 5)
+    rc, out, args, body = _submit(tmp_path, ["--manifest", str(m), "D-rev-x"])
+    assert rc != 0 and "submitted" not in out, out
+    assert "--ntasks=5" in args and 'export MAXPAR="5"' in body, (args, body)
+    assert "PACKED" not in out
+
+
+def test_wrapper_manifest_packs_and_clamps(tmp_path: Path) -> None:
+    m = _manifest(tmp_path, 5)
+    _, out, args, body = _submit(tmp_path / "a", ["--manifest", str(m), "D-rev-x"], NTASKS="2")
+    assert "--ntasks=2" in args and 'export MAXPAR="2"' in body and "PACKED" in out, out
+    _, out, args, body = _submit(tmp_path / "b", ["--manifest", str(m), "D-rev-x"], NTASKS="9")
+    assert "--ntasks=5" in args and 'export MAXPAR="5"' in body, (args, out)
