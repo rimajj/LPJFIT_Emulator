@@ -31,11 +31,20 @@
   cells that hold trees today, 3 % (1970-1999), 3 % (high emissions) and 4 % (low emissions) have
   at least one climate or soil input outside the range the model was built on, rising to 11-16 %
   for the future climates between the equator and 15° S. By overall distance, almost every cell is
-  closer to a pilot simulation than the held-out pilot locations were to the rest during the test,
-  so most predictions are interpolations of the kind the 61 % was measured on. That does not show
-  that the 61 % holds there: being near a pilot simulation is needed for the comparison to be fair,
-  not enough to make it true, and 200 locations cannot show every combination of climate and soil a
-  real place has.
+  closer to a pilot simulation than the held-out pilot locations were to the rest during the test.
+  That is partly because the saved model was built from all 200 pilot locations, and every
+  forested land cell lies in a 15-degree region that holds at least one of them: its predictions
+  there are easier than the test, not a sample of it, and must not be scored as if they were.
+  Being near a pilot simulation also does not show that the 61 % holds: 200 locations cannot show
+  every combination of climate and soil a real place has.
+
+  **Predictions a fair score can use, and a way to make new ones.** The five models behind the
+  test, each built without one fifth of the regions, are now saved too, and for every cell there
+  is a second prediction file made by the model that never saw that cell's region -- the setting
+  the 61 % was measured in. On the 6,000 pilot runs these saved models give back the test's own
+  predictions to the last digit. A new tool applies the saved models, either set, to any 30-year
+  climate (for example 1901-1930, the climate the stored global spin-up recycles) without
+  rebuilding anything.
 
   **What is still wrong.** The model is fitted to average behaviour, so it pulls every quantity
   towards the middle: the sparsest forests are over-predicted and the densest under-predicted, most
