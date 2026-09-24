@@ -10,12 +10,13 @@
     NCPUS=32 PARTITION=priority TIME=01:30:00 scripts/sbatch_py.sh T-fea-legs \\
         scripts/build_features_v3.py --stage legs --workers 32 --legs spinup historical
 
-TWO FEATURE SETS. By default the tables carry `V3_ALL` (the 120 `V3_FEATURES` plus the extension
-`V3X_FEATURES`) and are written as `features_v3x_*` under `scratch.exp/T-features-v3x/`.
-`--base-only` writes the 120 alone as `features_v3_*` under `scratch.exp/T-features-v3/` -- the
-tables a draft pre-registration pinned by hash, which a default run never overwrites. A default run
-also re-checks its 120 columns against those pinned tables, cell for cell (`--regress-dir`), so
-the extension provably moved nothing.
+THREE FEATURE SETS (`--set`), each written under its own name and directory so no run overwrites
+a table something else pinned:
+    base  the 120 `V3_FEATURES`                      features_v3_*   scratch.exp/T-features-v3/
+    x     + the extension `V3X_FEATURES` (151)       features_v3x_*  scratch.exp/T-features-v3x/
+    p     + the productivity columns `V3P_FEATURES`  features_v3p_*  scratch.exp/T-features-v3p/
+A run of a larger set re-checks, cell for cell, every column it shares with each smaller set's
+existing table, so an extension provably moved nothing it was appended to.
 
 Writes:
     features_v3[x]_pilot.parquet     keyed (cell, point), one row per pilot run
@@ -110,10 +111,10 @@ def _global_files(leg: str) -> dict[str, str]:
 
 
 def _pilot_chunk(
-    args: tuple[list[str], list[int], list[str], list[int], list[float]],
+    args: tuple[list[str], list[int], list[str], list[int], list[float], bool, bool],
 ) -> dict[str, Any]:
     """A batch of pilot runs: each run's own single-cell files, stacked, then one feature call."""
-    names, cells, forcing_dirs, codes, depths, extras = args
+    names, cells, forcing_dirs, codes, depths, extras, prod = args
     first, last = PILOT_WINDOW
     stacks: dict[str, list[Array]] = {v: [] for v in VARS}
     for name, cell, fdir in zip(names, cells, forcing_dirs, strict=True):
@@ -126,26 +127,34 @@ def _pilot_chunk(
         for v in VARS:
             stacks[v].append(daily[v][0])
     daily_all = {v: np.stack(stacks[v], axis=0) for v in VARS}
-    cols = fv3.v3_columns(daily_all, np.asarray(codes), np.asarray(depths), extras=extras)
+    cols = fv3.v3_columns(
+        daily_all, np.asarray(codes), np.asarray(depths), extras=extras, productivity=prod
+    )
     return {"names": names, "cols": cols}
 
 
-def _cells_chunk(args: tuple[str, list[int], list[int], list[float], bool]) -> dict[str, Any]:
+def _cells_chunk(
+    args: tuple[str, list[int], list[int], list[float], bool, bool],
+) -> dict[str, Any]:
     """Arbitrary global cells of one leg, read one cell at a time (the hard check's path)."""
-    leg, cells, codes, depths, extras = args
+    leg, cells, codes, depths, extras, prod = args
     w = LEG_WINDOWS[leg]
     daily = fv3.read_cells(_global_files(leg), w.first, w.last, cells)
-    cols = fv3.v3_columns(daily, np.asarray(codes), np.asarray(depths), extras=extras)
+    cols = fv3.v3_columns(
+        daily, np.asarray(codes), np.asarray(depths), extras=extras, productivity=prod
+    )
     return {"cells": cells, "cols": cols, "daily": daily}
 
 
-def _rows_chunk(args: tuple[str, int, int, list[int], list[float], bool]) -> dict[str, Any]:
+def _rows_chunk(args: tuple[str, int, int, list[int], list[float], bool, bool]) -> dict[str, Any]:
     """A contiguous row range of one leg's global files, read as whole slabs."""
-    leg, row0, row1, codes, depths, extras = args
+    leg, row0, row1, codes, depths, extras, prod = args
     w = LEG_WINDOWS[leg]
     t0 = time.time()
     daily, ids = fv3.read_rows(_global_files(leg), w.first, w.last, row0, row1)
-    cols = fv3.v3_columns(daily, np.asarray(codes), np.asarray(depths), extras=extras)
+    cols = fv3.v3_columns(
+        daily, np.asarray(codes), np.asarray(depths), extras=extras, productivity=prod
+    )
     return {"cells": ids, "cols": cols, "seconds": time.time() - t0}
 
 
@@ -190,8 +199,9 @@ class FeatureSet:
 
     names: tuple[str, ...]
     extras: bool
-    prefix: str  # features_v3 | features_v3x
-    regress_dir: Path | None  # the pinned 120-column tables; None = no regression check
+    productivity: bool
+    prefix: str  # features_v3 | features_v3x | features_v3p
+    regress: tuple[tuple[str, Path], ...]  # (prefix, directory) of the smaller sets' tables
 
 
 def _pool(workers: int) -> ProcessPoolExecutor:
@@ -199,27 +209,36 @@ def _pool(workers: int) -> ProcessPoolExecutor:
 
 
 def regress(table: pl.DataFrame, fs: FeatureSet, what: str, keys: Sequence[str]) -> dict[str, Any]:
-    """The 120 V3_FEATURES of this table against the pinned table of the same rows, exactly."""
-    if fs.regress_dir is None:
-        return {"skipped": "no regression directory"}
-    ref_path = fs.regress_dir / f"features_v3_{what}.parquet"
-    if not ref_path.exists():
-        return {"skipped": f"{ref_path} does not exist"}
-    ref = pl.read_parquet(ref_path).sort(list(keys))
+    """Every column shared with each smaller set's table of the same rows, exactly.
+
+    `exactly_equal` is False if any compared table disagrees, True otherwise (also when there was
+    nothing to compare, which the per-table entries then say).
+    """
+    out: dict[str, Any] = {"exactly_equal": True, "tables": {}}
     mine = table.sort(list(keys))
-    if ref.select(keys).to_dicts() != mine.select(keys).to_dicts():
-        return {"exactly_equal": False, "error": "the two tables hold different rows"}
-    check = compare(
-        {f: mine[f].to_numpy() for f in fv3.V3_FEATURES},
-        {f: ref[f].to_numpy() for f in fv3.V3_FEATURES},
-    )
-    check["basis"] = f"the 120 V3_FEATURES vs {ref_path} (sha256 {_sha256(ref_path)})"
-    print(
-        f"REGRESSION vs the pinned {what} table: {mine.height} rows x {len(fv3.V3_FEATURES)} "
-        f"features, exactly equal = {check['exactly_equal']}",
-        flush=True,
-    )
-    return check
+    for prefix, root in fs.regress:
+        ref_path = root / f"{prefix}_{what}.parquet"
+        if not ref_path.exists():
+            out["tables"][prefix] = {"skipped": f"{ref_path} does not exist"}
+            continue
+        ref = pl.read_parquet(ref_path).sort(list(keys))
+        if ref.select(keys).to_dicts() != mine.select(keys).to_dicts():
+            out["tables"][prefix] = {"exactly_equal": False, "error": "different rows"}
+            out["exactly_equal"] = False
+            continue
+        names = [f for f in fs.names if f in ref.columns]
+        check = compare(
+            {f: mine[f].to_numpy() for f in names}, {f: ref[f].to_numpy() for f in names}, names
+        )
+        check["basis"] = f"{len(names)} shared columns vs {ref_path} (sha256 {_sha256(ref_path)})"
+        out["tables"][prefix] = check
+        out["exactly_equal"] = out["exactly_equal"] and check["exactly_equal"]
+        print(
+            f"REGRESSION vs {prefix}_{what}: {mine.height} rows x {len(names)} shared features, "
+            f"exactly equal = {check['exactly_equal']}",
+            flush=True,
+        )
+    return out
 
 
 def stage_pilot(  # noqa: PLR0917 -- the stage's knobs, passed straight from the command line
@@ -243,6 +262,7 @@ def stage_pilot(  # noqa: PLR0917 -- the stage's knobs, passed straight from the
             [int(codes_all[c]) for c in cells[i : i + chunk]],
             [float(depth_all[c]) for c in cells[i : i + chunk]],
             fs.extras,
+            fs.productivity,
         )
         for i in range(0, len(names), chunk)
     ]
@@ -272,6 +292,7 @@ def stage_pilot(  # noqa: PLR0917 -- the stage's knobs, passed straight from the
                         [int(codes_all[c]) for c in s],
                         [float(depth_all[c]) for c in s],
                         fs.extras,
+                        fs.productivity,
                     )
                     for s in split
                 ],
@@ -360,6 +381,7 @@ def stage_legs(  # noqa: PLR0917 -- one flat pass per leg
                 codes_all[r0 : min(r0 + chunk, ncell)].tolist(),
                 depth_all[r0 : min(r0 + chunk, ncell)].tolist(),
                 fs.extras,
+                fs.productivity,
             )
             for r0 in range(0, ncell, chunk)
         ]
@@ -420,7 +442,7 @@ def stage_legs(  # noqa: PLR0917 -- one flat pass per leg
                 flush=True,
             )
             rc = rc or (0 if check["exactly_equal"] else 1)
-        if not max_cells and leg != "spinup":
+        if not max_cells:
             reg = regress(table, fs, leg, ["cell"])
             prov["regression_vs_pinned_v3"] = reg
             rc = rc or (0 if reg.get("exactly_equal", True) else 1)
@@ -439,17 +461,18 @@ def main() -> int:
     ap.add_argument("--out", default="")
     ap.add_argument("--limit", type=int, default=0, help="pilot smoke test: first N runs only")
     ap.add_argument("--max-cells", type=int, default=0, help="legs smoke test: first N cells")
-    ap.add_argument("--base-only", action="store_true", help="the 120 V3_FEATURES alone")
-    ap.add_argument("--regress-dir", default="", help="pinned 120-column tables (default v3 dir)")
+    ap.add_argument("--set", choices=("base", "x", "p"), default="x", help="module docstring")
     args = ap.parse_args()
     exp = Path(str(paths()["scratch"]["exp"]))
-    if args.base_only:
-        fs = FeatureSet(fv3.V3_FEATURES, False, "features_v3", None)
-        default_out = exp / "T-features-v3"
-    else:
-        reg = Path(args.regress_dir) if args.regress_dir else exp / "T-features-v3"
-        fs = FeatureSet(fv3.V3_ALL, True, "features_v3x", reg)
-        default_out = exp / "T-features-v3x"
+    v3, v3x = ("features_v3", exp / "T-features-v3"), ("features_v3x", exp / "T-features-v3x")
+    fs = {
+        "base": FeatureSet(fv3.V3_FEATURES, False, False, "features_v3", ()),
+        "x": FeatureSet(fv3.V3_ALL, True, False, "features_v3x", (v3,)),
+        "p": FeatureSet(fv3.V3_ALLP, True, True, "features_v3p", (v3, v3x)),
+    }[args.set]
+    default_out = (
+        exp / {"base": "T-features-v3", "x": "T-features-v3x", "p": "T-features-v3p"}[args.set]
+    )
     out = Path(args.out) if args.out else default_out
     if args.stage == "pilot":
         return stage_pilot(args.version, out, args.workers, args.chunk or 250, args.limit, fs)

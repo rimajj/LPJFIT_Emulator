@@ -163,6 +163,33 @@ def test_the_extension_follows_the_120_and_leaves_them_unchanged() -> None:
         assert alone[k][0] == ext[k][3], k
 
 
+def test_the_productivity_columns_follow_and_leave_the_151_unchanged() -> None:
+    n = 4
+    codes, depth = _soil(n)
+    clim = _climate(n, seed=6)
+    ext = fv3.v3_columns(clim, codes, depth, extras=True)
+    prod = fv3.v3_columns(clim, codes, depth, extras=True, productivity=True)
+    assert tuple(prod) == fv3.V3_ALLP == fv3.V3_ALL + fv3.V3P_FEATURES
+    for k in fv3.V3_ALL:
+        np.testing.assert_array_equal(prod[k], ext[k], err_msg=k)
+    for k in fv3.V3P_FEATURES:
+        assert np.isfinite(prod[k]).all() and (prod[k] >= 0).all(), k
+    for ph in fv3.PHOTO_TYPES:  # water can only lower the index
+        assert (prod[f"lue_{ph.name}_water"] <= prod[f"lue_{ph.name}"] + 1e-9).all(), ph.name
+    with pytest.raises(ValueError, match="extras=True"):
+        fv3.v3_columns(clim, codes, depth, productivity=True)
+
+
+def test_photo_temperature_response_is_temp_stress_c() -> None:
+    """Near 1 inside the optimum band, 0 above the C3/C4 heat limits and above temp_co2.high."""
+    t = np.array([-10.0, 0.0, 22.0, 28.0, 44.0, 46.0, 56.0])
+    boreal, c4 = fv3.PHOTO_TYPES[3], fv3.PHOTO_TYPES[4]
+    b = fv3.photo_temp_stress(t, boreal)
+    assert b[0] < 0.01 and b[2] > 0.95 and b[5] == 0.0 and b[4] == 0.0  # 38 is its co2 high
+    c = fv3.photo_temp_stress(t, c4)
+    assert c[1] < 0.05 and c[3] > 0.95 and c[5] > 0.0 and c[6] == 0.0
+
+
 def test_fire_fraction_is_the_globfirm_curve() -> None:
     """fire_prob.c: a year dry every day burns completely (index 1, sm 0), a wet year sits on the
     0.001 floor, and the curve rises in between."""

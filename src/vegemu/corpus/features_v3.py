@@ -319,6 +319,67 @@ def _extra_names() -> tuple[str, ...]:
 V3X_FEATURES: tuple[str, ...] = _extra_names()
 V3_ALL: tuple[str, ...] = V3_FEATURES + V3X_FEATURES
 
+# --------------------------------------------------------------------------------------------
+# THE PRODUCTIVITY EXTENSION (2026-09-24, second), `V3P_FEATURES`, appended after `V3_ALL` so the
+# `features_v3x` tables stay valid: a light-use index per photosynthesis type, the daily shortwave
+# weighted by the model's own temperature response of photosynthesis (`lpj/temp_stress.c`, with
+# k1..k3 as `lpj/fscanpftpar.c` derives them from `temp_co2` and `temp_photos` in
+# `par/pft_lpjmlfit.js`, and the C3/C4 heat cut-offs of 45 and 55 degrees), and again times the
+# bucket's daily water scalar -- the 400 cm profile for trees, the 50 cm profile for grasses. Seven
+# distinct responses: the tree types sharing one are merged. Vegetation carbon is productivity
+# times residence time, and a tree ensemble builds a product of daily series only crudely.
+# ⚠ temp_stress.c also returns 0 when the daylength is below 0.01 h; that needs latitude, so it
+# is not applied (a polar-night day has near-zero shortwave anyway).
+# --------------------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class PhotoType:
+    name: str
+    co2_low: float
+    co2_high: float
+    photos_low: float
+    photos_high: float
+    c4: bool
+    profile: int  # index into ROOT_PROFILES_CM of the water scalar it is weighted by
+
+
+PHOTO_TYPES: tuple[PhotoType, ...] = (
+    PhotoType("trbe", 2.0, 55.0, 20.0, 30.0, False, MID_PROFILE),
+    PhotoType("tene_tebe", -4.0, 42.0, 20.0, 30.0, False, MID_PROFILE),
+    PhotoType("tebs", -4.0, 38.0, 20.0, 30.0, False, MID_PROFILE),
+    PhotoType("boreal", -4.0, 38.0, 15.0, 25.0, False, MID_PROFILE),
+    PhotoType("c4grass", 6.0, 55.0, 20.0, 45.0, True, 0),
+    PhotoType("c3grass", -4.0, 45.0, 10.0, 30.0, False, 0),
+    PhotoType("polargrass", -4.0, 38.0, 10.0, 25.0, False, 0),
+)
+TMAX_C3, TMAX_C4 = 45.0, 55.0  # temp_stress.c tmc3, tmc4
+N_TREE_PHOTO = 4  # the first four PHOTO_TYPES are trees
+
+
+def _productivity_names() -> tuple[str, ...]:
+    names = [f"lue_{t.name}" for t in PHOTO_TYPES]
+    names += [f"lue_{t.name}_water" for t in PHOTO_TYPES]
+    names += ["lue_tree_over_grass", "lue_tree_over_grass_water"]
+    return tuple(names)
+
+
+V3P_FEATURES: tuple[str, ...] = _productivity_names()
+V3_ALLP: tuple[str, ...] = V3_ALL + V3P_FEATURES
+
+
+def photo_temp_stress(tas: Array, t: PhotoType) -> Array:
+    """temp_stress.c for one photosynthesis type, elementwise, daylength test omitted."""
+    k1 = 2.0 * np.log(1.0 / 0.99 - 1.0) / (t.co2_low - t.photos_low)
+    k2 = (t.co2_low + t.photos_low) * 0.5
+    k3 = np.log(0.99 / 0.01) / (t.co2_high - t.photos_high)
+    tmax = TMAX_C4 if t.c4 else TMAX_C3
+    with np.errstate(over="ignore"):
+        low = 1.0 / (1.0 + np.exp(k1 * (k2 - tas)))
+        high = 1.0 - 0.01 * np.exp(k3 * (tas - t.photos_high))
+    out: Array = np.where((tas <= tmax) & (tas < t.co2_high), low * high, 0.0)
+    return out
+
 
 # --------------------------------------------------------------------------------------------
 # The model's own formulas, transcribed.
@@ -510,7 +571,7 @@ def thaw_depth_mm(tdd: Array, frost_number: Array) -> Array:
 # --------------------------------------------------------------------------------------------
 
 
-def run_bucket(  # noqa: PLR0915, PLR0917 -- one daily loop; splitting it costs a copy per day
+def run_bucket(  # noqa: PLR0912, PLR0915, PLR0917 -- one daily loop; a split costs a copy a day
     tas: Array,
     pr: Array,
     dem: Array,
@@ -518,8 +579,12 @@ def run_bucket(  # noqa: PLR0915, PLR0917 -- one daily loop; splitting it costs 
     whc: Array,
     depth_mm: Array,
     passes: int = N_PASSES,
+    rsds: Array | None = None,
 ) -> dict[str, Array]:
     """The multi-profile bucket over (n, nyear, 365) daily inputs; returns per-cell summaries.
+
+    With `rsds` (the same shape as `tas`), the water-weighted light-use indices of
+    `V3P_FEATURES` are accumulated too.
 
     State is `W[group, cell, profile]` in mm, laid out so each group's slice is contiguous. The
     inputs are transposed to (day, cell) once, for the same reason: one day is one contiguous row.
@@ -532,6 +597,7 @@ def run_bucket(  # noqa: PLR0915, PLR0917 -- one daily loop; splitting it costs 
     pt = np.ascontiguousarray(pr.reshape(n, ny * nd).T)
     dt = np.ascontiguousarray(dem.reshape(n, ny * nd).T)
     vt = np.ascontiguousarray(vpd.reshape(n, ny * nd).T) / 1000.0  # kPa, as waterstress_tree.c
+    st = None if rsds is None else np.ascontiguousarray(rsds.reshape(n, ny * nd).T)
 
     cap = whc[None, :] * np.asarray(GROUP_MM, dtype=np.float64)[:, None]  # (G, n)
     with np.errstate(divide="ignore", invalid="ignore"):
@@ -557,6 +623,7 @@ def run_bucket(  # noqa: PLR0915, PLR0917 -- one daily loop; splitting it costs 
     aet_y = np.zeros((ny, n, npf))
     dem_y = np.zeros((ny, n))
     fire_y = np.zeros((ny, n, npf))
+    lue_w = np.zeros((len(PHOTO_TYPES), n))
 
     with np.errstate(invalid="ignore", divide="ignore"):
         for ip in range(passes):
@@ -604,6 +671,9 @@ def run_bucket(  # noqa: PLR0915, PLR0917 -- one daily loop; splitting it costs 
                 dem_y[y] += dd
                 w0 = wet[0] / FIRE_MOIST  # (n, P): update_daily.c counts only days above 0 C
                 fire_y[y] += np.where((temp > 0.0)[:, None], np.exp(-np.pi * w0 * w0), 0.0)
+                if st is not None:
+                    for k, ph in enumerate(PHOTO_TYPES):
+                        lue_w[k] += st[t] * photo_temp_stress(temp, ph) * wscal[:, ph.profile]
 
     out: dict[str, Array] = {}
     with np.errstate(invalid="ignore", divide="ignore"):
@@ -645,6 +715,10 @@ def run_bucket(  # noqa: PLR0915, PLR0917 -- one daily loop; splitting it costs 
             )
             out[f"fire_{p}"] = burnt[:, :, j].mean(axis=0)
         out[f"fire_max_d{ROOT_PROFILES_CM[FIRE_PROFILE]:g}"] = burnt[:, :, FIRE_PROFILE].max(axis=0)
+        if st is not None:
+            mj = SECONDS_PER_DAY / 1e6 / ny  # W m-2 day sums -> MJ m-2 per year
+            for k, ph in enumerate(PHOTO_TYPES):
+                out[f"lue_{ph.name}_water"] = lue_w[k] * mj
     out["snow_max"] = snow_max.mean(axis=0)
     out["snow_days"] = snow_days / ny
     return out
@@ -662,6 +736,7 @@ def v3_columns(  # noqa: PLR0912, PLR0915 -- a flat sequence of independent feat
     passes: int = N_PASSES,
     *,
     extras: bool = False,
+    productivity: bool = False,
 ) -> dict[str, Array]:
     """Every V3 feature, one value per row, from (n, nyear, 365) daily arrays of the five VARS.
 
@@ -793,7 +868,17 @@ def v3_columns(  # noqa: PLR0912, PLR0915 -- a flat sequence of independent feat
     cols["awc_1m"] = whc * 1000.0
     cols["awc_rootzone"] = whc * np.minimum(usable, LAYERBOUND[ROOT_LAYERS - 1])
 
-    cols.update(run_bucket(tas, pr, dem, vpd_pa(tas, huss), whc, usable, passes=passes))
+    cols.update(run_bucket(tas, pr, dem, vpd_pa(tas, huss), whc, usable, passes=passes, rsds=rsds))
+    mj_year = SECONDS_PER_DAY / 1e6 / ny
+    for ph in PHOTO_TYPES:
+        cols[f"lue_{ph.name}"] = (rsds * photo_temp_stress(tas, ph)).sum(axis=(1, 2)) * mj_year
+    with np.errstate(divide="ignore", invalid="ignore"):
+        for suffix in ("", "_water"):
+            tree = np.max([cols[f"lue_{ph.name}{suffix}"] for ph in PHOTO_TYPES[:N_TREE_PHOTO]], 0)
+            grass = np.max([cols[f"lue_{ph.name}{suffix}"] for ph in PHOTO_TYPES[N_TREE_PHOTO:]], 0)
+            cols[f"lue_tree_over_grass{suffix}"] = np.where(
+                grass > 0, tree / np.where(grass > 0, grass, 1.0), 0.0
+            )
 
     # -- the extension: the window's extreme years and the growing season -------------------
     tas_y = tas.mean(axis=2)
@@ -812,11 +897,13 @@ def v3_columns(  # noqa: PLR0912, PLR0915 -- a flat sequence of independent feat
         mj = (rsds * season).sum(axis=2).mean(axis=1) * SECONDS_PER_DAY / 1e6
         cols[f"rsds_gs{base:g}"] = mj  # MJ m-2 per year of shortwave on days above the base
 
-    missing = set(V3_ALL) - set(cols)
-    extra = set(cols) - set(V3_ALL)
+    missing = set(V3_ALLP) - set(cols)
+    extra = set(cols) - set(V3_ALLP)
     if missing or extra:
         raise AssertionError(f"feature list out of step: missing {missing}, extra {extra}")
-    names = V3_ALL if extras else V3_FEATURES
+    if productivity and not extras:
+        raise ValueError("the productivity columns follow the extension: pass extras=True too")
+    names = V3_ALLP if productivity else V3_ALL if extras else V3_FEATURES
     return {k: np.asarray(cols[k], dtype=np.float64) for k in names}
 
 
