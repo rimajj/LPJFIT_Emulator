@@ -1,0 +1,237 @@
+schema_version: 1
+
+exp_id: X-20260925-spinup-vegc-recipe-v2
+line: X
+
+# DRAFT, written by the T-features stream on 2026-09-24/25 for the integrator to review and seal.
+# Nothing has been run under this id. `selection` below says exactly what WAS run, including that
+# the value this experiment would compute has already been printed by the dev screen.
+status: draft
+
+title: "ON CELLS THE CHOICE NEVER SCORED, IS THE SCREENED VEGETATION-CARBON RECIPE AS GOOD AS A RERUN AT THE STORED SPIN-UP'S CONSTANT-CO2 EQUILIBRIUM?"
+question: >
+  X-20260924-spinup-vegc-from-spinup measured that a climate-only map with the sealed inputs (86
+  monthly climate features + 5 soil columns) and the sealed learner lands inside the acceptance
+  band in 42.7 % of the 56,986 cells with any stem, where a second run of the model lands inside
+  it in 85.9 % (D = -0.432). A dev screen (scripts/screen_spinup_vegc.py) then compared recipes
+  using ONLY the scored cells of folds 0-2 and chose one by a rule fixed before it ran: features
+  computed from the daily forcing (a soil-water bucket, drought spells, the model's own
+  bioclimatic limits and fire curve, light weighted by the model's photosynthesis temperature
+  response), the two-seed truth of the scored window as training rows, a two-stage split into
+  tree-bearing and not, an absolute-error loss, tuned and early-stopped LightGBM settings, the
+  pilot pooled into the training rows, and five-seed bagging.
+
+  THE FALSIFIABLE CLAIM: on the 20,123 scored cells of folds 3 and 4 -- each predicted by a model
+  trained on the cells of the other four folds, the sealed construction restricted to those
+  cells -- D = frac(recipe) - frac(rerun) >= -0.02, frac(rerun) restricted to the same cells.
+
+  ⚠ EXPECTED OUTCOME, STATED BEFORE SEALING: FAIL. The screen already printed this recipe's value
+  on these cells (see selection.held_out_already_quoted), about -0.26, far from -0.02. This is
+  pre-registered so the best recipe found has a sealed, null-checked record on cells the choice
+  never scored -- not because a pass is possible.
+
+  ⚠ WHAT A PASS WOULD NOT SAY (as the sibling): the map has seen one climate per place, so it
+  identifies no warming response and must never be quoted for a warmed climate; vegetation carbon
+  only; nothing about a restart file.
+
+estimand:
+  name: asgood_vegc_spinup_heldout
+  definition: >
+    Identical to X-20260924-spinup-vegc-from-spinup (asgood_vegc_spinup: truth T_k = seed k's mean
+    VegC over model years 1450-1699; band w = max(0.10, s) from the earlier disjoint half
+    1200-1449; per-cell pass averaged over both seeds; D = frac(x) - frac(rerun)), computed by the
+    same code (exp_spinup_vegc.scored_set and score), RESTRICTED to the scored cells whose
+    15-degree tile is in fold 3 or 4 of the sealed tile -> fold map (global_folds: 15 deg, k=5,
+    seed 42): 20,123 of the 56,986. frac(rerun) is recomputed on those 20,123 cells (0.869478).
+
+    THE MODEL ARM: the recipe below, read field by field by scripts/exp_spinup_vegc_recipe_v2.py.
+    For each held-out fold f in {3, 4}: training rows are every stored-spin-up cell outside fold f
+    with finite truth, one row per seed with target log1p(T_k) (1450-1699 means), PLUS every pilot
+    run of the pilot cells outside fold f, one row per seed (the pilot's own 1450-1699 means),
+    weight 1; the source is never a feature. Stage 1: a LightGBM classifier (sealed settings) of
+    "any stem in restart_1999" (stored spin-up rows) / "any stem at the end of the run" (pilot
+    rows) -- a TRAINING label only. Stage 2: two regressors, on the tree-bearing and the other
+    training rows, each with the tuned settings and the recipe's loss, early-stopped on a random
+    15 % of the TRAINING rows' 15-degree tiles and refitted on all training rows at the stopped
+    tree count. A cell's prediction = p * tree-bearing head + (1 - p) * other head in log1p,
+    averaged over five seeds, expm1, clipped at 0. Features: feature set v3p = the sealed 91 +
+    the 167 columns of vegemu.corpus.features_v3.V3_ALLP (tables pinned below): 258 inputs.
+
+    REPORTED BESIDE THE STATISTIC, NEVER DECIDED ON: frac; variance explained on log1p; the flat
+    10 % rate; D per latitude band; a 1,000-resample 15-degree-tile bootstrap interval; and the
+    sealed recipe (91 features, sealed learner, spin-up pool) on the same cells.
+  reference_basis: >
+    As X-20260924-spinup-vegc-from-spinup: stored global LPJmL-FIT 5.6.004 spin-up, Feb-05 2026
+    binary, npatch 25, seeds 1 and 2, CO2 276.59 ppm for model years < 1700 (the only part used),
+    recycled climate 1901-1930 (GSWP3-W5E5); spinup_truth.parquet sha256 37391b3f70c12995....
+    Pilot rows: pilot-v2-constco2 and its second seed (200 cells x 30 climates, single-cell
+    spin-ups, Aug-12 binary, constant CO2), pilot_trajectory_stats.parquet sha256 745197c70804b209....
+    Scored: 20,123 of the 56,986 cells with any stem (folds 3-4). Level shares; the statistic a
+    difference of two shares.
+  units: dimensionless
+  kind: ratio
+
+data:
+  corpus: /p/tmp/jamirp/vegemu/corpus/spinup-constco2
+  corpus_sha256: "37391b3f70c12995b80f04cf6a8bb61f27cf1b321c2e5b5dd9975280221d56d9"
+  plan_sha256: "cc1f795157f19e59337e01b412fe94f6230898cd5ff6a8c23ed0946f7f614308"
+  n_rows: 20123
+  # The daily-forcing feature tables. The run refuses a table that does not hash to its pin.
+  # Built by scripts/build_features_v3.py --set p (code f248cd1), jobs 2286883 (pilot) and 2286884
+  # (legs): the 200 pilot control runs' 167 features from their own forcing equal those from the
+  # global historical file exactly (max |diff| 0), and every column shared with the earlier v3
+  # and v3x tables regresses exactly, for the pilot and for all 67,420 cells.
+  features:
+    tag: v3p
+    dir: /p/tmp/jamirp/vegemu/exp/T-features-v3p
+    spinup_sha256: "24eae642b8cee33b23ecbbcf9bf0a0744692ac00e31833b7723c238bf02641d8"
+    pilot_sha256: "ea46cb1e4bd49ffbbc18668b1e976dee7e943935f6fffdd35d7ecf5038183f84"
+
+  split:
+    kind: blocked_spatial
+    k: 5
+    seed: 42
+    block_degrees: [15]
+    scored_folds: [3, 4]
+
+  leakage_checks:
+    - "Folds: the sealed tile -> fold map; a scored cell's whole 15-degree tile is in its held-out fold, so neither its own truth nor any cell of its tile trains its prediction -- nor does any pilot run of a pilot cell in that fold."
+    - "SELECTION NEVER COMPARED FOLDS 3-4: every choice of the screen was made on D over the scored cells of folds 0-2 (models trained on the other four folds). Folds 3-4 were printed for every candidate and never entered a comparison (see selection)."
+    - "No location column (cell, lon, lat, tile) and no CO2 is a feature; the screen asserts the sealed FORBIDDEN set against every feature set, and a unit test asserts it for all of them. The v3 features never read latitude (the model's daylength is replaced by a fixed daylight fraction)."
+    - "The stage-1 tree-bearing flag is a TRAINING label only; a scored cell's own flag (which defines the scored set) is never read by its prediction, which comes from its climate through the classifier."
+    - "The pooled pilot rows carry no source column; the pool is a set of training rows with weight 1."
+    - "Early stopping holds out 15 % of the TRAINING rows' tiles, never a scored cell."
+    - "The analogue null standardises its eight features on each fold's training rows only (sealed code)."
+    - "CO2 is never a feature; only the constant-CO2 stretch is used (invariant 8)."
+
+# The pool the four nulls are drawn from: the stored spin-up's own cells (the stronger lookups on
+# these cells; the pilot-pool nulls of the from-pilot sibling are weaker). The sealed null code has
+# no pooled variant.
+nulls_pool: spinup
+
+# The recipe, read by scripts/exp_spinup_vegc_recipe_v2.py field by field, so the sealed hash
+# covers it. `params` override exp_model_pilot_response.PARAMS (subsample_freq 1, verbose -1
+# inherited); n_estimators is the early-stopping ceiling.
+recipe:
+  name: "screen round 2 best"
+  feats: v3p
+  target: half2_seeds
+  gate: soft
+  objective: l1
+  capacity: tuned
+  params:
+    colsample_bytree: 0.9322383049275373
+    learning_rate: 0.020343045376891144
+    max_bin: 255
+    min_child_samples: 5
+    min_split_gain: 0.042271448901565235
+    n_estimators: 8000
+    num_leaves: 48
+    reg_lambda: 26.23514538217487
+    subsample: 0.5052887904508281
+  pool: both
+  pilot_weight: 1.0
+  zero_floor: 0.0
+  bag: 5
+
+selection:
+  script: scripts/screen_spinup_vegc.py
+  round1: "job 2286843 (tag T-fea-spinscreen), code d4e739e"
+  round2: "job 2295237 (tag T-fea-spinscreen-r2), code 6a2bf86"
+  rule: >
+    Greedy on dev D (scored cells of folds 0-2, models trained on the other four folds), fixed
+    order, a component kept only if it gains more than 0.005, then a backward pass dropping any
+    kept component that no longer pays 0.005. Round 1 kept: +v3x daily-forcing features (-0.4253
+    -> -0.3661), per-seed rows of the scored window (-0.3527), the soft two-stage gate (-0.3297),
+    absolute-error loss (-0.3163), tuned settings (24 optuna trials on folds 0-2, -0.2582; the dev
+    number of a tuned recipe is optimistic by construction), pooling the pilot (-0.2508),
+    five-seed bagging (-0.2405); not kept: a zero floor. The backward pass dropped nothing.
+    Round 2 (its candidates written while round 1 was running, before its result past the loss
+    step was seen) kept the productivity features (-0.2292); see round2_result for the loss
+    ensemble step.
+  step0: "The screen's engine reproduced both sealed model arms on all 56,986 cells exactly: D -0.4316498789 (from-spinup) and -0.6121679 (from-pilot); round 2 reproduced round 1's final recipe exactly (dev D -0.2405, held-out -0.2736)."
+  held_out_already_quoted: >
+    ⚠ THE SCREEN PRINTED THE HELD-OUT VALUE OF EVERY CANDIDATE, as its brief required, so the
+    number this experiment would compute is ALREADY KNOWN (round2_result). This is NOT a blind
+    test. What it protects is narrower: the recipe was chosen on folds 0-2 alone by a rule fixed
+    in advance, so its folds-3-4 value carries no selection bias; sealing it records the recipe,
+    the nulls and the pass rule. A blind test needs cells nobody has scored.
+  round2_result: >
+    Round 2 kept the productivity features (dev D -0.2405 -> -0.2292) and not the loss ensembles
+    (absolute + squared error -0.2320, absolute + Huber -0.2318). THE VALUE THIS EXPERIMENT WOULD
+    COMPUTE, ALREADY PRINTED: D -0.2631 on the 20,123 folds-3-4 cells (frac 0.6064 against the
+    rerun's 0.8695; tile-bootstrap 90 % [-0.2970, -0.2261]; variance explained on log1p 0.980;
+    flat-10 % rate 0.602), against D -0.4432 (frac 0.4263) for the sealed recipe on the same cells.
+    Round-2 screen.json sha256 4069b495d1eadb53....
+
+# Measured by scripts/exp_spinup_vegc_recipe_v2.py --arm nulls --nulls-pool spinup, job 2286970
+# (code ab3bb33), 2026-09-24, before this file had a recipe: the sealed null code on all five
+# folds, restricted to the 20,123 scored cells of folds 3-4, with frac(rerun) restricted likewise
+# (0.869478). nulls.json sha256 abd8fe0046c2e2ef.... Every null is deterministic (the shuffle is
+# seeded), so the model job reads that nulls.json and each value is the one below.
+nulls:
+  - id: training_mean
+    description: "The mean (on log1p) of the training cells' targets: the average forest."
+    expected:
+      statistic: asgood_vegc_spinup_heldout
+      value: -0.808627
+      tolerance: 0.001
+      derivation: "Measured, job 2286970: frac 0.0609, D -0.808627, tile-bootstrap 90 % [-0.8369, -0.7790]."
+
+  - id: nearest_analogue
+    description: "THE BEST NULL. Copy the target of the climatically nearest training cell (eight analogue features, standardised on the training cells)."
+    expected:
+      statistic: asgood_vegc_spinup_heldout
+      value: -0.550117
+      tolerance: 0.001
+      derivation: "Measured, job 2286970: frac 0.3194, D -0.550117, [-0.5939, -0.5014]; variance explained on log1p 0.775."
+
+  - id: nearest_geographic
+    description: "Copy the target of the nearest training cell on the unit sphere, across the held-out tile's edge: the address null."
+    expected:
+      statistic: asgood_vegc_spinup_heldout
+      value: -0.628733
+      tolerance: 0.001
+      derivation: "Measured, job 2286970: frac 0.2407, D -0.628733, [-0.6664, -0.5904]."
+
+  - id: shuffled
+    description: "The held-out fold's two-seed mean truth permuted within the fold (seed 20260924, sealed code on all five folds, then restricted)."
+    expected:
+      statistic: asgood_vegc_spinup_heldout
+      value: -0.820429
+      tolerance: 0.001
+      derivation: "Measured, job 2286970: frac 0.0490, D -0.820429, [-0.8442, -0.7947]."
+
+decision_rule:
+  statistic: asgood_vegc_spinup_heldout
+  comparator: model_absolute
+  pass_if: ">= -0.02"
+  arms: [model, training_mean, nearest_analogue, nearest_geographic, shuffled]
+  multiplicity: none
+  power_note: >
+    The owner's rule and the siblings' a-priori margin, unchanged: D >= -0.02, i.e. frac(recipe)
+    >= 0.849478 on these cells. Best null nearest_analogue at -0.550117; no null satisfies the
+    rule, so the estimand has power. If any null returns something other than its stated value
+    the outcome is `invalid`, not fail.
+  ceiling_note: >
+    frac(rerun) on these 20,123 cells = 0.869478; the band is the bare 10 % floor in 84.9 % of
+    them. Predicting each cell's own two-seed mean -- which no learner can -- lands in band in
+    97.8 % of all 56,986 cells; a prediction with a lognormal error of SD 0.05 would reach about
+    0.90, of SD 0.08 about 0.77 (both measured on the same truth). So rerun grade needs a typical
+    error of about 5-6 %; round 1's recipe had a median absolute log error of 0.074 on folds 0-2.
+  outcomes_note: >
+    (a) D >= -0.02: rerun grade on vegetation carbon on cells the choice never scored -- not
+    expected (see question). (b) -0.550117 < D < -0.02: better than every lookup, not rerun grade;
+    quote D, frac and the error structure against the sealed recipe beside it. (c) D <= -0.550117:
+    no better than an analogue lookup, contradicting the screen -- find the difference between
+    the screen's and this script's apparatus before anything else.
+
+compute:
+  launcher: scripts/sbatch_py.sh
+  tag: X-spinveg-v2-model
+  partition: priority
+  est_core_hours: 16
+
+outputs:
+  - path: /p/tmp/jamirp/vegemu/exp/X-20260925-spinup-vegc-recipe-v2/metrics.json
+    kind: metrics
