@@ -636,6 +636,7 @@ def test_nothing_may_write_over_the_template(world: dict[str, Path]) -> None:
     base = ["--template", str(copy), "--predictions", str(world["pred"])]
     with pytest.raises(ValueError, match="is the template itself"):
         sg.main(["plan", "--out", str(copy), *base])
+    assert not sg.work_dir_for(copy).exists(), "a refused plan leaves no work directory"
     with pytest.raises(ValueError, match="is the template itself"):
         sg.main(["t0", "--template", str(copy), "--out", str(copy)])  # would cmp, then delete it
     alias = copy.parent / "alias.lpj"

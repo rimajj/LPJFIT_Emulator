@@ -437,13 +437,13 @@ def load_predictions(
 # THE SCALE. Each quantity the synthesiser reads is compared with the same quantity of the
 # template's own record (`corpus.state.summarise_cell`, the definition the training labels were
 # made with), over a sample of predicted-forest cells, and the MEDIAN ratio must lie in
-# [1/SCALE_BAND, SCALE_BAND]. Dev diagnostic, 2026-09-24, against the truth columns of
-# `map-response-v0/oof_map.parquet`: per 1000-cell block, equimap-v1 `pred_historical` and
-# `pred_1901_1930_heldout` sit at median ratios 0.72-1.84 for stems_per_patch, soilc,
-# height_p10/p50 and wooddens_p50. The equilibrium model's own fitted scale (log1p) would put a
-# soil carbon of 1e4 at ~1e-3 of itself and 15 stems a patch at ~0.18; a height in cm is 100x. A
-# genuine regional shift wider than the band is what `--skip-scale-check` is for; the plan
-# records that it was used.
+# [1/SCALE_BAND, SCALE_BAND]. Dev diagnostic, 2026-09-24 (job 2286733, `restart_1999` as the
+# template): the v0 out-of-fold map and equimap-v1 `pred_historical` / `pred_1901_1930_heldout`,
+# each over the globe and five sub-ranges, gave median ratios 0.78-1.28 for all eight quantities;
+# the same v1 file with stems and soil carbon left on the model's fitted log1p scale gave 0.217
+# and 0.00099, and was refused. Per 1000-cell block against the v0 table's truth columns the
+# spread is wider, 0.72-1.84. A height in cm is 100x. A genuine regional shift wider than the
+# band is what `--skip-scale-check` is for; the plan records that it was used.
 # --------------------------------------------------------------------------------------------
 SCALE_BAND = 4.0
 SCALE_SAMPLE = 48
@@ -1514,8 +1514,8 @@ def cmd_t0(args: argparse.Namespace) -> dict[str, Any]:
 # The command line.
 # --------------------------------------------------------------------------------------------
 def cmd_plan(args: argparse.Namespace, work: Path) -> dict[str, Any]:
+    plan, preds = make_plan(args)  # first: a refused plan leaves no work directory behind
     work.mkdir(parents=True, exist_ok=True)
-    plan, preds = make_plan(args)
     need = disk_need(plan)
     if not args.skip_disk_check:
         # Shards live in the work directory, the product next to `--out`; they coexist until
