@@ -1,6 +1,14 @@
 #!/usr/bin/env python
 """D: the acceptance truth -- 1000-year single-cell spin-ups of EVERY cell under three climates.
 
+⚠ PARKED -- DO NOT LAUNCH THE FULL CAMPAIGN (owner, 2026-09-24). The owner ruled that no new
+all-cell reference runs are needed: the stored spin-up (only its years before the onset of rising
+CO2), the stored ssp126 and the stored ssp370 runs are the reference, and the SSP runs are short
+transients (2020-2100), so no equilibrium is claimed for them. This builder is kept because it is
+tested end to end and its smoke test (`truth-smoke1`, 24 runs) is the proof that a single-cell
+rerun with the pilot's protocol reproduces a pilot control restart byte for byte. `WHY IT EXISTS`
+below is the ORIGINAL rationale, superseded by that ruling -- read it as history, not a live plan.
+
     # 1. the plan: flag every cell, fix the runs, write the manifests, project the cost. Cheap.
     scripts/sbatch_py.sh D-tru-v1-plan scripts/corpus_truth.py --stage plan --version v1
 
@@ -1322,6 +1330,11 @@ def main() -> int:
     ap.add_argument("--sample", type=int, default=24, help="verify stage: cells per leg re-decoded")
     ap.add_argument("--workers", type=int, default=int(os.environ.get("SLURM_CPUS_PER_TASK", "1")))
     a = ap.parse_args()
+    print(
+        "⚠ PARKED (owner, 2026-09-24): the full truth campaign is NOT to be launched; the stored "
+        "spin-up, ssp126 and ssp370 runs are the reference. See this script's docstring.",
+        file=sys.stderr,
+    )
 
     if a.stage == "plan":
         ppm = (

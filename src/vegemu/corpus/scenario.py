@@ -1,5 +1,11 @@
 """The acceptance truth's forcing: a 30-year window of a GLOBAL forcing leg, cut out per cell.
 
+⚠ PARKED WITH ITS CAMPAIGN (owner, 2026-09-24): no new all-cell reference runs will be made; the
+stored spin-up (pre-CO2-rise years only), ssp126 and ssp370 runs are the reference. The slicer stays
+because it is correct and tested (it reproduces the pilot's control forcing byte for byte), and a
+single-cell forcing window is useful beyond that campaign. The paragraph below is its ORIGINAL
+rationale, superseded by that ruling.
+
 WHAT THIS IS FOR. The owner's acceptance criterion is proof on all tree-bearing cells, under both
 scenarios, and on the response between them. Nothing already on disk is that proof for the
 equilibrium product: the stored spin-up carries a CO2 ramp in its last 300 years and the scenario
