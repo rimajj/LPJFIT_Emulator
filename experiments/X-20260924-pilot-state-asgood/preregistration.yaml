@@ -1,0 +1,151 @@
+schema_version: 1
+
+exp_id: X-20260924-pilot-state-asgood
+line: X
+
+status: sealed
+
+title: "ON THE FULL FOREST STATE, IS THE CLIMATE-ONLY EMULATOR AS GOOD AS A RERUN OF THE MODEL?"
+question: >
+  The owner's acceptance criterion is tree counts AND trait distributions AND trait medians inside
+  max(10 %, the model's own two-run spread), per cell; on 2026-09-24 the owner chose the pass rule
+  "as good as a rerun": the emulator passes if it lands inside that band as often as a second run
+  of the original model does. The stored global spin-up kept only vegetation carbon for its
+  constant-CO2 years, so the FULL state can be tested only where both seeds of a constant-CO2
+  spin-up exist: the pilot, 200 cells x 30 climates, now with its full second seed.
+
+  THE FALSIFIABLE CLAIM: D = frac(emulator) - frac(rerun) >= -0.02 on the 6,000 pilot rows, where
+  a row passes only if EVERY one of the 19 varying scored quantities is inside the band at once.
+
+  WHAT IT ADDS TO THE SEALED X-20260923-equilibrium-from-climate: that experiment asked whether the
+  map explains variance (it does, 0.608); this asks the owner's acceptance question of the same
+  predictions, against the rerun, on the conjunctive per-row band.
+
+estimand:
+  name: asgood_state_pilot
+  definition: >
+    Rows: the 6,000 (cell, climate) spin-ups of pilot-v2-constco2 (200 cells x 30 climates).
+    Quantities: the 19 of SCORED_CONJUNCTIVE that vary (score.SCORED_VARYING: stems per patch,
+    above-ground biomass, leaf area index, soil carbon, and the 10th/50th/90th percentiles of wood
+    density, specific leaf area, 95 % rooting depth, leaf longevity and height); the three
+    fine-root-conductivity quantiles are one constant and pass every arm, so they are left out.
+    Truth per seed k in {1, 2}: T_k = seed k's end-of-spin-up restart state (pilot-v2-constco2 and
+    pilot-v2-constco2-s2). Band per (cell, climate, quantity): w = score.spread_across_climates on
+    the two seeds, i.e. max(0.10, the median two-seed relative spread of that quantity over the
+    cell's OTHER 29 climates) -- the pair being scored never sets its own tolerance. An arm x
+    passes a row against T_k if every quantity T_k defines satisfies |x - T_k| <= w |T_k| (a trait
+    of a treeless truth is not scored; a trait x leaves undefined where T_k has one fails). Per row
+    the score is the mean over k = 1, 2; frac(x) is the mean over the 6,000 rows; frac(rerun)
+    scores T_2 against T_1 and T_1 against T_2 with the same w. THE STATISTIC: D(x) = frac(x) -
+    frac(rerun); higher is better.
+
+    THE MODEL ARM is the emulator's EMITTED out-of-fold prediction: the post-processed `pred_`
+    heads of the saved climate-only map models/equimap-v1/oof_pilot.parquet (sealed recipe, 5
+    folds of whole 15-degree tiles, seed 42; stocks clipped at zero, trait quantiles sorted,
+    traits blank where it predicts no trees). Its raw heads are reported beside, never decided on.
+
+    REPORTED BESIDE, NEVER DECIDED ON: frac(x); frac(x) on rows tree-bearing in both seeds; the
+    per-quantity band rate.
+  reference_basis: >
+    LPJmL-FIT 5.6.004, Aug-12 2026 binary. Pilot corpus v2-constco2 (seed 1, corpus.parquet sha256
+    9c117cb6c045fe90...) and its full second seed pilot-v2-constco2-s2 (replicate_s2.parquet sha256
+    b88c67875705f3dd...): 200 cells x 30 climates, single-cell 1000-year spin-ups, npatch 25, CO2
+    constant 276.59 ppm, base window 1970-1999; state from the end-of-spin-up restart. Emulator:
+    models/equimap-v1/oof_pilot.parquet (sha256 97a485df6161ea8c...), inputs the 86 CLIMATE_FEATURES
+    + 5 soil columns. 200 of the 56,986 cells; a share of rows inside a conjunctive band, and the
+    statistic a difference of two shares.
+  units: dimensionless
+  kind: ratio
+
+data:
+  corpus: /p/tmp/jamirp/vegemu/corpus/pilot-v2-constco2
+  corpus_sha256: "9c117cb6c045fe90692fbee431dc3a33bf6ced1e4d5e7f4fb2350a1bce16903c"
+  plan_sha256: "bad787ade3fc609b25cf8ebc87dfd0978e4a869068d9408c73945ec3dc667f99"
+  n_rows: 6000
+
+  split:
+    kind: blocked_spatial
+    k: 5
+    seed: 42
+    block_degrees: [15]
+
+  leakage_checks:
+    - "The emulator's predictions are out-of-fold: each cell is predicted by the map fitted without its 15-degree tile's fold (the sealed folds of X-20260923-equilibrium-from-climate); the script asserts the OOF file's fold column equals score.blocked_spatial_folds on these cells."
+    - "Inputs are exactly the 91 climate + soil features; no state, location or design column is an input."
+    - "The band for a row comes from the SAME cell's other 29 climates, never from the row's own seed pair, so a scored pair cannot set its own tolerance."
+    - "The analogue null standardises on each fold's training rows only; the nulls are the sealed experiment's own null_predictions."
+    - "CO2 is constant on this corpus and is never a feature (invariant 8)."
+
+# Measured by scripts/exp_pilot_state_asgood.py --arm nulls, job 2286548, 2026-09-24, before this
+# file was written and before any model arm was scored; nulls.json sha256 d174fc039f3cd2e2...
+# Deterministic: the nulls are exp_equilibrium_map.null_predictions (seeded shuffle); the model job
+# reads this nulls.json rather than recomputing it.
+nulls:
+  - id: training_mean
+    description: "The mean of the training rows (sealed recipe transforms): the average forest."
+    expected:
+      statistic: asgood_state_pilot
+      value: -0.1035
+      tolerance: 0.001
+      derivation: "Measured, job 2286548: frac 0.0000 -- the average forest never lands inside the band on all 19 at once."
+
+  - id: nearest_analogue
+    description: "Copy the forest of the climatically nearest training row (eight analogue features)."
+    expected:
+      statistic: asgood_state_pilot
+      value: -0.088167
+      tolerance: 0.001
+      derivation: "Measured, job 2286548: frac 0.0153; on rows tree-bearing in both seeds 0.0005."
+
+  - id: nearest_geographic
+    description: "THE BEST NULL. Copy the forest of the nearest training cell under the SAME design climate: the address null."
+    expected:
+      statistic: asgood_state_pilot
+      value: -0.071
+      tolerance: 0.001
+      derivation: "Measured, job 2286548: frac 0.0325; on rows tree-bearing in both seeds 0.0010. Most of its passes are treeless rows copied from a treeless neighbour."
+
+  - id: shuffled
+    description: "The held-out truth permuted across the held-out rows (seeded)."
+    expected:
+      statistic: asgood_state_pilot
+      value: -0.1035
+      tolerance: 0.001
+      derivation: "Measured, job 2286548: frac 0.0000."
+
+decision_rule:
+  statistic: asgood_state_pilot
+  comparator: model_absolute
+  pass_if: ">= -0.02"
+  arms: [model, training_mean, nearest_analogue, nearest_geographic, shuffled]
+  multiplicity: none
+  power_note: >
+    THE OWNER'S RULE WITH THE SAME A-PRIORI MARGIN AS THE ALL-CELL TESTS (X-20260924-spinup-vegc-*):
+    non-inferiority to a rerun within 2 rows in 100, D >= -0.02, i.e. frac(emulator) >= 0.0835.
+    Under model_absolute each null is judged on its own D; the best, nearest_geographic, is at
+    -0.071, so no null satisfies the rule and the estimand has power -- but the gap between the
+    rerun (0.1035) and nothing (0.0) is small, so read D beside frac and the per-quantity rates.
+
+  ceiling_note: >
+    ⚠ THE REFERENCE IS THE RERUN, AND IT IS LOW: a second run of the model lands inside the band on
+    all 19 quantities at once in only 10.35 % of rows. The conjunctive per-row band is therefore
+    dominated by the model's own realisation noise; the band is the bare 10 % floor for 83.2 % of
+    (row, quantity) pairs. An emulator of the ensemble mean can in principle beat a rerun, since its
+    error does not carry a second realisation.
+
+  outcomes_note: >
+    PRE-NAMED. (a) D >= -0.02: on the full state the emulator is as good as a rerun on the pilot,
+    200 cells, present-day and perturbed constant-CO2 climates. (b) -0.071 < D < -0.02: it beats
+    every lookup but is not rerun-grade; report where (per-quantity rates). (c) D <= -0.071: no
+    better than copying a neighbour. ⚠ None of these is the all-cell criterion: 200 cells, and the
+    all-cell part exists only for vegetation carbon (X-20260924-spinup-vegc-*).
+
+compute:
+  launcher: scripts/sbatch_py.sh
+  tag: X-pstate-model
+  partition: priority
+  est_core_hours: 1
+
+outputs:
+  - path: /p/tmp/jamirp/vegemu/exp/X-20260924-pilot-state-asgood/metrics.json
+    kind: metrics
