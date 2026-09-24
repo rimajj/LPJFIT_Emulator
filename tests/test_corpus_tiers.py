@@ -405,6 +405,70 @@ def test_a_scheme_1_plan_is_not_re_planned_in_place(
         m.stage_plan("v9", 200, 30, 250, co2=m.Co2(True, 276.59))
 
 
+def _refusable_decode(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, shift: float = 1.0
+) -> ModuleType:
+    """A planned source `pilot-v9` with a table, and a decode whose `agb` is off by `shift`."""
+    m = _two_versions(monkeypatch, tmp_path, {"co2_constant": True, "plan_sha256": "x", "co2": "C"})
+    src = tmp_path / "pilot-v9"
+    names = ["r0", "r1"]
+    runs = {"name": names, "cell": [1, 2], "point": ["control", "lhs00"]}
+    pl.DataFrame({**runs, "run_dir": ["-", "-"], "forcing": ["-", "-"]}).write_csv(src / "runs.csv")
+    pl.DataFrame({"point": ["control", "lhs00"]}).write_csv(src / "design.csv")
+    pl.DataFrame({"cell": [1, 2]}).write_csv(src / "cells.csv")
+    table = pl.DataFrame(
+        {
+            "name": names,
+            "point": ["control", "lhs00"],
+            "stems_total": [3.0, 0.0],
+            "truth_stems_total": [3.0, 0.0],
+            "restart_year": [m.STATE_YEAR, m.STATE_YEAR],
+            "agb": [1.0, 0.0],
+        }
+    )
+    table.write_parquet(src / "corpus.parquet")
+    decoded = table.with_columns(pl.col("agb") + shift)  # a change no schema explains
+    done = [{"name": r, "restart_sha256": "0" * 64} for r in names]
+    monkeypatch.setattr(m, "_decode_all", lambda jobs, n: (done, []))
+    monkeypatch.setattr(m, "_corpus_frame", lambda *a, **k: decoded)
+    monkeypatch.setattr(m, "_report_decode", lambda *a, **k: None)
+    return m
+
+
+def test_a_refused_re_decode_does_not_take_the_tables_name(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A re-decode whose diff fails used to write `corpus.parquet` anyway, record its sha256 in the
+    decode JSON, and overwrite a good table an earlier run had left there."""
+    m = _refusable_decode(monkeypatch, tmp_path)
+    out = tmp_path / "pilot-v10"
+    out.mkdir()
+    (out / "provenance.json").write_text(json.dumps({"derived_from": {"corpus_dir": "pilot-v9"}}))
+    (out / "corpus.parquet").write_bytes(b"an earlier, accepted table")
+    assert m.stage_decode("v9", 1, None, out_version="v10") == 1
+    assert (out / "corpus.parquet").read_bytes() == b"an earlier, accepted table"
+    assert (out / "corpus.refused.parquet").is_file()
+    assert not list(out.glob(".*pending*")), "no leftovers"
+    report = json.loads((out / "decode_s1.json").read_text())
+    assert report["corpus_sha256"] is None
+    assert report["comparison_to_source"]["ok"] is False
+    assert report["refused_table"] == str(out / "corpus.refused.parquet")
+
+
+def test_an_accepted_re_decode_takes_the_tables_name(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    m = _refusable_decode(monkeypatch, tmp_path, shift=0.0)
+    assert m.stage_decode("v9", 1, None, out_version="v10", schema=2) == 0
+    out = tmp_path / "pilot-v10"
+    assert sorted(p.name for p in out.glob("*.parquet")) == ["corpus.parquet"]
+    report = json.loads((out / "decode_s1.json").read_text())
+    assert (
+        report["corpus_sha256"] == hashlib.sha256((out / "corpus.parquet").read_bytes()).hexdigest()
+    )
+    assert report["refused_table"] is None and report["comparison_to_source"]["ok"] is True
+
+
 def test_two_build_shards_racing_to_create_the_co2_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

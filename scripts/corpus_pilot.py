@@ -1691,14 +1691,23 @@ def stage_decode(  # noqa: PLR0912, PLR0915 -- decode, write, derive, compare, r
     # them is one path typo away from doubling the pilot with re-runs and calling it more evidence.
     # It is a second measurement of the same thing, which is a SPREAD, never extra rows.
     # (`full_stem` is fixed above, where a re-decode checks its source table exists.)
+    #
+    # ⚠ A RE-DECODE ONLY GETS THE TABLE'S NAME AFTER ITS DIFF PASSES. It is written under a pending
+    # name first; a refused one lands at `<stem>.refused.parquet` and its sha256 is withheld from
+    # the decode JSON, as `corpus_build.check_seeds_differ` withholds a refused build's -- that hash
+    # is the only handle a pre-registration has. Written straight to `<stem>.parquet`, a refused
+    # table sat at the name a derived version is cited by, and overwrote a good one from an earlier
+    # run. An in-place decode is unchanged: it writes its own name directly, as it always has.
     stem = "corpus_smoke" if limit else full_stem
     dest = out / f"{stem}.parquet"
-    frame.write_parquet(dest)
+    written = dest if out == src else out / f".{stem}.pending.parquet"
+    frame.write_parquet(written)
     treeless, control, ctrl_treeless = _decode_parts(frame)
     truth_treed = ctrl_treeless.filter(pl.col("truth_stems_total") > 0).height
 
     derived: dict[str, Any] | None = None
     comparison: dict[str, Any] | None = None
+    refused = False
     if out != src:
         derived = _write_derived(
             out,
@@ -1710,7 +1719,11 @@ def stage_decode(  # noqa: PLR0912, PLR0915 -- decode, write, derive, compare, r
             source_table=source_table,
         )
         comparison = compare_tables(pl.read_parquet(source_table), frame, src_schema, use)
-        comparison["byte_identical"] = sha256_of(source_table) == sha256_of(dest)
+        comparison["byte_identical"] = sha256_of(source_table) == sha256_of(written)
+        refused = not comparison["ok"]
+        if refused:
+            dest = out / f"{stem}.refused.parquet"
+        os.replace(written, dest)
 
     summary: dict[str, Any] = {
         "created_utc": datetime.now(UTC).isoformat(timespec="seconds"),
@@ -1741,7 +1754,8 @@ def stage_decode(  # noqa: PLR0912, PLR0915 -- decode, write, derive, compare, r
         "treeless_control_rows": ctrl_treeless.height,
         "control_rows": control.height,
         "treeless_control_cells_treed_in_ground_truth": truth_treed,
-        "corpus_sha256": sha256_of(dest),
+        "corpus_sha256": None if refused else sha256_of(dest),
+        "refused_table": str(dest) if refused else None,
         # ⚠ This used to say "untouched" whatever the plan was -- the word that hid a CO2 ramp for
         # a week. It now states the plan's CO2 forcing, and that it is never a feature.
         "co2": f"{src_prov['co2']} -- as planned; never a feature (MEMORY.md:co2-closed)",
