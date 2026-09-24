@@ -411,6 +411,16 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+def _text_features(model_text: str) -> list[str]:
+    """The feature names a LightGBM model text was fitted on, in order, from its header."""
+    for line in model_text.splitlines():
+        if line.startswith("feature_names="):
+            return line.removeprefix("feature_names=").split(" ")
+        if line.startswith("Tree="):
+            break
+    return []
+
+
 def feature_stats(x: Array, features: Sequence[str]) -> dict[str, dict[str, float]]:
     """Per-feature training range and scale: the envelope inside which a prediction interpolates."""
     out: dict[str, dict[str, float]] = {}
@@ -550,15 +560,25 @@ class EquilibriumMap:
         manifest = json.loads((in_dir / "manifest.json").read_text(encoding="utf-8"))
         if manifest.get("format") != FORMAT:
             raise ValueError(f"not a {FORMAT} manifest: {manifest.get('format')!r}")
+        features = tuple(manifest["features"])
         models = {}
         for head in manifest["heads"]:
             p = in_dir / head["file"]
             if _sha256(p) != head["sha256"]:
                 raise ValueError(f"{p} does not match the manifest's sha256; refusing to load")
             models[head["name"]] = p.read_text(encoding="utf-8")
+            # The hash covers the head files, not the manifest, and prediction takes a plain array:
+            # a manifest whose feature list were reordered would feed every column to the wrong
+            # split with no error. Each head's own text names the order it was fitted on.
+            fitted_on = _text_features(models[head["name"]])
+            if fitted_on != list(features):
+                raise ValueError(
+                    f"{p} was fitted on a different feature order than the manifest lists; "
+                    "refusing to load"
+                )
         return cls(
             heads=tuple(h["name"] for h in manifest["heads"]),
-            features=tuple(manifest["features"]),
+            features=features,
             params=dict(manifest["params"]),
             n_jobs=int(manifest["n_jobs"]),
             treeless_below=float(manifest["treeless_below_stems_per_patch"]),

@@ -10,6 +10,7 @@ changes nothing, and post-processing does exactly the four things it claims and 
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -181,6 +182,20 @@ def test_a_saved_map_loads_back_to_identical_predictions(tmp_path: Path) -> None
     head = tmp_path / "heads" / "agb.txt"
     head.write_text(head.read_text() + "\n", encoding="utf-8")
     with pytest.raises(ValueError, match="sha256"):
+        EquilibriumMap.load(tmp_path)
+
+
+def test_a_manifest_whose_feature_order_disagrees_with_its_heads_is_refused(tmp_path: Path) -> None:
+    """The sha256 covers the head files, not the manifest. A reordered feature list there would
+    feed every column of a plain array to the wrong split, silently."""
+    x, y = _problem()
+    em = EquilibriumMap(heads=SUBSET, params=SMALL).fit(x, y)
+    em.save(tmp_path, basis={"what": "synthetic"})
+    path = tmp_path / "manifest.json"
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    manifest["features"] = [*manifest["features"][1:], manifest["features"][0]]
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(ValueError, match="feature order"):
         EquilibriumMap.load(tmp_path)
 
 
