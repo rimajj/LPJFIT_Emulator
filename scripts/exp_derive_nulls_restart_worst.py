@@ -406,9 +406,14 @@ def load_model_arm(
     wrote, is NOT dropped: it is a missing prediction and scores e = inf, exactly as a missing
     value does in `score.py`. Dropping it would score the model on an easier subset than its nulls.
 
-    READ BACK, NOT INTENDED. The harness decodes the synthesised record with the corpus decoder and
-    separately proves the file on disk decodes to that same record (`t0_roundtrip`). A row whose
-    round-trip failed is not a state the file holds, so it is treated as a failed target too.
+    READ BACK, NOT INTENDED -- WITH ONE GAP. The harness summarises the synthesised record with the
+    corpus decoder's summariser and separately proves the bytes on disk are that record's encoding
+    and re-encode unchanged (`t0_roundtrip`). A row whose round-trip failed is not a state the file
+    holds, so it is treated as a failed target too. ⚠ The `y0_` columns are summarised from the
+    IN-MEMORY record (`scripts/synth_pilot.py`, `summarise_cell(rec, ...)`), not from decoding the
+    file, so they equal the file's state only as far as the encoder is lossless for everything the
+    summary reads. Reals are float64 in the restart, so values survive; a field the summary reads
+    but the encoder drops or rebuilds would not, and `t0_roundtrip` does not test that.
     A table holding several arms (the harness's one-year table carries `arm` = map / oracle /
     truth) is cut to `arm`, and a row whose C run did not succeed (`success`) is a failed target.
     """
