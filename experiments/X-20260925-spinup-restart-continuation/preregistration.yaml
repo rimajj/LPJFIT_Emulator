@@ -3,7 +3,7 @@ schema_version: 1
 exp_id: X-20260925-spinup-restart-continuation
 line: X
 
-status: draft
+status: sealed
 
 title: "DOES THE REAL MODEL, STARTED FROM THE EMULATED CONSTANT-CO2 RESTART, STAY AT THE STORED SPIN-UP'S EQUILIBRIUM AS WELL AS A RERUN WOULD, ON EVERY CELL?"
 question: >
