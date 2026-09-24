@@ -10,6 +10,7 @@ the held-out fold and nothing else.
 from __future__ import annotations
 
 import dataclasses
+import json
 import sys
 from pathlib import Path
 
@@ -175,3 +176,19 @@ def test_error_structure_bins_cover_the_cells() -> None:
     n = sum(row["cells"] for row in es["carbon_gC_m2"])
     assert n == es["cells"]
     assert 0.0 <= es["frac"] <= 1.0
+
+
+def test_a_recipe_survives_its_json_round_trip() -> None:
+    r = scr.Recipe(
+        "x",
+        feats="v3x",
+        target="half2_seeds",
+        gate="soft",
+        objective="l1",
+        capacity="tuned",
+        params=(("learning_rate", 0.05), ("num_leaves", 63)),
+        pool="both",
+        bag=5,
+    )
+    back = scr.recipe_of(json.loads(json.dumps(dataclasses.asdict(r))))
+    assert back == r and back.key() == r.key()

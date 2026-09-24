@@ -69,7 +69,7 @@ from lightgbm import LGBMClassifier, LGBMRegressor, early_stopping
 from exp_equilibrium_map import FEATURES, FORBIDDEN
 from exp_model_pilot_response import PARAMS
 from exp_spinup_vegc import STATISTIC, _inputs, global_folds, score, scored_set
-from vegemu.corpus.features_v3 import V3_ALL, V3_FEATURES
+from vegemu.corpus.features_v3 import V3_ALL, V3_ALLP, V3_FEATURES
 from vegemu.paths import paths
 from vegemu.score import blocked_spatial_folds, spatial_blocks
 
@@ -89,6 +89,7 @@ FEATURE_SETS: dict[str, tuple[str, ...]] = {
     "base": tuple(FEATURES),
     "v3": tuple(FEATURES) + V3_FEATURES,
     "v3x": tuple(FEATURES) + V3_ALL,
+    "v3p": tuple(FEATURES) + V3_ALLP,  # only when the features_v3p tables are given (round 2)
 }
 TARGETS: tuple[str, ...] = ("win", "half2", "win_seeds", "half2_seeds")
 BIG: dict[str, Any] = {
@@ -177,7 +178,7 @@ def _pilot_grid(table: pl.DataFrame, cells: IntArray, points: Sequence[str]) -> 
     return t
 
 
-def load(v3x_dir: Path) -> Data:  # noqa: PLR0915 -- one flat, asserted alignment
+def load(v3x_dir: Path, v3p_dir: Path | None = None) -> Data:  # noqa: PLR0915 -- one flat pass
     inp = _inputs()
     corpus = Path(str(paths()["scratch"]["corpus"]))
     spin = corpus / "spinup-constco2"
@@ -195,12 +196,15 @@ def load(v3x_dir: Path) -> Data:  # noqa: PLR0915 -- one flat, asserted alignmen
     assert np.allclose(np.asarray(inp["lon_p"]), lon_g[cells_p])
     assert np.allclose(np.asarray(inp["lat_p"]), lat_g[cells_p])
 
-    v3_g = pl.read_parquet(v3x_dir / "features_v3x_spinup.parquet").sort("cell")
+    src, tag = (v3x_dir, "v3x") if v3p_dir is None else (v3p_dir, "v3p")
+    v3_g = pl.read_parquet(src / f"features_{tag}_spinup.parquet").sort("cell")
     assert np.array_equal(v3_g["cell"].to_numpy(), np.arange(67420))
-    v3_p = _pilot_grid(pl.read_parquet(v3x_dir / "features_v3x_pilot.parquet"), cells_p, points)
+    v3_p = _pilot_grid(pl.read_parquet(src / f"features_{tag}_pilot.parquet"), cells_p, points)
     xg: dict[str, Array] = {}
     xp: dict[str, Array] = {}
     for name, cols in FEATURE_SETS.items():
+        if name == "v3p" and v3p_dir is None:
+            continue
         assert not FORBIDDEN & set(cols), f"a forbidden column is in feature set {name}"
         assert not any("co2" in c.lower() for c in cols), "CO2 is never a feature"
         extra = [c for c in cols if c not in FEATURES]
@@ -649,6 +653,54 @@ class Screen:
         return dataclasses.replace(r, capacity="tuned", params=params)
 
 
+# Round 2, added after round 1 had run (disclosed in its output): candidates that did not exist
+# when round 1's order was fixed, each applied to round 1's final recipe by the same rule.
+ROUND2: tuple[tuple[str, tuple[dict[str, Any], ...]], ...] = (
+    ("productivity features", ({"feats": "v3p"},)),
+)
+
+
+def recipe_of(spec: dict[str, Any]) -> Recipe:
+    """A Recipe back from its `dataclasses.asdict` JSON form."""
+    params = tuple((str(k), v) for k, v in spec.get("params") or ())
+    return Recipe(**{**spec, "params": params})
+
+
+def round2(scr: Screen, round1: Path, report: dict[str, Any], out: Path) -> int:
+    r1 = json.loads(round1.read_text())
+    current = recipe_of(r1["best"]["recipe"])
+    base = Recipe("sealed-spinup")
+    rec = scr.run(dataclasses.replace(current, name="round-1 best"))
+    cur_d = float(rec["eval"]["dev"]["D"])
+    report["round"] = 2
+    report["round1"] = {"path": str(round1), "best": r1["best"]}
+    singles: list[dict[str, Any]] = []
+    path: list[dict[str, Any]] = []
+    for step, changes in ROUND2:
+        print(f"== round 2 step {step}", flush=True)
+        alts: dict[str, float] = {}
+        recs: dict[str, Recipe] = {}
+        for ch in changes:
+            lab = _label(ch)
+            singles.append(
+                {"change": lab, **scr.run(dataclasses.replace(base, name=f"single {lab}", **ch))}
+            )
+            combo = dataclasses.replace(current, name=f"round-1 best +{lab}", **ch)
+            alts[lab] = float(scr.run(combo)["eval"]["dev"]["D"])
+            recs[lab] = combo
+        pick = choose(cur_d, alts)
+        path.append(
+            {"step": step, "current_dev_D": cur_d, "alternatives": alts, "kept": pick or "none"}
+        )
+        if pick is not None:
+            current, cur_d = recs[pick], alts[pick]
+        print(f"  kept: {pick or 'none'}; current dev D {cur_d:+.4f}", flush=True)
+    report["singles"] = singles
+    report["path"] = path
+    finish(scr, current, report, out)
+    return 0
+
+
 def main() -> int:  # noqa: PLR0915 -- one flat sequence of screen stages
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     ap.add_argument("--out", required=True)
@@ -657,6 +709,8 @@ def main() -> int:  # noqa: PLR0915 -- one flat sequence of screen stages
     ap.add_argument("--threads", type=int, default=8, help="LightGBM threads per fit")
     ap.add_argument("--trials", type=int, default=24)
     ap.add_argument("--quick", action="store_true", help="plumbing smoke: 40 trees, 2 trials")
+    ap.add_argument("--round2", default="", help="a round-1 screen.json: test ROUND2 from its best")
+    ap.add_argument("--v3p", default="", help="directory of features_v3p_*.parquet (round 2)")
     args = ap.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -665,7 +719,12 @@ def main() -> int:  # noqa: PLR0915 -- one flat sequence of screen stages
         PARAMS["n_estimators"] = 40
         BIG["n_estimators"] = 200
 
-    d = load(v3x)
+    v3p = None
+    if args.round2:
+        v3p = (
+            Path(args.v3p) if args.v3p else Path(str(paths()["scratch"]["exp"])) / "T-features-v3p"
+        )
+    d = load(v3x, v3p)
     fold = np.asarray(d.sc["fold"])
     print(
         f"scored cells {fold.size}: dev (folds 0-2) {int(np.isin(fold, DEV_FOLDS).sum())}, "
@@ -682,6 +741,9 @@ def main() -> int:  # noqa: PLR0915 -- one flat sequence of screen stages
         "features": {k: len(v) for k, v in FEATURE_SETS.items()},
         "quick": bool(args.quick),
     }
+
+    if args.round2:
+        return round2(scr, Path(args.round2), report, out)
 
     # Step 0: the sealed recipes, re-derived by this engine, all five folds.
     print("== step 0: reproduce the two sealed model arms", flush=True)
@@ -750,11 +812,18 @@ def main() -> int:  # noqa: PLR0915 -- one flat sequence of screen stages
             current, cur_d = without, d_without
     report["backward"] = backward
 
+    report["singles"] = singles
+    report["path"] = path
+    finish(scr, current, report, out)
+    return 0
+
+
+def finish(scr: Screen, current: Recipe, report: dict[str, Any], out: Path) -> None:
+    """The best recipe's error structure, its pilot-only twin, and the outputs."""
+    d = scr.d
     best = scr.run(current)
     pred_best = scr.preds[current.key()]
     mask = d.sc["mask"].astype(bool)
-    report["singles"] = singles
-    report["path"] = path
     report["best"] = {"recipe": dataclasses.asdict(current), "eval": best["eval"]}
     report["error_structure"] = {
         "dev": error_structure(pred_best[mask], d, DEV_FOLDS),
@@ -781,6 +850,8 @@ def main() -> int:  # noqa: PLR0915 -- one flat sequence of screen stages
     report["tuning"] = scr.tuned
     report["all_candidates"] = list(scr.cache.values())
 
+    scr.run(Recipe("sealed-spinup"))  # cached in round 1; round 2 fits it once for the table
+    sealed_pred = scr.preds[Recipe("sealed-spinup").key()]
     cells = np.flatnonzero(mask)
     pl.DataFrame(
         {
@@ -788,7 +859,7 @@ def main() -> int:  # noqa: PLR0915 -- one flat sequence of screen stages
             "fold": np.asarray(d.sc["fold"]).astype(np.int8),
             "pred_best": pred_best[mask],
             "pred_pilot_same_recipe": pp[mask],
-            "pred_sealed_spinup": scr.preds[Recipe("sealed-spinup").key()][mask],
+            "pred_sealed_spinup": sealed_pred[mask],
             "t1": d.sc["t1"],
             "t2": d.sc["t2"],
             "w": d.sc["w"],
@@ -796,7 +867,6 @@ def main() -> int:  # noqa: PLR0915 -- one flat sequence of screen stages
     ).write_parquet(out / "predictions.parquet")
     (out / "screen.json").write_text(json.dumps(report, indent=2, default=str))
     print(f"wrote {out / 'screen.json'}", flush=True)
-    return 0
 
 
 if __name__ == "__main__":
