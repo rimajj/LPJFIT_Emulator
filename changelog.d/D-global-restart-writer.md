@@ -19,6 +19,12 @@
   `current-api`, which calls `synthesise_cell` exactly as it stands today). The second is where
   predicted type shares, a recomputed climate buffer and a climate-derived type rule get wired in.
 - `plan` and `assemble` refuse to start without the free disk they will use, plus 10 %.
+- `plan` refuses, before any work: prediction files with duplicate cells; files whose median
+  prediction/template ratio over 48 forested cells falls outside 4x for any quantity the
+  synthesiser reads (a log1p or cm column; `--skip-scale-check` overrides and is recorded); files
+  whose `lon`/`lat` are not the grid's own (another cell ordering); a census of another template;
+  a template not framed from cell 0. `plan`, `assemble`, `census` and `t0` refuse an output that
+  is the template itself (`t0` would have deleted it after comparing it with itself).
 - `census`: the tree-stem count of every template record. On `restart_1999`: 56,986 cells with a
   stem, 10,434 without, in 36 s on 32 workers. `plan --census` then says before any work exactly
   how many cells it will synthesise, and the cost projection prices only those.
