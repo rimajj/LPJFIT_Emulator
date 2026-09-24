@@ -1,26 +1,48 @@
 #!/usr/bin/env python
 """Write the emulated restart file for the WHOLE GLOBE, as a task farm over cell blocks.
 
-    scripts/synth_global.py plan     --out-dir <D> [--pred <parquet>] [--block-size 500] ...
-    scripts/synth_global.py shards   --out-dir <D> [--blocks all|a:b] [--workers 64]
-    scripts/synth_global.py assemble --out-dir <D>
-    scripts/synth_global.py verify   --out-dir <D> [--workers 64]
-    scripts/synth_global.py run      --out-dir <D> ...          # all four, in one job
-    scripts/synth_global.py farm     --out-dir <D> --jobs 4     # prints the multi-job submission
+    scripts/synth_global.py plan     --out <file> --predictions <parquet> [--template <file>]
+                                     [--block-size 500] [--work-dir <D>] ...
+    scripts/synth_global.py shards   --out <file> [--blocks a:b | --task I --ntasks N] [--workers W]
+    scripts/synth_global.py status   --out <file>        # which shards are written, which are not
+    scripts/synth_global.py assemble --out <file>
+    scripts/synth_global.py verify   --out <file> [--workers W]
+    scripts/synth_global.py finish   --out <file>        # assemble + verify + summary, one job
+    scripts/synth_global.py run      --out <file> --predictions <parquet> ...   # everything
+    scripts/synth_global.py farm     --out <file> --ntasks 4    # prints the multi-job submission
     scripts/synth_global.py t0       --out <file> [--first-cell F --ncell N]   # the scale proof
+
+Every command after `plan` finds the plan through `--out` (its work directory is `<out>.work/`
+unless `--work-dir` says otherwise) or through `--work-dir` alone.
 
 WHAT THIS IS. `synth_restart.py` writes one contiguous block and holds it in RAM; the product is a
 restart file for all 67,420 cells, ~119 GiB, in the model's grid order (latitude row, then
-longitude). So the globe is cut into blocks; each block is read from the TEMPLATE global restart,
-each cell with a prediction is synthesised by `models.synth.synthesise_cell` exactly as
-`synth_restart.py` does it, and the block is written as a SHARD -- itself a valid restart file with
+longitude). So the globe is cut into blocks; each block is read from the TEMPLATE global restart
+(default: `ground_truth.restart_spinup_end`, the stored spin-up's `restart_1999` -- the only real
+restart each cell has), each cell with a prediction is synthesised by ONE pluggable per-cell
+function (below), and the block is written as a SHARD -- itself a valid restart file with
 `firstcell` = the block's first cell. `assemble` stitches the shards into one file by byte-range
 copies (`binfmt.restart.assemble_restart`), and `verify` reads every record of the result back.
 
 A BLOCK WITH NOTHING TO SYNTHESISE WRITES NO SHARD. Its records are the template's, verbatim, so
 the assembler copies them straight out of the template. Cells with no prediction, a NaN in a
-required prediction, or a `skip` template pass through unchanged -- as in `synth_restart.py`,
-because substituting a guess there would put a fabricated forest into the deliverable.
+required prediction, a `skip` template, or a template with no tree in it pass through unchanged --
+as in `synth_restart.py`, because substituting a guess there would put a fabricated forest into the
+deliverable. So by default the synthesised set is exactly the predicted cells whose template holds
+a stem (56,986 of 67,420 in `restart_1999`), and every other cell is the template's own record.
+
+SHARD WRITING IS RESTARTABLE. A shard is built as `<shard>.partial` and renamed only by a clean
+close, and its report (`shard_<k>.json`) is written after the rename and carries the plan's hash
+and the shard's size. `shards` skips every block whose shard and report exist, agree in size and
+belong to this plan, so a task that died is re-run ALONE with exactly the arguments it had (`status`
+lists what is missing and the `--task` that owns it), and nothing it did not own is touched.
+
+THE PER-CELL SYNTHESIS IS ONE PLUGGABLE FUNCTION. `--cell-rule current-api` (the default) calls
+`synthesise_cell(template, prediction, pool, layout, cell=, template_cell=, seed=, match_traits=,
+**synth_kwargs)` -- today's API, nothing else. `--cell-rule module:factory` swaps it: see
+`CellSynth` for the contract. That is where predicted type shares, a climate buffer recomputed from
+the forcing, or a climate-derived allowed-type rule are wired in: they are per-cell inputs the
+factory can read for its block, which a JSON of fixed keyword arguments cannot carry.
 
 ⚠ WHAT THE PRODUCT OF THIS SCRIPT IS NOT. It is not a fidelity measurement. The template of every
 cell is that cell's OWN real `restart_1999` record (the synthesiser's design: soil water, climate
@@ -37,13 +59,14 @@ where `factory(template_path, first_cell, ncell, **donor_opts)` returns an objec
 pool needs. A rule must never hand a cell a donor pool built from that cell's own record.
 
 THE PROCESSES ARE SPAWNED, NOT FORKED (`docs/reference/cluster.md` trap 7: a forked worker that
-touches polars hangs forever). Predictions are read once, in the parent, and handed to each block
-as plain dicts.
+touches polars hangs forever). Predictions are read once, by `plan`, and handed to each block as
+plain dicts.
 """
 
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import hashlib
 import importlib
 import inspect
@@ -51,6 +74,7 @@ import json
 import multiprocessing as mp
 import os
 import resource
+import shutil
 import subprocess
 import sys
 import time
@@ -81,26 +105,25 @@ from vegemu.binfmt.restart import (
 from vegemu.models.synth import (
     MATCH_TRAITS,
     DonorPool,
+    SynthReport,
     build_donor_pool,
     synthesise_cell,
     type_ladder,
 )
-from vegemu.paths import path, paths
+from vegemu.paths import path
 
-PLAN_VERSION = 1
+PLAN_VERSION = 2
 DEFAULT_BLOCK = 500
 DEFAULT_SEED = 20260908  # synth_restart.py's, so a block synthesised by either agrees per cell
-OUTPUT_NAME = "restart_1999_emulated.lpj"
+# Free space demanded beyond the bytes a plan will write, so a run does not fill the file system
+# for every other job on it. The global product alone is ~119 GiB.
+DISK_MARGIN = 1.10
 
 
 def _template_default() -> Path:
-    return path("ground_truth.historical_seed1") / "restart/restart_1999.lpj"
-
-
-def _pred_default() -> Path:
-    # The v0 out-of-fold map predictions, which `synth_restart.py` also defaults to. The production
-    # input is `--pred <models>/equimap-v1/pred_<leg>.parquet` once that model exists.
-    return Path(str(paths()["scratch"]["exp"])) / "map-response-v0" / "oof_map.parquet"
+    # The stored global spin-up's end: every cell's only real restart, and the template of the
+    # constant-CO2 equilibrium product.
+    return path("ground_truth.restart_spinup_end")
 
 
 def _sha256(p: Path, chunk: int = 64 << 20) -> str:
@@ -195,6 +218,135 @@ def make_donor_source(
 
 
 # --------------------------------------------------------------------------------------------
+# The per-cell synthesis: ONE call, pluggable, so what goes into it can change without the farm.
+# --------------------------------------------------------------------------------------------
+class CellSynth(Protocol):
+    """The contract of `--cell-rule`. Built once per block by its factory:
+
+        factory(template_path, first_cell, ncell, *, donors, match_traits, **synth_kwargs)
+
+    where `donors` is the block's `DonorSource` (so a rule may ask it for more than `pool_for`) and
+    `synth_kwargs` is the plan's `--synth-kwargs` JSON. Then called once per synthesised cell:
+
+        synth(template_record, prediction, pool, layout, *, cell, seed) -> (record, SynthReport)
+
+    `prediction` holds EVERY finite `pred_<q>` of the cell under the name `<q>` (so `pft_frac_0..6`
+    arrive if the parquet has them), `pool` is `donors.pool_for(cell)`, and `template_record` is the
+    cell's own decoded record. The record returned is encoded, round-trip checked and written; the
+    report's scalar fields go into the shard's per-cell report.
+
+    Example, once `synthesise_cell` takes the composition and climate options (branch int/synth):
+
+        class Composition(CurrentApi):
+            def __call__(self, template, prediction, pool, layout, *, cell, seed):
+                shares = [prediction.get(f"pft_frac_{i}", float("nan")) for i in range(7)]
+                return synthesise_cell(..., type_shares=shares, allowed_types=..., climbuf=...)
+
+    A rule must not read a cell's own TRUTH beyond its template record; the template is already
+    the cell's own restart, and that is disclosed, not hidden.
+    """
+
+    def __call__(
+        self,
+        template: dict[str, Any],
+        prediction: dict[str, float],
+        pool: DonorPool,
+        layout: Layout,
+        *,
+        cell: int,
+        seed: int,
+    ) -> tuple[dict[str, Any], SynthReport]: ...
+
+    def describe(self) -> dict[str, Any]: ...
+
+
+class CurrentApi:
+    """`synthesise_cell` exactly as `synth_restart.py` calls it, plus `--synth-kwargs`.
+
+    Its template is the cell's own record (`template_cell = cell`). Only keyword arguments the
+    installed `synthesise_cell` accepts are allowed -- checked at plan time -- so the same plan
+    stays valid when the function gains OPTIONAL arguments, and asks for none it lacks.
+    """
+
+    def __init__(
+        self,
+        template: Path,
+        first_cell: int,
+        ncell: int,
+        *,
+        donors: DonorSource,
+        match_traits: tuple[str, ...] = MATCH_TRAITS,
+        **synth_kwargs: Any,
+    ) -> None:
+        check_synth_kwargs(synth_kwargs)
+        self.match_traits = tuple(match_traits)
+        self.synth_kwargs = dict(synth_kwargs)
+
+    def __call__(
+        self,
+        template: dict[str, Any],
+        prediction: dict[str, float],
+        pool: DonorPool,
+        layout: Layout,
+        *,
+        cell: int,
+        seed: int,
+    ) -> tuple[dict[str, Any], SynthReport]:
+        return synthesise_cell(
+            template,
+            prediction,
+            pool,
+            layout,
+            cell=cell,
+            template_cell=cell,
+            seed=seed,
+            match_traits=self.match_traits,
+            **self.synth_kwargs,
+        )
+
+    def describe(self) -> dict[str, Any]:
+        return {"rule": "current-api", "synth_kwargs": self.synth_kwargs}
+
+
+CELL_RULES: dict[str, Callable[..., CellSynth]] = {"current-api": CurrentApi}
+
+# Passed by the farm itself; a `--synth-kwargs` key may not override them.
+_RESERVED_KWARGS = frozenset({"template", "prediction", "pool", "layout", "cell", "template_cell"})
+_RESERVED_KWARGS |= {"seed", "match_traits"}
+
+
+def check_synth_kwargs(kwargs: dict[str, Any]) -> None:
+    accepted = set(inspect.signature(synthesise_cell).parameters)
+    bad = sorted((set(kwargs) - accepted) | (set(kwargs) & _RESERVED_KWARGS))
+    if bad:
+        raise ValueError(f"--synth-kwargs: synthesise_cell does not take (or reserves) {bad}")
+
+
+def make_cell_synth(
+    rule: str,
+    template: Path,
+    first_cell: int,
+    ncell: int,
+    *,
+    donors: DonorSource,
+    match_traits: tuple[str, ...],
+    synth_kwargs: dict[str, Any],
+) -> CellSynth:
+    """A named rule, or `module:factory` for one this file does not know about."""
+    if rule in CELL_RULES:
+        factory = CELL_RULES[rule]
+    elif ":" in rule:
+        mod, attr = rule.split(":", 1)
+        factory = getattr(importlib.import_module(mod), attr)
+    else:
+        raise ValueError(f"unknown cell rule {rule!r}; known: {sorted(CELL_RULES)} or mod:attr")
+    fn: CellSynth = factory(
+        template, first_cell, ncell, donors=donors, match_traits=match_traits, **synth_kwargs
+    )
+    return fn
+
+
+# --------------------------------------------------------------------------------------------
 # Predictions.
 # --------------------------------------------------------------------------------------------
 def required_quantities(match_traits: tuple[str, ...]) -> tuple[str, ...]:
@@ -270,6 +422,11 @@ def _parse_range(text: str | None, lo: int, hi: int) -> tuple[int, int]:
     return int(a or lo), int(b or hi)
 
 
+def work_dir_for(out: Path) -> Path:
+    """Where a plan for output `out` keeps its plan, shards and reports, unless told otherwise."""
+    return out.with_name(out.name + ".work")
+
+
 def make_plan(args: argparse.Namespace) -> tuple[dict[str, Any], dict[int, dict[str, float]]]:
     """The plan, and the predictions it will synthesise (kept out of the plan: they are data)."""
     template = Path(args.template) if args.template else _template_default()
@@ -278,23 +435,21 @@ def make_plan(args: argparse.Namespace) -> tuple[dict[str, Any], dict[int, dict[
     ncell = reader.ncell - first if args.ncell is None else int(args.ncell)
     if not (first >= 0 and ncell >= 1 and first + ncell <= reader.ncell):
         raise ValueError(f"range [{first}, +{ncell}) outside the template's {reader.ncell} cells")
+    if args.block_size < 1:
+        raise ValueError("--block-size must be >= 1")
     match_traits = tuple(t for t in args.match_traits.split(",") if t)
     synth_kwargs = json.loads(args.synth_kwargs) if args.synth_kwargs else {}
-    accepted = set(inspect.signature(synthesise_cell).parameters)
-    reserved = {"template", "prediction", "pool", "layout", "cell", "template_cell", "seed"}
-    bad = sorted((set(synth_kwargs) - accepted) | (set(synth_kwargs) & reserved))
-    if bad:
-        raise ValueError(f"--synth-kwargs: synthesise_cell does not take (or reserves) {bad}")
+    if args.cell_rule == "current-api":
+        check_synth_kwargs(synth_kwargs)
 
     pred_info: dict[str, Any] = {}
     preds: dict[int, dict[str, float]] = {}
     if args.mode == "synth":
+        if not args.predictions:
+            raise ValueError("--predictions is required to synthesise (a parquet: cell, pred_<q>)")
         lo, hi = _parse_range(args.only, first, first + ncell)
         preds, pred_info = load_predictions(
-            Path(args.pred) if args.pred else _pred_default(),
-            max(lo, first),
-            min(hi, first + ncell),
-            match_traits,
+            Path(args.predictions), max(lo, first), min(hi, first + ncell), match_traits
         )
         pred_info["only"] = [lo, hi]
 
@@ -305,9 +460,11 @@ def make_plan(args: argparse.Namespace) -> tuple[dict[str, Any], dict[int, dict[
         kind = "shard" if (args.mode == "identity" or todo) else "template"
         blocks.append({"k": k, "first": a, "ncell": n, "predicted": todo, "kind": kind})
 
+    out = Path(args.out).resolve()
     plan = {
         "version": PLAN_VERSION,
         "mode": args.mode,
+        "out": str(out),
         "template": str(template),
         "template_bytes": reader.filesize,
         "template_ncell": reader.ncell,
@@ -317,6 +474,7 @@ def make_plan(args: argparse.Namespace) -> tuple[dict[str, Any], dict[int, dict[
         "predictions": pred_info,
         "donor_rule": args.donor_rule,
         "donor_opts": json.loads(args.donor_opts) if args.donor_opts else {},
+        "cell_rule": args.cell_rule,
         "seed": args.seed,
         "match_traits": list(match_traits),
         "synth_kwargs": synth_kwargs,
@@ -328,43 +486,117 @@ def make_plan(args: argparse.Namespace) -> tuple[dict[str, Any], dict[int, dict[
     return plan, preds
 
 
-def _plan_path(out_dir: Path) -> Path:
-    return out_dir / "plan.json"
+def _plan_path(work: Path) -> Path:
+    return work / "plan.json"
 
 
-def _load_plan(out_dir: Path) -> dict[str, Any]:
-    plan: dict[str, Any] = json.loads(_plan_path(out_dir).read_text())
+def _load_plan(work: Path) -> dict[str, Any]:
+    if not _plan_path(work).exists():
+        raise FileNotFoundError(f"no plan in {work}: run `plan` first (or pass the --work-dir)")
+    plan: dict[str, Any] = json.loads(_plan_path(work).read_text())
     return plan
 
 
-def _preds_path(out_dir: Path) -> Path:
-    return out_dir / "predictions.json"
+def _preds_path(work: Path) -> Path:
+    return work / "predictions.json"
+
+
+def _record_span_bytes(reader: RestartReader, first: int, ncell: int) -> int:
+    """Bytes of `ncell` consecutive records of `reader` from record `first`, headers excluded."""
+    start, _ = reader.extent(first)
+    _, end = reader.extent(first + ncell - 1)
+    return int(end - start)
+
+
+def disk_need(plan: dict[str, Any]) -> dict[str, Any]:
+    """Bytes this plan will put on disk, by place, from the TEMPLATE's record sizes.
+
+    A synthesised record is not the template's size, but it is the same order (stems are ~1 kB of
+    a ~2 MB record), so the template's is the estimate, with `DISK_MARGIN` on top. Shards and the
+    output coexist until `finish` deletes the shard bodies, so both count.
+    """
+    reader = RestartReader(Path(plan["template"]))
+    shard_bytes = sum(
+        _record_span_bytes(reader, b["first"], b["ncell"])
+        for b in plan["blocks"]
+        if b["kind"] == "shard"
+    )
+    out_bytes = PREFIX_BYTES + 8 * plan["ncell"]
+    out_bytes += _record_span_bytes(reader, plan["first_cell"], plan["ncell"])
+    return {"shard_bytes": shard_bytes, "output_bytes": out_bytes}
+
+
+def check_disk(where: dict[Path, int]) -> dict[str, Any]:
+    """Refuse if any file system named has less free space than it will be asked for, with margin.
+
+    `where` maps a directory to the bytes that will be written under it; two directories on one
+    file system are summed, since they draw on the same free space.
+    """
+    by_dev: dict[int, dict[str, Any]] = {}
+    for d, nbytes in where.items():
+        probe = d
+        while not probe.exists():
+            probe = probe.parent
+        dev = probe.stat().st_dev
+        slot = by_dev.setdefault(
+            dev, {"dirs": [], "need": 0, "free": shutil.disk_usage(probe).free}
+        )
+        slot["dirs"].append(str(d))
+        slot["need"] += int(nbytes)
+    report = {"file_systems": list(by_dev.values()), "margin": DISK_MARGIN}
+    short = [s for s in by_dev.values() if s["need"] * DISK_MARGIN > s["free"]]
+    if short:
+        raise OSError(
+            "not enough free disk: "
+            + "; ".join(
+                f"{s['dirs']} need {s['need'] / 2**30:.1f} GiB x {DISK_MARGIN}, "
+                f"{s['free'] / 2**30:.1f} GiB free"
+                for s in short
+            )
+            + " (--skip-disk-check to override)"
+        )
+    return report
 
 
 # --------------------------------------------------------------------------------------------
 # One block -> one shard. Runs in a spawned worker; takes and returns plain data only.
 # --------------------------------------------------------------------------------------------
-def _shard_path(out_dir: Path, k: int) -> Path:
-    return out_dir / "shards" / f"shard_{k:05d}.lpj"
+def _shard_path(work: Path, k: int) -> Path:
+    return work / "shards" / f"shard_{k:05d}.lpj"
+
+
+def _report_fields(rep: SynthReport) -> dict[str, Any]:
+    """The report's scalar fields, whatever the installed `SynthReport` carries.
+
+    Named ones first (the summary sums them); then every other int/float/str/bool field, so a field
+    the synthesiser gains later (a composition source, a litter scale) reaches the per-cell table
+    without this file changing. Containers are left out: per-cell dicts would not tabulate.
+    """
+    fields: dict[str, Any] = {
+        "stems_requested": rep.stems_requested,
+        "stems_placed": rep.stems_placed,
+        "inadmissible_placed": rep.inadmissible_placed,
+        "type_fallbacks": rep.type_fallbacks,
+        "treeless_template": not rep.type_admissible,
+        "shape_source": ",".join(f"{k}={v}" for k, v in rep.shape_source.items()),
+        "soil_scale": rep.soil_scale,
+    }
+    if dataclasses.is_dataclass(rep):
+        for f in dataclasses.fields(rep):
+            v = getattr(rep, f.name)
+            scalar = isinstance(v, bool | int | float | str | np.integer | np.floating)
+            if scalar and f.name not in fields and f.name not in ("cell", "template_cell"):
+                fields[f"rep_{f.name}"] = v
+    return fields
 
 
 def _synth_one(
     plan: dict[str, Any], cell: int, blob: bytes, *, tmpl: dict[str, Any],
-    pred: dict[str, float], pool: DonorPool, lay: Layout,
+    pred: dict[str, float], pool: DonorPool, lay: Layout, synth: CellSynth,
 ) -> tuple[bytes, dict[str, Any]]:  # fmt: skip
-    """One cell through `synthesise_cell`, round-trip checked. Returns (record, report fields)."""
+    """One cell through the plan's cell rule, round-trip checked. Returns (record, report)."""
     try:
-        rec, rep = synthesise_cell(
-            tmpl,
-            pred,
-            pool,
-            lay,
-            cell=cell,
-            template_cell=cell,
-            seed=int(plan["seed"]) + cell,
-            match_traits=tuple(plan["match_traits"]),
-            **plan["synth_kwargs"],
-        )
+        rec, rep = synth(tmpl, pred, pool, lay, cell=cell, seed=int(plan["seed"]) + cell)
         out = write_cell(rec, lay)
         # t0 on the SYNTHESISED record, per record, before it is committed.
         if write_cell(read_cell(out, lay), lay) != out:
@@ -375,14 +607,8 @@ def _synth_one(
         return blob, {"status": f"error-passed-through: {type(exc).__name__}: {exc}"}
     return out, {
         "status": "synthesised",
-        "stems_requested": rep.stems_requested,
-        "stems_placed": rep.stems_placed,
-        "inadmissible_placed": rep.inadmissible_placed,
-        "type_fallbacks": rep.type_fallbacks,
-        "treeless_template": not rep.type_admissible,
         "predicted_treeless": pred["stems_per_patch"] <= 0,
-        "shape_source": ",".join(f"{k}={v}" for k, v in rep.shape_source.items()),
-        "soil_scale": rep.soil_scale,
+        **_report_fields(rep),
     }
 
 
@@ -390,15 +616,20 @@ def run_block(job: dict[str, Any]) -> dict[str, Any]:  # noqa: PLR0915 -- one li
     """Synthesise (or, in identity mode, decode and re-encode) one block into its shard."""
     wall0, cpu0 = time.perf_counter(), time.process_time()
     plan, blk, preds = job["plan"], job["block"], job["preds"]
-    out_dir = Path(job["out_dir"])
+    work = Path(job["work_dir"])
     template = Path(plan["template"])
     first, ncell = int(blk["first"]), int(blk["ncell"])
-    dest = _shard_path(out_dir, int(blk["k"]))
+    dest = _shard_path(work, int(blk["k"]))
     reader = RestartReader(template)
     lay = reader.layout
     donors: DonorSource | None = None
+    synth: CellSynth | None = None
     if plan["mode"] == "synth" and preds:
         donors = make_donor_source(plan["donor_rule"], template, first, ncell, plan["donor_opts"])
+        synth = make_cell_synth(
+            plan["cell_rule"], template, first, ncell, donors=donors,
+            match_traits=tuple(plan["match_traits"]), synth_kwargs=plan["synth_kwargs"],
+        )  # fmt: skip
     synth_treeless_templates = plan["treeless_template"] == "synthesise"
 
     body = hashlib.sha256()
@@ -422,17 +653,16 @@ def run_block(job: dict[str, Any]) -> dict[str, Any]:  # noqa: PLR0915 -- one li
                 tmpl = read_cell(blob, lay)
                 if tmpl["skip"]:
                     row["status"] = "passed-through-skip"
-                elif (
-                    pred["stems_per_patch"] > 0
-                    and not type_ladder(tmpl).size
-                    and not synth_treeless_templates
-                ):
-                    # No tree in the template means no admissible tree TYPE to copy, and the
-                    # synthesiser would then draw types from the whole pool -- the fault that
-                    # killed half the first roster within a year. Kept as the template, counted.
+                elif not type_ladder(tmpl).size and not synth_treeless_templates:
+                    # No stem in the template: outside the set the product synthesises (the
+                    # cells with any stem). A forest predicted here has no admissible tree TYPE
+                    # to copy, and the synthesiser would draw types from the whole pool -- the
+                    # fault that killed half the first roster within a year; a treeless one would
+                    # only rescale the soil of a cell no tree was ever run in. Kept, counted.
                     row["status"] = "passed-through-treeless-template"
+                    row["predicted_treeless"] = pred["stems_per_patch"] <= 0
                 else:
-                    assert donors is not None
+                    assert donors is not None and synth is not None
                     # Timed apart from the cell: a per-block pool is built on its first call, and
                     # folding that into one cell's cost would make the per-cell numbers lie.
                     p_wall, p_cpu = time.perf_counter(), time.process_time()
@@ -442,7 +672,7 @@ def run_block(job: dict[str, Any]) -> dict[str, Any]:  # noqa: PLR0915 -- one li
                     c_wall += p_wall
                     c_cpu += p_cpu
                     out, fields = _synth_one(
-                        plan, cell, blob, tmpl=tmpl, pred=pred, pool=pool, lay=lay
+                        plan, cell, blob, tmpl=tmpl, pred=pred, pool=pool, lay=lay, synth=synth
                     )
                     row.update(fields)
             w.append(out)
@@ -473,12 +703,34 @@ def run_block(job: dict[str, Any]) -> dict[str, Any]:  # noqa: PLR0915 -- one li
     return {k: v for k, v in report.items() if k != "cells"}
 
 
-def _shard_done(out_dir: Path, plan: dict[str, Any], blk: dict[str, Any]) -> bool:
-    rep_path = _shard_path(out_dir, blk["k"]).with_suffix(".json")
-    if not rep_path.exists() or not _shard_path(out_dir, blk["k"]).exists():
+def _shard_done(work: Path, plan: dict[str, Any], blk: dict[str, Any]) -> bool:
+    """A shard counts as written only if its body AND its report exist, the report says complete
+    and belongs to THIS plan, and the body on disk is the size the report recorded. Anything else
+    -- a task killed before its report, a report from an older plan, a body truncated or replaced
+    since -- is rewritten, never trusted."""
+    shard = _shard_path(work, blk["k"])
+    rep_path = shard.with_suffix(".json")
+    if not rep_path.exists() or not shard.exists():
         return False
     rep = json.loads(rep_path.read_text())
-    return bool(rep.get("complete")) and rep.get("plan_sha256") == plan["plan_sha256"]
+    return (
+        bool(rep.get("complete"))
+        and rep.get("plan_sha256") == plan["plan_sha256"]
+        and rep.get("shard_bytes") == shard.stat().st_size
+    )
+
+
+def task_blocks(plan: dict[str, Any], task: int, ntasks: int) -> list[int]:
+    """The shard blocks task `task` of `ntasks` owns: contiguous, disjoint, together all of them.
+
+    A pure function of the plan, so re-running one task with the same `--task/--ntasks` selects
+    exactly the blocks it had -- which is what lets a failed task be re-run alone.
+    """
+    if not (ntasks >= 1 and 0 <= task < ntasks):
+        raise ValueError(f"--task {task} outside [0, --ntasks {ntasks})")
+    ks = [b["k"] for b in plan["blocks"] if b["kind"] == "shard"]
+    lo, hi = (len(ks) * task) // ntasks, (len(ks) * (task + 1)) // ntasks
+    return ks[lo:hi]
 
 
 def _farm(
@@ -500,21 +752,50 @@ def _farm(
             yield fut.result()
 
 
-def cmd_shards(out_dir: Path, blocks_arg: str | None, workers: int) -> dict[str, Any]:
-    plan = _load_plan(out_dir)
+def _run_block_caught(job: dict[str, Any]) -> dict[str, Any]:
+    """`run_block`, with a failure returned as data: one bad block must not cost the others."""
+    try:
+        return run_block(job)
+    except Exception as exc:  # reported per block below, and the command then exits non-zero
+        return {"k": job["block"]["k"], "error": f"{type(exc).__name__}: {exc}"}
+
+
+def cmd_shards(
+    work: Path,
+    workers: int,
+    *,
+    blocks_arg: str | None = None,
+    task: int | None = None,
+    ntasks: int | None = None,
+) -> dict[str, Any]:
+    """Write the shards this call owns and has not yet written.
+
+    Owned = every shard block (`--blocks` absent), the plan-block range `--blocks a:b`, or task
+    `--task I` of `--ntasks N`. Already-written shards are skipped (`_shard_done`), so re-running a
+    call is always safe and writes only what is missing. A block that fails is reported by number
+    and the call returns non-zero AFTER every other block has been written.
+    """
+    plan = _load_plan(work)
     preds_all: dict[str, dict[str, float]] = (
-        json.loads(_preds_path(out_dir).read_text()) if _preds_path(out_dir).exists() else {}
+        json.loads(_preds_path(work).read_text()) if _preds_path(work).exists() else {}
     )
-    (out_dir / "shards").mkdir(parents=True, exist_ok=True)
-    lo, hi = _parse_range(blocks_arg, 0, len(plan["blocks"]))
-    todo = [b for b in plan["blocks"][lo:hi] if b["kind"] == "shard"]
-    skipped = [b["k"] for b in todo if _shard_done(out_dir, plan, b)]
+    (work / "shards").mkdir(parents=True, exist_ok=True)
+    if task is not None or ntasks is not None:
+        if blocks_arg not in (None, "all"):
+            raise ValueError("give --blocks or --task/--ntasks, not both")
+        owned = set(task_blocks(plan, int(task or 0), int(ntasks or 1)))
+        scope = f"task {task} of {ntasks}"
+    else:
+        lo, hi = _parse_range(blocks_arg, 0, len(plan["blocks"]))
+        owned = {b["k"] for b in plan["blocks"][lo:hi]}
+        scope = f"blocks [{lo},{hi})"
+    todo = [b for b in plan["blocks"] if b["k"] in owned and b["kind"] == "shard"]
+    skipped = [b["k"] for b in todo if _shard_done(work, plan, b)]
     todo = [b for b in todo if b["k"] not in set(skipped)]
-    print(
-        f"shards: {len(todo)} to write, {len(skipped)} already done, blocks [{lo},{hi})", flush=True
-    )
+    print(f"shards: {len(todo)} to write, {len(skipped)} already done, {scope}", flush=True)
     wall0 = time.perf_counter()
     done: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
     jobs = []
     for b in todo:
         mine = {
@@ -522,8 +803,12 @@ def cmd_shards(out_dir: Path, blocks_arg: str | None, workers: int) -> dict[str,
             for c in range(b["first"], b["first"] + b["ncell"])
             if str(c) in preds_all
         }
-        jobs.append({"plan": plan, "block": b, "preds": mine, "out_dir": str(out_dir)})
-    for r in _farm(run_block, jobs, workers):
+        jobs.append({"plan": plan, "block": b, "preds": mine, "work_dir": str(work)})
+    for r in _farm(_run_block_caught, jobs, workers):
+        if "error" in r:
+            failed.append(r)
+            print(f"  shard {r['k']:5d}  FAILED: {r['error']}", flush=True)
+            continue
         done.append(r)
         print(
             f"  shard {r['k']:5d}  cells {r['first']}+{r['ncell']}  {r['wall_s']:.1f} s wall  "
@@ -533,23 +818,55 @@ def cmd_shards(out_dir: Path, blocks_arg: str | None, workers: int) -> dict[str,
     return {
         "written": len(done),
         "skipped": skipped,
+        "failed": failed,
         "wall_s": time.perf_counter() - wall0,
         "workers": workers,
     }
 
 
+def cmd_status(work: Path, ntasks: int | None) -> dict[str, Any]:
+    """Which shards are written and which are not -- and, for a farm of `ntasks` tasks, which task
+    to re-run. Reads only the work directory; safe while tasks are running."""
+    plan = _load_plan(work)
+    shard_ks = [b["k"] for b in plan["blocks"] if b["kind"] == "shard"]
+    by_k = {b["k"]: b for b in plan["blocks"]}
+    missing = [k for k in shard_ks if not _shard_done(work, plan, by_k[k])]
+    partial = sorted(p.name for p in (work / "shards").glob("*.partial"))
+    out: dict[str, Any] = {
+        "plan_sha256": plan["plan_sha256"],
+        "blocks": len(plan["blocks"]),
+        "shard_blocks": len(shard_ks),
+        "written": len(shard_ks) - len(missing),
+        "missing": missing,
+        "partial_files": partial,
+        "assembled": Path(plan["out"]).exists(),
+    }
+    if ntasks:
+        out["rerun_tasks"] = sorted(
+            {t for t in range(ntasks) for k in task_blocks(plan, t, ntasks) if k in set(missing)}
+        )
+    print(json.dumps(out, indent=1), flush=True)
+    return out
+
+
 # --------------------------------------------------------------------------------------------
 # Assembly.
 # --------------------------------------------------------------------------------------------
-def segments_for(out_dir: Path, plan: dict[str, Any]) -> list[Segment]:
+def segments_for(work: Path, plan: dict[str, Any]) -> list[Segment]:
     """Shard blocks from their shard; runs of template blocks as ONE template segment each."""
     template = Path(plan["template"])
     segs: list[Segment] = []
+    missing = [
+        b["k"] for b in plan["blocks"] if b["kind"] == "shard" and not _shard_done(work, plan, b)
+    ]
+    if missing:
+        raise FileNotFoundError(
+            f"{len(missing)} shard(s) missing, incomplete or from another plan: {missing[:20]}"
+            " -- run `shards` again for them (`status` names the task)"
+        )
     for b in plan["blocks"]:
         if b["kind"] == "shard":
-            if not _shard_done(out_dir, plan, b):
-                raise FileNotFoundError(f"shard {b['k']} is missing or belongs to another plan")
-            segs.append(Segment(_shard_path(out_dir, b["k"]), 0, b["ncell"]))
+            segs.append(Segment(_shard_path(work, b["k"]), 0, b["ncell"]))
         elif segs and segs[-1].path == template and segs[-1].first + segs[-1].ncell == b["first"]:
             segs[-1] = Segment(template, segs[-1].first, segs[-1].ncell + b["ncell"])
         else:
@@ -557,15 +874,13 @@ def segments_for(out_dir: Path, plan: dict[str, Any]) -> list[Segment]:
     return segs
 
 
-def _output(out_dir: Path) -> Path:
-    return out_dir / "restart" / OUTPUT_NAME
-
-
-def cmd_assemble(out_dir: Path) -> dict[str, Any]:
-    plan = _load_plan(out_dir)
-    dest = _output(out_dir)
+def cmd_assemble(work: Path, *, skip_disk_check: bool = False) -> dict[str, Any]:
+    plan = _load_plan(work)
+    dest = Path(plan["out"])
     dest.parent.mkdir(parents=True, exist_ok=True)
-    segs = segments_for(out_dir, plan)
+    segs = segments_for(work, plan)
+    # An existing output is replaced only by the final rename, so it and the new one coexist.
+    disk = None if skip_disk_check else check_disk({dest.parent: disk_need(plan)["output_bytes"]})
     wall0 = time.perf_counter()
     info = assemble_restart(dest, segs, firstcell=plan["first_cell"])
     wall = time.perf_counter() - wall0
@@ -576,8 +891,9 @@ def cmd_assemble(out_dir: Path) -> dict[str, Any]:
         shard_segments=sum(1 for s in segs if s.path != Path(plan["template"])),
         template_segments=sum(1 for s in segs if s.path == Path(plan["template"])),
         maxrss_mb=_maxrss_mb(),
+        disk=disk,
     )
-    _write_json(out_dir / "assembly.json", info)
+    _write_json(work / "assembly.json", info)
     print(f"assembled {dest}: {info['bytes'] / 2**30:.2f} GiB in {wall:.0f} s", flush=True)
     return info
 
@@ -652,9 +968,9 @@ def verify_block(job: dict[str, Any]) -> dict[str, Any]:
     return tot
 
 
-def cmd_verify(out_dir: Path, workers: int, cmp_template: bool) -> dict[str, Any]:
-    plan = _load_plan(out_dir)
-    dest = _output(out_dir)
+def cmd_verify(work: Path, workers: int, cmp_template: bool) -> dict[str, Any]:
+    plan = _load_plan(work)
+    dest = Path(plan["out"])
     wall0 = time.perf_counter()
     out = RestartReader(dest)
     tmpl = RestartReader(Path(plan["template"]))
@@ -673,7 +989,7 @@ def cmd_verify(out_dir: Path, workers: int, cmp_template: bool) -> dict[str, Any
         synth: list[int] = []
         sha = None
         if b["kind"] == "shard":
-            rep = json.loads(_shard_path(out_dir, b["k"]).with_suffix(".json").read_text())
+            rep = json.loads(_shard_path(work, b["k"]).with_suffix(".json").read_text())
             synth = [r["cell"] for r in rep["cells"] if r["status"] == "synthesised"]
             sha = rep["body_sha256"]
         jobs.append(
@@ -718,7 +1034,7 @@ def cmd_verify(out_dir: Path, workers: int, cmp_template: bool) -> dict[str, Any
         if summary["foreign_type_stems"]
         else []
     )
-    _write_json(out_dir / "verify.json", summary)
+    _write_json(work / "verify.json", summary)
     print(json.dumps(summary, indent=1, default=_jsonable), flush=True)
     return summary
 
@@ -756,22 +1072,22 @@ def _cmp(src: Path, dest: Path, plan: dict[str, Any]) -> dict[str, Any]:
 # --------------------------------------------------------------------------------------------
 # The cost report and the full-globe projection.
 # --------------------------------------------------------------------------------------------
-def cmd_summary(out_dir: Path) -> dict[str, Any]:
-    plan = _load_plan(out_dir)
+def cmd_summary(work: Path, workers: int = 64) -> dict[str, Any]:
+    plan = _load_plan(work)
     rows: list[dict[str, Any]] = []
     blocks: list[dict[str, Any]] = []
     for b in plan["blocks"]:
-        p = _shard_path(out_dir, b["k"]).with_suffix(".json")
+        p = _shard_path(work, b["k"]).with_suffix(".json")
         if b["kind"] == "shard" and p.exists():
             rep = json.loads(p.read_text())
             rows.extend(rep["cells"])
             blocks.append({k: v for k, v in rep.items() if k != "cells"})
     if not rows:
         out0: dict[str, Any] = {"blocks": 0, "note": "no shard was written; nothing to cost"}
-        _write_json(out_dir / "summary.json", out0)
+        _write_json(work / "summary.json", out0)
         return out0
     cells = pl.DataFrame(rows, infer_schema_length=None)
-    cells.write_parquet(out_dir / "cells.parquet")
+    cells.write_parquet(work / "cells.parquet")
     by = cells.group_by("status").agg(
         pl.len().alias("n"),
         pl.col("cpu_s").mean().alias("cpu_s_mean"),
@@ -801,16 +1117,23 @@ def cmd_summary(out_dir: Path) -> dict[str, Any]:
             "treeless_template_cells": int(synth["treeless_template"].sum()),
             "predicted_treeless_cells": int(synth["predicted_treeless"].sum()),
         }
-        out["projection"] = _project(plan, synth, blocks)
     for name in ("assembly.json", "verify.json"):
-        if (out_dir / name).exists():
-            out[name.removesuffix(".json")] = json.loads((out_dir / name).read_text())
-    _write_json(out_dir / "summary.json", out)
+        if (work / name).exists():
+            out[name.removesuffix(".json")] = json.loads((work / name).read_text())
+    if synth.height:
+        out["projection"] = _project(plan, synth, blocks, out, workers)
+    _write_json(work / "summary.json", out)
     print(json.dumps(out, indent=1, default=_jsonable), flush=True)
     return out
 
 
-def _project(plan: dict[str, Any], synth: pl.DataFrame, blocks: list[dict[str, Any]]) -> Any:
+def _project(
+    plan: dict[str, Any],
+    synth: pl.DataFrame,
+    blocks: list[dict[str, Any]],
+    measured: dict[str, Any],
+    workers: int,
+) -> Any:
     """Full-globe synthesis cost, extrapolated from this run's cells by the STEMS each one gets.
 
     A cell's cost is dominated by its roster: the donor match is one distance row per placed stem.
@@ -823,7 +1146,13 @@ def _project(plan: dict[str, Any], synth: pl.DataFrame, blocks: list[dict[str, A
 
     The line is floored at the cheapest cell actually observed, so an extrapolation below the
     sampled range can never price a cell at zero or less. The plain mean-times-count figure is
-    reported alongside, as the naive bound.
+    reported alongside, as the naive bound. It is an UPPER bound in one more way: it prices every
+    predicted cell, including those whose template holds no tree and which will pass through at
+    the cost of a byte copy -- which cells those are is only known by decoding the template.
+
+    Wall time adds the two whole-file I/O passes, assembly and verification, as MEASURED by this
+    run when its plan spans the whole template (a global-framed dry run assembles and verifies all
+    67,420 records whatever it synthesised); otherwise they are left out and said to be.
     """
     tmpl = RestartReader(Path(plan["template"]))
     sizes = tmpl.cell_sizes()
@@ -841,6 +1170,10 @@ def _project(plan: dict[str, Any], synth: pl.DataFrame, blocks: list[dict[str, A
     nblock = -(-tmpl.ncell // int(plan["block_size"]))
     cpu_pools = float(np.mean(pooled)) * nblock if pooled else 0.0
     cpu_h = (cpu_cells + cpu_pools) / 3600.0
+    whole = plan["first_cell"] == 0 and plan["ncell"] == plan["template_ncell"]
+    io_s = None
+    if whole and "assembly" in measured and "verify" in measured:
+        io_s = float(measured["assembly"]["wall_s"]) + float(measured["verify"]["wall_s"])
     return {
         "basis": (
             f"{synth.height} cells synthesised in this run; CPU regressed linearly on stems "
@@ -858,7 +1191,17 @@ def _project(plan: dict[str, Any], synth: pl.DataFrame, blocks: list[dict[str, A
         "cpu_hours_naive_mean_times_count": float(np.mean(y)) * per_patch.size / 3600.0,
         "cpu_hours_donor_pools": cpu_pools / 3600.0,
         "cpu_hours_total": cpu_h,
-        "wall_hours_at_64_workers": cpu_h / 64.0,
+        "workers": workers,
+        "synthesis_wall_hours_at_workers": cpu_h / max(workers, 1),
+        "io_wall_s_assemble_plus_verify": io_s,
+        "io_basis": (
+            "measured on this run's whole-file assembly and verification"
+            if io_s is not None
+            else "not measured: this plan does not span the whole template"
+        ),
+        "total_wall_hours_at_workers": (
+            None if io_s is None else cpu_h / max(workers, 1) + io_s / 3600.0
+        ),
         "bytes_to_write": int(np.sum(sizes)),
     }
 
@@ -924,47 +1267,71 @@ def cmd_t0(args: argparse.Namespace) -> dict[str, Any]:
 # --------------------------------------------------------------------------------------------
 # The command line.
 # --------------------------------------------------------------------------------------------
-def cmd_plan(args: argparse.Namespace) -> dict[str, Any]:
-    out_dir = Path(args.out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
+def cmd_plan(args: argparse.Namespace, work: Path) -> dict[str, Any]:
+    work.mkdir(parents=True, exist_ok=True)
     plan, preds = make_plan(args)
-    _write_json(_preds_path(out_dir), {str(c): v for c, v in preds.items()})
-    if _plan_path(out_dir).exists():
-        old = _load_plan(out_dir)
-        if old["plan_sha256"] != plan["plan_sha256"] and any((out_dir / "shards").glob("*.json")):
+    need = disk_need(plan)
+    if not args.skip_disk_check:
+        # Shards live in the work directory, the product next to `--out`; they coexist until
+        # `finish` deletes the shard bodies. Checked BEFORE anything large is written.
+        plan_disk = check_disk(
+            {work: need["shard_bytes"], Path(plan["out"]).parent: need["output_bytes"]}
+        )
+        print(f"  disk: {json.dumps(plan_disk['file_systems'])}", flush=True)
+    _write_json(_preds_path(work), {str(c): v for c, v in preds.items()})
+    if _plan_path(work).exists():
+        old = _load_plan(work)
+        if old["plan_sha256"] != plan["plan_sha256"] and any((work / "shards").glob("*.json")):
             print("  NOTE: replacing a plan whose shards exist; they will be rewritten", flush=True)
-    _write_json(_plan_path(out_dir), plan)
+    _write_json(_plan_path(work), plan)
     n_shard = sum(1 for b in plan["blocks"] if b["kind"] == "shard")
     print(
         f"plan: {plan['ncell']} cells from {plan['first_cell']} in {len(plan['blocks'])} blocks "
-        f"of {plan['block_size']}; {n_shard} to write as shards, the rest straight from the "
-        f"template; mode={plan['mode']}; plan {plan['plan_sha256'][:12]}",
+        f"of {plan['block_size']}; {n_shard} to write as shards "
+        f"({need['shard_bytes'] / 2**30:.1f} GiB), the rest straight from the template; "
+        f"output {plan['out']} ({need['output_bytes'] / 2**30:.1f} GiB); mode={plan['mode']}; "
+        f"plan {plan['plan_sha256'][:12]}; work dir {work}",
         flush=True,
     )
     return plan
 
 
-def cmd_farm(out_dir: Path, jobs: int, workers: int) -> None:
-    """Print the multi-job submission: shard jobs over disjoint block ranges, then assemble+verify
-    after all of them. Printed, not run, so the wrapper and its ledger rows stay visible."""
-    plan = _load_plan(out_dir)
-    nb = len(plan["blocks"])
-    step = -(-nb // jobs)
+def cmd_farm(
+    work: Path, ntasks: int, workers: int, *, time_limit: str, tag_prefix: str
+) -> list[str]:
+    """Print the multi-job submission: `ntasks` shard jobs, then `finish` after all of them.
+
+    Printed, not run, so every submission goes through the wrapper and its ledger row stays
+    visible. The tasks own disjoint block sets (`task_blocks`), so any one that fails is re-run
+    ALONE with its own line; `finish` then runs by hand (its `afterok` dependency on the failed
+    job can never be satisfied, so cancel it and resubmit).
+    """
+    plan = _load_plan(work)
     me = "scripts/synth_global.py"
-    print("# run from the repo root; every submission goes through the wrapper (ledger rows)")
-    print("deps=''")
-    for j, a in enumerate(range(0, nb, step)):
-        b = min(a + step, nb)
-        print(
-            f"jid=$(PARTITION=priority NCPUS={workers} TIME=04:00:00 scripts/sbatch_py.sh "
-            f"D-glb-shards-{j} {me} shards --out-dir {out_dir} --blocks {a}:{b} "
+    loc = f"--work-dir {work}"
+    lines = [
+        "# from the repo root. Each task owns a fixed, disjoint set of shard blocks; re-running a",
+        "# task (same --task/--ntasks) writes only its shards that are still missing.",
+        "deps=''",
+    ]
+    for t in range(ntasks):
+        ks = task_blocks(plan, t, ntasks)
+        lines.append(
+            f"# task {t}: {len(ks)} shard blocks"
+            + (f" (k {ks[0]}..{ks[-1]})" if ks else " (nothing to write)")
+        )
+        lines.append(
+            f"jid=$(PARTITION=priority NCPUS={workers} TIME={time_limit} scripts/sbatch_py.sh "
+            f"{tag_prefix}-t{t} {me} shards {loc} --task {t} --ntasks {ntasks} "
             f"--workers {workers} | awk '/submitted/{{print $5}}'); deps=\"$deps:$jid\""
         )
-    print(
-        f"DEPENDENCY=afterok$deps PARTITION=priority NCPUS={workers} TIME=04:00:00 "
-        f"scripts/sbatch_py.sh D-glb-assemble {me} finish --out-dir {out_dir} "
-        f"--workers {workers}"
+    lines.append(
+        f"DEPENDENCY=afterok$deps PARTITION=priority NCPUS={workers} TIME={time_limit} "
+        f"scripts/sbatch_py.sh {tag_prefix}-finish {me} finish {loc} --workers {workers}"
     )
+    lines.append(f"# which task to re-run:  {me} status {loc} --ntasks {ntasks}")
+    print("\n".join(lines), flush=True)
+    return lines
 
 
 def _allocated_cpus() -> int:
@@ -972,54 +1339,104 @@ def _allocated_cpus() -> int:
     return len(os.sched_getaffinity(0))
 
 
-def build_parser() -> argparse.ArgumentParser:
+def _resolve_work(args: argparse.Namespace) -> Path:
+    """The work directory: `--work-dir`, else `<--out>.work`. A later command given `--out` must
+    name the same output its plan was made for -- two plans must never be crossed."""
+    if getattr(args, "work_dir", None):
+        work = Path(args.work_dir).resolve()
+    elif getattr(args, "out", None):
+        work = work_dir_for(Path(args.out).resolve())
+    else:
+        raise SystemExit(f"{args.cmd}: give --out <file> or --work-dir <dir>")
+    if args.cmd not in ("plan", "run") and getattr(args, "out", None):
+        planned = _load_plan(work)["out"]
+        if Path(planned) != Path(args.out).resolve():
+            raise SystemExit(f"{args.cmd}: the plan in {work} writes {planned}, not {args.out}")
+    return work
+
+
+def build_parser() -> argparse.ArgumentParser:  # noqa: PLR0915 -- one flat list of options
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
 
+    def where(p: argparse.ArgumentParser, *, out_required: bool = False) -> None:
+        p.add_argument(
+            "--out", required=out_required, default=None, help="the global restart file to write"
+        )
+        p.add_argument(
+            "--work-dir", default=None, help="plan, shards, reports (default <out>.work)"
+        )
+
     def planning(p: argparse.ArgumentParser) -> None:
-        p.add_argument("--template", default=None, help="global restart to read (default: 1999)")
+        p.add_argument(
+            "--template",
+            default=None,
+            help="global restart to read (default: ground_truth.restart_spinup_end)",
+        )
+        p.add_argument(
+            "--predictions",
+            "--pred",
+            dest="predictions",
+            default=None,
+            help="parquet with cell + pred_<q> (natural scale); required unless --mode identity",
+        )
         p.add_argument("--first-cell", type=int, default=0)
         p.add_argument("--ncell", type=int, default=None, help="default: to the end of the grid")
         p.add_argument("--block-size", type=int, default=DEFAULT_BLOCK)
         p.add_argument("--mode", choices=("synth", "identity"), default="synth")
-        p.add_argument("--pred", default=None, help="parquet with cell + pred_<q> (natural scale)")
         p.add_argument("--only", default=None, help="synthesise only cells a:b; the rest pass")
-        p.add_argument("--donor-rule", default="proximity-band")
+        p.add_argument("--donor-rule", default="proximity-band", help="a name, or module:factory")
         p.add_argument("--donor-opts", default=None, help='JSON, e.g. {"band": 20}')
+        p.add_argument(
+            "--cell-rule", default="current-api", help="per-cell synthesis: a name, or mod:factory"
+        )
         p.add_argument("--seed", type=int, default=DEFAULT_SEED)
         p.add_argument("--match-traits", default=",".join(MATCH_TRAITS))
-        p.add_argument("--synth-kwargs", default=None, help="JSON of extra synthesise_cell kwargs")
+        p.add_argument(
+            "--synth-kwargs",
+            default=None,
+            help="JSON of keyword arguments for the cell rule (current-api: synthesise_cell's)",
+        )
         p.add_argument("--on-error", choices=("raise", "pass"), default="raise")
         p.add_argument(
             "--treeless-template",
             choices=("pass", "synthesise"),
             default="pass",
-            help="a forest predicted where the template holds no tree: keep the template "
-            "(default; the synthesiser has no admissible tree type to copy) or synthesise anyway",
+            help="a template holding no tree: keep it (default; outside the any-stem set, and "
+            "with no admissible tree type to copy) or synthesise it anyway",
         )
+        p.add_argument("--skip-disk-check", action="store_true")
 
     for name in ("plan", "run"):
         p = sub.add_parser(name)
-        p.add_argument("--out-dir", required=True)
+        where(p, out_required=True)
         planning(p)
         if name == "run":
             p.add_argument("--workers", type=int, default=_allocated_cpus())
             p.add_argument("--cmp-template", action="store_true")
             p.add_argument("--keep-shards", action="store_true")
     p = sub.add_parser("shards")
-    p.add_argument("--out-dir", required=True)
-    p.add_argument("--blocks", default="all", help="plan block range a:b (default all)")
+    where(p)
+    p.add_argument("--blocks", default=None, help="plan block range a:b (default: all)")
+    p.add_argument("--task", type=int, default=None, help="with --ntasks: this task's blocks")
+    p.add_argument("--ntasks", type=int, default=None)
     p.add_argument("--workers", type=int, default=_allocated_cpus())
+    p = sub.add_parser("status")
+    where(p)
+    p.add_argument("--ntasks", type=int, default=None, help="name the tasks to re-run")
     for name in ("assemble", "verify", "finish", "summary"):
         p = sub.add_parser(name)
-        p.add_argument("--out-dir", required=True)
+        where(p)
         p.add_argument("--workers", type=int, default=_allocated_cpus())
         p.add_argument("--cmp-template", action="store_true")
         p.add_argument("--keep-shards", action="store_true")
+        p.add_argument("--skip-disk-check", action="store_true")
     p = sub.add_parser("farm")
-    p.add_argument("--out-dir", required=True)
-    p.add_argument("--jobs", type=int, default=4)
+    where(p)
+    p.add_argument("--ntasks", type=int, default=4)
     p.add_argument("--workers", type=int, default=64)
+    p.add_argument("--time", default="04:00:00")
+    p.add_argument("--tag-prefix", default="D-glb-farm", help="each job's tag is <prefix>-t<i>")
     p = sub.add_parser("t0")
     p.add_argument("--out", required=True)
     p.add_argument("--template", default=None)
@@ -1030,36 +1447,43 @@ def build_parser() -> argparse.ArgumentParser:
     return ap
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None) -> int:  # noqa: PLR0911 -- one exit per command
     args = build_parser().parse_args(argv)
 
     if args.cmd == "t0":
         return 0 if cmd_t0(args)["verdict"] == "BYTE-IDENTICAL" else 1
-    out_dir = Path(args.out_dir)
+    work = _resolve_work(args)
     if args.cmd == "plan":
-        cmd_plan(args)
+        cmd_plan(args, work)
         return 0
     if args.cmd == "farm":
-        cmd_farm(out_dir, args.jobs, args.workers)
+        cmd_farm(work, args.ntasks, args.workers, time_limit=args.time, tag_prefix=args.tag_prefix)
         return 0
-    if args.cmd == "run":
-        cmd_plan(args)
-        cmd_shards(out_dir, "all", args.workers)
+    if args.cmd == "status":
+        cmd_status(work, args.ntasks)
+        return 0
     if args.cmd == "shards":
-        cmd_shards(out_dir, args.blocks, args.workers)
-        return 0
+        res = cmd_shards(
+            work, args.workers, blocks_arg=args.blocks, task=args.task, ntasks=args.ntasks
+        )
+        return 1 if res["failed"] else 0
+    if args.cmd == "run":
+        cmd_plan(args, work)
+        if cmd_shards(work, args.workers)["failed"]:
+            print("run: shard(s) failed; not assembling. Re-run `shards`, then `finish`.")
+            return 1
     if args.cmd in ("run", "finish", "assemble"):
-        cmd_assemble(out_dir)
+        cmd_assemble(work, skip_disk_check=args.skip_disk_check)
     if args.cmd == "assemble":
         return 0
     verdict = "PASS"
     if args.cmd in ("run", "finish", "verify"):
-        verdict = cmd_verify(out_dir, args.workers, args.cmp_template)["verdict"]
-    cmd_summary(out_dir)
+        verdict = cmd_verify(work, args.workers, args.cmp_template)["verdict"]
+    cmd_summary(work, args.workers)
     if args.cmd in ("run", "finish") and not args.keep_shards and verdict == "PASS":
         # The shard BODIES are now inside the assembled file, byte for byte (verify checked each
         # one's hash). The per-block reports are small and are the cost record, so they stay.
-        for shard in sorted((out_dir / "shards").glob("shard_*.lpj")):
+        for shard in sorted((work / "shards").glob("shard_*.lpj")):
             shard.unlink()
     return 0 if verdict == "PASS" else 1
 
