@@ -21,6 +21,7 @@ from scipy.spatial import cKDTree
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
+import apply_equilibrium_map as apply
 import diag_equilibrium_map as diag
 import exp_equilibrium_map as sealed
 from exp_model_pilot_response import PARAMS as SEALED_PARAMS
@@ -266,6 +267,13 @@ def test_the_prediction_file_says_which_map_made_each_row() -> None:
     assert info["rows_by_fold"] == {"0": 80, "1": 80, "2": 80}
     assert heldout.columns[:6] == ["cell", "lon", "lat", "tile", "fold", "pred_treeless"]
     assert heldout["raw_height_p50"].is_nan().sum() == 0  # raw is never blanked
+
+
+def test_an_applied_window_must_be_thirty_years() -> None:
+    w = apply.parse_window("historical:1901:1930")
+    assert (w.leg, w.first, w.last, w.state_year) == ("historical", 1901, 1930, 1930)
+    with pytest.raises(ValueError, match="30-year"):
+        apply.parse_window("historical:1901:1920")
 
 
 def test_a_manifest_whose_feature_order_disagrees_with_its_heads_is_refused(tmp_path: Path) -> None:
