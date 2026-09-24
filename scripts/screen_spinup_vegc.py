@@ -125,7 +125,9 @@ class Recipe:
             p.update(BIG)
         p.update(dict(self.params))
         if self.objective in ("huber", "huber_centred"):
-            p.update(objective="huber", alpha=0.2)
+            # alpha is the Huber delta in log1p units AND caps each tree's step at lr * alpha
+            # (LightGBM's Huber hessian is 1), so a small delta cannot converge in 600 trees.
+            p.update(objective="huber", alpha=0.5)
         elif self.objective == "l1":
             p.update(objective="regression_l1")
         p["n_jobs"] = threads
@@ -491,17 +493,20 @@ def tune(d: Data, r: Recipe, trials: int, workers: int, threads: int) -> dict[st
 
     def objective(trial: Any) -> float:
         params = (
-            ("learning_rate", trial.suggest_float("learning_rate", 0.01, 0.12, log=True)),
-            ("num_leaves", trial.suggest_int("num_leaves", 15, 511, log=True)),
+            ("learning_rate", trial.suggest_float("learning_rate", 0.02, 0.12, log=True)),
+            ("num_leaves", trial.suggest_int("num_leaves", 15, 255, log=True)),
             ("min_child_samples", trial.suggest_int("min_child_samples", 3, 100, log=True)),
             ("colsample_bytree", trial.suggest_float("colsample_bytree", 0.2, 1.0)),
             ("subsample", trial.suggest_float("subsample", 0.5, 1.0)),
             ("reg_lambda", trial.suggest_float("reg_lambda", 1e-3, 30.0, log=True)),
             ("min_split_gain", trial.suggest_float("min_split_gain", 1e-6, 0.05, log=True)),
+            ("max_bin", trial.suggest_categorical("max_bin", [255, 1023])),
             ("n_estimators", BIG["n_estimators"]),
         )
         rt = dataclasses.replace(r, capacity="tuned", params=params, bag=1)
-        pred, _ = predict_all(d, rt, DEV_FOLDS, workers, threads)
+        # Three folds at a time: give each the threads the five-fold runs share.
+        per_fit = max(1, workers * threads // len(DEV_FOLDS))
+        pred, _ = predict_all(d, rt, DEV_FOLDS, len(DEV_FOLDS), per_fit)
         return float(score(pred[mask][dev], sub)["D"])
 
     study = optuna.create_study(direction="maximize", sampler=optuna.samplers.TPESampler(seed=0))
