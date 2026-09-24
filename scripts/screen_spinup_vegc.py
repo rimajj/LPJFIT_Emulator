@@ -61,7 +61,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import numpy as np
 import numpy.typing as npt
-import optuna
 import polars as pl
 from joblib import Parallel, delayed
 from lightgbm import LGBMClassifier, LGBMRegressor, early_stopping
@@ -496,6 +495,8 @@ def predict_all(
 
 
 def tune(d: Data, r: Recipe, trials: int, workers: int, threads: int) -> dict[str, Any]:
+    import optuna  # noqa: PLC0415 -- only the tuning step needs it; CI does not install it
+
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     mask = d.sc["mask"].astype(bool)
     fold = np.asarray(d.sc["fold"])
