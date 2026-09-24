@@ -242,6 +242,21 @@ class SpinupProtocol:
 
 PILOT_PROTOCOL = SpinupProtocol()
 
+
+def continue_draws(seed: tuple[int, int, int], n: int, nspinyear: int = 30) -> list[int]:
+    """The next `n` shuffled forcing-year indices from a 48-bit RNG state (low word first).
+
+    What a run started FROM a restart draws: `openrestart.c:139` restores `config->seed` from the
+    header, and every spin-up year then takes `erand48(seed) * nspinyear` exactly as above.
+    """
+    x = int(seed[0]) | (int(seed[1]) << 16) | (int(seed[2]) << 32)
+    out: list[int] = []
+    for _ in range(n):
+        x = (_RAND48_A * x + _RAND48_C) & _RAND48_MASK
+        out.append(int((x / float(1 << 48)) * nspinyear))
+    return out
+
+
 # THE STORED GLOBAL SPIN-UP (`ground_truth.historical_seed1`), read off its own saved config
 # (`scripts_for_running_the_model/lpjml_2000_2019.js`: nspinup 1000, nspinyear 30, firstyear 2000,
 # lastyear 1999, random_seed 1, shuffle_climate true) and its log ("Spinup using climate starting

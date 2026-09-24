@@ -95,6 +95,18 @@ def test_stopping_early_is_the_prefix_of_the_full_run() -> None:
         cb.STORED_SPINUP.until(999)
 
 
+def test_a_run_from_a_restart_continues_the_headers_generator() -> None:
+    """Drawing on from a header's state is drawing on in the one sequence: 700 then 201 more of
+    the stored run are its first 901, and a seed-1 start is the documented initial state."""
+    full, seed_901 = cb.STORED_SPINUP.schedule()
+    start = (13070, 1, 0)  # setseed(1): (13070, 1 % 65536, 1 / 65536)
+    assert cb.continue_draws(start, 901) == list(full[:901])
+    _, seed_700 = cb.STORED_SPINUP.until(1699).schedule()
+    assert cb.continue_draws(seed_700, 201) == list(full[700:901])
+    nxt = cb.continue_draws(seed_901, 30)
+    assert len(nxt) == 30 and all(0 <= i < NYEAR for i in nxt)
+
+
 def _long_forcing(nyear: int, firstyear: int = 1901) -> cb.Forcing:
     """A forcing whose every year is distinguishable, so a wrong year index cannot hide."""
     base = 10.0 + 8.0 * np.sin(2 * np.pi * (np.arange(cb.NDAYYEAR) - 100) / cb.NDAYYEAR)
