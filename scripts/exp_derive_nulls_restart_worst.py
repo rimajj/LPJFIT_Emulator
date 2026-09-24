@@ -51,6 +51,7 @@ plus two standard errors of how much that gap moves when the ~160 independent ti
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import sys
@@ -64,6 +65,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import numpy as np
 import numpy.typing as npt
 import polars as pl
+import yaml
 
 from exp_derive_nulls_restart_pilot import (
     CONTROL_POINT,
@@ -92,6 +94,7 @@ from vegemu.score import (
 )
 
 Array = npt.NDArray[np.float64]
+REPO = Path(__file__).resolve().parent.parent
 
 STATISTIC = "worst_quantity_skill"
 QUANTITIES = SCORED_CONJUNCTIVE
@@ -425,6 +428,11 @@ def load_model_arm(
         raise ValueError(
             f"{path.name} lacks {prefix}{missing_cols[0]} and {len(missing_cols) - 1} more"
         )
+    # Two usable rows for one target would be resolved silently by whichever the index kept last;
+    # which state the file holds is then a matter of row order. Refused instead.
+    dup = frame.select(["cell", "point"]).is_duplicated()
+    if dup.any():
+        raise ValueError(f"{path.name}: {int(dup.sum())} rows share a (cell, point) target")
     frame = frame.select(
         [pl.col("cell").cast(pl.Int64), pl.col("point").cast(pl.Utf8)]
         + [pl.col(f"{prefix}{q}").cast(pl.Float64).alias(q) for q in QUANTITIES]
@@ -450,6 +458,55 @@ def load_model_arm(
         "covered": covered,
     }
     return out, coverage
+
+
+def sha256_of(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def input_hashes(args: argparse.Namespace, basis: dict[str, Any]) -> dict[str, str]:
+    """sha256 of every table this run scores from, so the verdict names exactly what was read.
+
+    ⚠ WHY. The synthesiser's table records neither which map table it consumed nor its hash, and
+    the map's out-of-fold table can be rewritten after the restarts were built from it; `--map-oof`
+    is checked for its FOLDS only. The hashes are what lets a later reader match the scored files
+    to the files that produced them.
+    """
+    files = {"corpus": Path(basis["corpus"]) / "corpus.parquet"}
+    if "replicate" in basis:
+        files["replicate"] = Path(basis["replicate"])
+    for key in ("pred", "map_oof", "pred_year1"):
+        if getattr(args, key):
+            files[key] = Path(getattr(args, key))
+    for spec in args.report_arm:
+        label, _, path = spec.partition("=")
+        files[f"report_arm:{label}"] = Path(path)
+    hashes = {k: sha256_of(p) for k, p in files.items()}
+    if args.exp_id:
+        check_sealed_inputs(args.exp_id, hashes)
+    return hashes
+
+
+def check_sealed_inputs(exp_id: str, hashes: dict[str, str]) -> None:
+    """Refuse a run whose corpus or seed-2 table is not the one its pre-registration sealed.
+
+    The sealed basis names both files by sha256 (`data.corpus_sha256`,
+    `data.replicate_table_sha256`); a different table -- including a content-equal re-decode with
+    other bytes -- is a different basis and needs a new seal, not a quiet substitution.
+    """
+    prereg = REPO / "experiments" / exp_id / "preregistration.yaml"
+    data = yaml.safe_load(prereg.read_text(encoding="utf-8")).get("data", {})
+    for key, field in (("corpus", "corpus_sha256"), ("replicate", "replicate_table_sha256")):
+        sealed = data.get(field)
+        if sealed and hashes.get(key) != sealed:
+            raise ValueError(
+                f"{exp_id} sealed {field} {sealed[:12]}..., this run read "
+                f"{str(hashes.get(key, 'nothing'))[:12]}... -- not the sealed basis"
+            )
 
 
 def _parse_args() -> argparse.Namespace:
@@ -616,6 +673,7 @@ def main() -> int:
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     basis = load_basis(args)
+    hashes = input_hashes(args, basis)  # refuses a basis other than the sealed one (--exp-id)
     truth = basis["truth"]
     assert_constant_quantities(truth, QUANTITIES)
     band = band_from_spread(truth, basis["spread"], abs_floor=0.0)
@@ -635,6 +693,7 @@ def main() -> int:
         "truth_basis": basis["truth_basis"],
         "band_basis": basis["band_basis"],
         "band_coverage": basis["band_coverage"],
+        "inputs_sha256": hashes,
         "quantities_max_over": list(SCORED_VARYING),
         "n_cells": n_c,
         "n_points": n_p,

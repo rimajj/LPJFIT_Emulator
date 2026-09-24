@@ -18,10 +18,12 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
+import exp_derive_nulls_restart_worst as scorer
 from exp_derive_nulls_restart_worst import (
     EXPECTED_ORDER,
     QUANTITIES,
     STATISTIC,
+    check_sealed_inputs,
     load_model_arm,
     on_grid,
     row_errors,
@@ -163,3 +165,29 @@ def test_a_multi_arm_table_is_cut_to_the_named_arm(tmp_path: Path) -> None:
     assert np.array_equal(got[0, 0], rows[0].select([f"y1_{q}" for q in QUANTITIES]).row(0))
     with pytest.raises(ValueError, match="no rows of arm"):
         load_model_arm(path, basis, np.array([0]), prefix="y1_", arm="oracle")
+
+
+def test_two_usable_rows_for_one_target_are_refused(tmp_path: Path) -> None:
+    """Which state a target scores must not depend on row order."""
+    frame = _grid_frame([1], ["a"]).rename({q: f"y0_{q}" for q in QUANTITIES})
+    path = tmp_path / "synth_map.parquet"
+    pl.concat([frame, frame]).write_parquet(path)
+    basis = {"cell_ids": [1], "points": ["a"]}
+    with pytest.raises(ValueError, match="share a"):
+        load_model_arm(path, basis, np.array([0]), prefix="y0_", arm="map")
+
+
+def test_a_run_on_other_tables_than_the_sealed_ones_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    exp = tmp_path / "experiments" / "X-1"
+    exp.mkdir(parents=True)
+    (exp / "preregistration.yaml").write_text(
+        "data:\n  corpus_sha256: 'aa'\n  replicate_table_sha256: 'bb'\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(scorer, "REPO", tmp_path)
+    check_sealed_inputs("X-1", {"corpus": "aa", "replicate": "bb", "pred": "cc"})
+    with pytest.raises(ValueError, match="replicate_table_sha256"):
+        check_sealed_inputs("X-1", {"corpus": "aa", "replicate": "zz"})
+    with pytest.raises(ValueError, match="corpus_sha256"):
+        check_sealed_inputs("X-1", {"replicate": "bb"})
