@@ -52,12 +52,13 @@ builds to disagree on, and they did not disagree in a single byte.
 
 ## What this licenses, and what it does not
 
-- ✅ **"The Feb-05 -> Aug-12 difference is inert for a stock run" is now a measurement**, not an
-  argument from reading the diff: identical restart, identical per-tree output, identical fluxes,
-  for one year from a real forested state with every rung-2 environment switch unset.
-- ✅ So the stored historical + ssp370-seed-1 legs (Feb-05) and anything run with the Aug-12 build
-  can be compared without a build caveat **for stock runs**, and the corpus's one-binary rule is
-  about reproducibility, not about a known physics difference.
+- ✅ **"The Feb-05 -> Aug-12 difference is inert for a stock run" now has a measurement behind it**
+  (ONE cell-year), not only an argument from reading the diff: identical restart, identical per-tree
+  output, identical fluxes, for one year from a real forested state with every rung-2 environment
+  switch unset.
+- ✅ So when the stored historical + ssp370-seed-1 legs (Feb-05) are compared with Aug-12 runs, the
+  build caveat **for stock runs** narrows to the code paths this cell-year did not exercise (next
+  bullet), and the corpus's one-binary rule is about reproducibility, not a known physics difference.
 - ❌ **One cell, one year, the transient branch.** Not a spin-up, not a scenario leg, not a cell
   where fire, establishment or mortality took a branch this one did not. A code path the year did
   not exercise is not tested. The diff argument (`MEMORY.md:build-provenance`) still covers those.
