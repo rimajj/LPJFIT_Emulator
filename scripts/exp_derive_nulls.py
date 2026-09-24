@@ -145,7 +145,10 @@ def main() -> int:
     # ---------------------------------------------------------------------------------------
     # Experiment B -- the warming response. Same-cell contrast, so geography is held fixed.
     # ---------------------------------------------------------------------------------------
-    ssp = load_leg("ssp370", args.version)
+    # v0's ssp370 seed tables are byte-identical (one realisation twice); only the delta of its
+    # mean is used and no band is built from its pair -- the case the opt-in exists for. Passing it
+    # keeps the sealed X-20260908 derivations (map and response) reproducible.
+    ssp = load_leg("ssp370", args.version, allow_identical_seeds=True)
     base, _future, delta = response_pair(
         hist, ssp, RESPONSE_QUANTITIES, k=args.k, block_degrees=args.block_degrees
     )

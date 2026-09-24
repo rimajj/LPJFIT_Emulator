@@ -81,9 +81,10 @@ def load_leg(leg: str, version: str = "v0", *, allow_identical_seeds: bool = Fal
     re-written with different bytes), both before any band can be built.
 
     `allow_identical_seeds=True` loads it anyway and marks `Leg.seeds_identical`, for a caller that
-    uses the leg as a single realisation and never builds a band from its pair. ⚠ The two closed
+    uses the leg as a single realisation and never builds a band from its pair. The two closed
     corpus-v0 experiments that read ssp370 (`scripts/exp_derive_nulls.py`,
-    `scripts/train_emulator.py`) predate this guard and now need that keyword to re-run.
+    `scripts/train_emulator.py`) are exactly that -- they take only the delta of its mean -- and
+    pass the keyword, so the guard changes nothing they compute.
     """
     d = corpus_dir(version)
     p1, p2 = d / f"state_{leg}_seed1.parquet", d / f"state_{leg}_seed2.parquet"
