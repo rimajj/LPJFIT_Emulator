@@ -715,6 +715,11 @@ def acceptance_band_with_composition(
     `acceptance_band`'s arithmetic with the floor attached by name (`abs_floor_vector`), so on the
     22 of SCORED_CONJUNCTIVE it is bit-identical to `acceptance_band(..., abs_floor=0.0)` and on the
     type shares to `acceptance_band(..., abs_floor=ABS_FLOOR_COMPOSITION)`.
+
+    ⚠ SAME-PAIR, SO CIRCULAR, exactly like `acceptance_band` (module docstring). The owner's
+    2026-09-24 pass rule measures the band on an INDEPENDENT run pair; for that, build the spread
+    from the other pair and pass it to `band_from_spread(truth, spread, abs_floor=abs_floor_vector(
+    names))` instead of calling this.
     """
     truth = (seed1 + seed2) / 2.0
     return truth, band_from_spread(
