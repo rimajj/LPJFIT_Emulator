@@ -26,6 +26,8 @@ THE SELECTION RULE -- fixed in this docstring before the screen was first run:
     pooling the pilot, a zero floor, bagging. At each step every alternative is applied to the
     current recipe, the best by dev D is kept only if it beats the current recipe by more than
     MIN_GAIN; otherwise the simpler recipe stands.
+  * Then a backward pass: each kept component is removed in turn, and dropped if the recipe
+    without it is within MIN_GAIN of the recipe with it (dev D only).
   * Each alternative is ALSO run alone on the sealed baseline ("single"), so a change that only
     helps in combination, or only alone, is visible.
   ⚠ Tuning (capacity "tuned") selects the best of N trials ON the dev folds, so its dev number is
@@ -109,7 +111,7 @@ class Recipe:
     feats: str = "base"
     target: str = "win"
     gate: str = "none"  # none | hard | soft: tree-bearing or not, then carbon
-    objective: str = "l2"  # l2 | huber | l1, all on log1p
+    objective: str = "l2"  # l2 | huber (centred on the training mean) | l1, all on log1p
     capacity: str = "sealed"  # sealed | big | tuned
     params: tuple[tuple[str, Any], ...] = ()  # the tuned settings
     pool: str = "spinup"  # spinup | pilot | both
@@ -122,7 +124,7 @@ class Recipe:
         if self.capacity == "big":
             p.update(BIG)
         p.update(dict(self.params))
-        if self.objective == "huber":
+        if self.objective in ("huber", "huber_centred"):
             p.update(objective="huber", alpha=0.2)
         elif self.objective == "l1":
             p.update(objective="regression_l1")
@@ -365,6 +367,18 @@ def _inner_split(tiles: IntArray, f: int, seed: int) -> BoolArray:
     return np.isin(tiles, val)
 
 
+@dataclass(frozen=True)
+class Offset:
+    """A fitted regressor plus a constant, for the centred Huber fit."""
+
+    model: LGBMRegressor
+    mu: float
+
+    def predict(self, x: Array) -> Array:
+        out: Array = self.model.predict(x) + self.mu
+        return out
+
+
 def _fit_reg(
     r: Recipe,
     x: Array,
@@ -375,8 +389,24 @@ def _fit_reg(
     f: int,
     threads: int,
     seed: int | None,
-) -> tuple[LGBMRegressor, int]:
+) -> tuple[LGBMRegressor | Offset, int]:
     p = r.lgbm(threads, seed)
+    if r.objective == "huber":
+        # LightGBM's Huber loss does not start from the mean and clips each gradient at alpha, so
+        # on log1p carbon (mean ~6) it would spend its whole budget walking up to the level. Fit
+        # the deviations from the training mean instead; `Offset` adds it back.
+        mu = float(np.average(y, weights=w))
+        m, it = _fit_reg(
+            dataclasses.replace(r, objective="huber_centred"),
+            x,
+            y - mu,
+            w,
+            tiles,
+            f=f,
+            threads=threads,
+            seed=seed,
+        )
+        return Offset(m, mu), it
     if not r.early_stops:
         m = LGBMRegressor(**p)
         m.fit(x, y, sample_weight=w)
@@ -468,7 +498,7 @@ def tune(d: Data, r: Recipe, trials: int, workers: int, threads: int) -> dict[st
             ("subsample", trial.suggest_float("subsample", 0.5, 1.0)),
             ("reg_lambda", trial.suggest_float("reg_lambda", 1e-3, 30.0, log=True)),
             ("min_split_gain", trial.suggest_float("min_split_gain", 1e-6, 0.05, log=True)),
-            ("n_estimators", 8000),
+            ("n_estimators", BIG["n_estimators"]),
         )
         rt = dataclasses.replace(r, capacity="tuned", params=params, bag=1)
         pred, _ = predict_all(d, rt, DEV_FOLDS, workers, threads)
@@ -610,7 +640,7 @@ class Screen:
             self.tuned[k] = tune(self.d, base, self.trials, self.workers, self.threads)
             print(f"  best dev D {self.tuned[k]['best_dev_D']:+.4f}", flush=True)
         bp = self.tuned[k]["best_params"]
-        params = tuple(sorted({**bp, "n_estimators": 8000}.items()))
+        params = tuple(sorted({**bp, "n_estimators": BIG["n_estimators"]}.items()))
         return dataclasses.replace(r, capacity="tuned", params=params)
 
 
@@ -688,6 +718,32 @@ def main() -> int:  # noqa: PLR0915 -- one flat sequence of screen stages
         (out / "screen_partial.json").write_text(
             json.dumps({**report, "singles": singles, "path": path}, indent=2, default=str)
         )
+
+    # The backward pass: each kept component removed in turn, in the order it was kept. It goes
+    # if the recipe without it is within MIN_GAIN of the recipe with it -- the forward rule's
+    # price, read the other way. Dev D only.
+    backward: list[dict[str, Any]] = []
+    for step in [p["step"] for p in path if p["kept"] != "none"]:
+        fields = {
+            "features": {"feats": base.feats},
+            "target": {"target": base.target},
+            "two stages": {"gate": base.gate},
+            "objective": {"objective": base.objective},
+            "capacity": {"capacity": base.capacity, "params": ()},
+            "pool": {"pool": base.pool, "pilot_weight": base.pilot_weight},
+            "zero floor": {"zero_floor": base.zero_floor},
+            "bagging": {"bag": base.bag},
+        }[step]
+        without = dataclasses.replace(current, name=f"{current.name} -{step}", **fields)
+        d_without = float(scr.run(without)["eval"]["dev"]["D"])
+        drop = d_without > cur_d - MIN_GAIN
+        backward.append(
+            {"step": step, "dev_D_with": cur_d, "dev_D_without": d_without, "dropped": drop}
+        )
+        print(f"  backward: without {step} dev D {d_without:+.4f} -> dropped {drop}", flush=True)
+        if drop:
+            current, cur_d = without, d_without
+    report["backward"] = backward
 
     best = scr.run(current)
     pred_best = scr.preds[current.key()]
