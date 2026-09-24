@@ -907,8 +907,11 @@ def synthesise_cell(  # noqa: PLR0912, PLR0915 -- one pass over the patches; spl
                       mix restricted to the allowed types -- or, for a TREELESS template, the donor
                       pool's mix -- is used, and `report.shares_source` says which.
       allowed_types   the types the TARGET climate admits (`climbuf.bioclimatic_verdict`). Shares on
-                      other types are dropped and renormalised, and a donor-type fallback can never
-                      widen past this set. This replaces "the template holds it", which was vacuous
+                      other types are dropped and renormalised, and a donor-type fallback stays
+                      inside this set -- unless the pool holds NO donor of any allowed type, when
+                      `_choose_donors` still places a stem from the whole pool and counts it in
+                      `inadmissible_placed` (0 on the pilot), which the caller must check.
+                      This replaces "the template holds it", which was vacuous
                       for a treeless template: with no ladder the rule switched itself off and any
                       type in the pool could be placed.
       climbuf         a replacement climate buffer (`climbuf.climate_buffer_from_forcing`).
