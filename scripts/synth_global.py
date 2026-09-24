@@ -91,6 +91,7 @@ import numpy as np
 import polars as pl  # parent-side only: workers are SPAWNED, and receive plain dicts
 
 from synth_restart import BIOME_DONORS, DONOR_BAND, _donor_cells
+from vegemu.binfmt.clm import read_grid
 from vegemu.binfmt.restart import (
     PREFIX_BYTES,
     Layout,
@@ -103,6 +104,7 @@ from vegemu.binfmt.restart import (
     trees_of,
     write_cell,
 )
+from vegemu.corpus.state import summarise_cell
 from vegemu.models.synth import (
     MATCH_TRAITS,
     DonorPool,
@@ -125,6 +127,22 @@ def _template_default() -> Path:
     # The stored global spin-up's end: every cell's only real restart, and the template of the
     # constant-CO2 equilibrium product.
     return path("ground_truth.restart_spinup_end")
+
+
+def refuse_template_as_output(dest: Path, template: Path, what: str) -> None:
+    """Refuse to write `dest` if it IS the template.
+
+    The default template is the stored spin-up's `restart_1999` -- every cell's only real restart,
+    and writable by this account. Each writer here builds `<dest>.partial` and renames it over
+    `dest`, so `--out <template>` would replace it; `t0` would then `cmp` the file against itself,
+    find it identical and delete it. Checked before anything is opened for writing.
+    """
+    dest, template = Path(dest), Path(template)
+    same = dest.resolve() == template.resolve()
+    if not same and dest.exists() and template.exists():
+        same = os.path.samefile(dest, template)
+    if same:
+        raise ValueError(f"{what} {dest} is the template itself; refusing to overwrite it")
 
 
 def _sha256(p: Path, chunk: int = 64 << 20) -> str:
@@ -413,6 +431,91 @@ def load_predictions(
 
 
 # --------------------------------------------------------------------------------------------
+# Is the prediction file about THIS grid, on the NATURAL scale? Checked by `plan` before any work:
+# either fault would otherwise run to completion and write a file that loads and is wrong.
+#
+# THE SCALE. Each quantity the synthesiser reads is compared with the same quantity of the
+# template's own record (`corpus.state.summarise_cell`, the definition the training labels were
+# made with), over a sample of predicted-forest cells, and the MEDIAN ratio must lie in
+# [1/SCALE_BAND, SCALE_BAND]. Dev diagnostic, 2026-09-24, against the truth columns of
+# `map-response-v0/oof_map.parquet`: per 1000-cell block, equimap-v1 `pred_historical` and
+# `pred_1901_1930_heldout` sit at median ratios 0.72-1.84 for stems_per_patch, soilc,
+# height_p10/p50 and wooddens_p50. The equilibrium model's own fitted scale (log1p) would put a
+# soil carbon of 1e4 at ~1e-3 of itself and 15 stems a patch at ~0.18; a height in cm is 100x. A
+# genuine regional shift wider than the band is what `--skip-scale-check` is for; the plan
+# records that it was used.
+# --------------------------------------------------------------------------------------------
+SCALE_BAND = 4.0
+SCALE_SAMPLE = 48
+SCALE_MIN_CELLS = 8
+GRID_TOL_DEG = 0.01  # a one-cell shift on the 0.5-degree grid is 0.5
+
+
+def check_prediction_scale(
+    reader: RestartReader, preds: dict[int, dict[str, float]], match_traits: tuple[str, ...]
+) -> dict[str, Any]:
+    """Median prediction / template ratio of every quantity `synthesise_cell` reads."""
+    qs = (*required_quantities(match_traits), "soilc")
+    forest = [c for c in sorted(preds) if preds[c].get("stems_per_patch", 0.0) > 0]
+    tries = forest
+    if len(forest) > 4 * SCALE_SAMPLE:  # spread over the whole range, not its first block
+        tries = [forest[int(i)] for i in np.linspace(0, len(forest) - 1, 4 * SCALE_SAMPLE).round()]
+    logs: dict[str, list[float]] = {q: [] for q in qs}
+    used = 0
+    with reader:
+        for cell in dict.fromkeys(tries):
+            if used >= SCALE_SAMPLE:
+                break
+            rec = read_cell(reader.cell_bytes(cell), reader.layout)
+            if rec["skip"]:
+                continue
+            ref = summarise_cell(rec, cell, reader.layout)
+            if not ref["stems_per_patch"] > 0:
+                continue
+            used += 1
+            for q in qs:
+                p, t = preds[cell].get(q, np.nan), ref.get(q, np.nan)
+                if np.isfinite(p) and np.isfinite(t) and p > 0 and t > 0:
+                    logs[q].append(float(np.log(p / t)))
+    med = {q: float(np.exp(np.median(v))) for q, v in logs.items() if len(v) >= SCALE_MIN_CELLS}
+    bad = {q: r for q, r in med.items() if not 1.0 / SCALE_BAND <= r <= SCALE_BAND}
+    return {"band": SCALE_BAND, "cells": used, "median_ratio": med, "out_of_band": bad}
+
+
+def check_prediction_grid(pred_path: Path, cells: list[int], ncell: int) -> dict[str, Any]:
+    """If the file carries `lon`/`lat`, they must be the grid's own for each `cell`.
+
+    Two 67,420-cell coordinate files with DIFFERENT orderings exist on the cluster (`read_grid`),
+    and a prediction indexed by the other one is every cell's value written into another cell --
+    plausible values, a loadable file, nothing else would notice. Refused outright, no override.
+    """
+    schema = pl.read_parquet_schema(pred_path)
+    if "lon" not in schema or "lat" not in schema or not cells:
+        return {"checked": False, "why": "no lon/lat columns in the predictions"}
+    grid_path = path("inputs.coord")
+    if not grid_path.exists():
+        return {"checked": False, "why": f"no grid file at {grid_path}"}
+    grid = read_grid(grid_path)
+    if grid.shape[0] != ncell:
+        return {"checked": False, "why": f"template has {ncell} cells, the grid {grid.shape[0]}"}
+    df = pl.read_parquet(pred_path, columns=["cell", "lon", "lat"])
+    df = df.filter(pl.col("cell").is_in(cells))
+    c = df["cell"].to_numpy().astype(np.int64)
+    dlon = (df["lon"].to_numpy() - grid[c, 0] + 180.0) % 360.0 - 180.0
+    dlat = df["lat"].to_numpy() - grid[c, 1]
+    off = np.maximum(np.abs(dlon), np.abs(dlat))
+    bad = np.flatnonzero(~(off <= GRID_TOL_DEG))
+    if bad.size:
+        raise ValueError(
+            f"{pred_path}: {bad.size} of {c.size} cells have lon/lat that are not the grid's "
+            f"({grid_path}), e.g. cell {int(c[bad[0]])} at "
+            f"({float(df['lon'][int(bad[0])])}, {float(df['lat'][int(bad[0])])}) vs "
+            f"({float(grid[c[bad[0]], 0])}, {float(grid[c[bad[0]], 1])}): another cell ordering"
+        )
+    return {"checked": True, "cells": int(c.size), "max_offset_deg": float(off.max())}
+
+
+# --------------------------------------------------------------------------------------------
 # The template census: which cells hold a stem. Only a decode of every record can say, so it is
 # its own pass, run once per template; the plan reads it to say EXACTLY how many cells it will
 # synthesise, and the cost projection to price only those.
@@ -436,6 +539,8 @@ def census_block(job: dict[str, Any]) -> dict[str, Any]:
 
 def cmd_census(template: Path, dest: Path, workers: int, block_size: int) -> dict[str, Any]:
     """Tree stems per template cell (`type_ladder`, the synthesiser's own test), to a parquet."""
+    refuse_template_as_output(dest, template, "census --out")
+    refuse_template_as_output(dest.with_suffix(".json"), template, "census sidecar")
     wall0 = time.perf_counter()
     reader = RestartReader(template)
     jobs = [
@@ -470,7 +575,21 @@ def cmd_census(template: Path, dest: Path, workers: int, block_size: int) -> dic
 
 def census_counts(census: Path, reader: RestartReader, predicted: set[int]) -> dict[str, Any]:
     """What a census says about this plan: how many predicted cells hold a stem (and so will be
-    synthesised under `--treeless-template pass`), and how many do not."""
+    synthesised under `--treeless-template pass`), and how many do not.
+
+    The census must be OF THIS TEMPLATE, which its sidecar JSON names: a row count alone accepts a
+    census of any other 67,420-cell restart (`restart_2019`, a scenario leg), and the plan would
+    then report counts, and price cells, that belong to a different file."""
+    side = census.with_suffix(".json")
+    meta = json.loads(side.read_text()) if side.exists() else {}
+    made_from = Path(str(meta.get("template", "")))
+    same = made_from.exists() and os.path.samefile(made_from, reader.path)
+    if not (same and meta.get("template_bytes") == reader.filesize):
+        raise ValueError(
+            f"{census}: not a census of this template: its {side.name} names "
+            f"{meta.get('template')!r} ({meta.get('template_bytes')} B), this is {reader.path} "
+            f"({reader.filesize} B)"
+        )
     df = pl.read_parquet(census)
     if df.height != reader.ncell or df["cell"].to_list() != list(range(reader.ncell)):
         raise ValueError(f"{census}: not a census of this template ({df.height} rows)")
@@ -509,7 +628,17 @@ def work_dir_for(out: Path) -> Path:
 def make_plan(args: argparse.Namespace) -> tuple[dict[str, Any], dict[int, dict[str, float]]]:
     """The plan, and the predictions it will synthesise (kept out of the plan: they are data)."""
     template = Path(args.template) if args.template else _template_default()
+    refuse_template_as_output(Path(args.out), template, "--out")
     reader = RestartReader(template)
+    if reader.generic.firstcell != 0:
+        # Every cell id here -- the predictions' `cell`, the census rows, the donor cells, a
+        # block's `first` -- is used as a RECORD INDEX into the template. That is the global grid
+        # index only when the template starts at cell 0; otherwise each prediction would land on
+        # a cell `firstcell` places away, silently.
+        raise ValueError(
+            f"{template}: firstcell {reader.generic.firstcell}; the template must start at cell 0 "
+            "(prediction cell ids are global grid indices and are used as record indices)"
+        )
     first = int(args.first_cell)
     ncell = reader.ncell - first if args.ncell is None else int(args.ncell)
     if not (first >= 0 and ncell >= 1 and first + ncell <= reader.ncell):
@@ -531,6 +660,19 @@ def make_plan(args: argparse.Namespace) -> tuple[dict[str, Any], dict[int, dict[
             Path(args.predictions), max(lo, first), min(hi, first + ncell), match_traits
         )
         pred_info["only"] = [lo, hi]
+        pred_info["grid_check"] = check_prediction_grid(
+            Path(args.predictions), sorted(preds), reader.ncell
+        )
+        scale = check_prediction_scale(reader, preds, match_traits)
+        scale["skipped"] = bool(args.skip_scale_check)
+        pred_info["scale_check"] = scale
+        if scale["out_of_band"] and not args.skip_scale_check:
+            raise ValueError(
+                f"{args.predictions}: median prediction/template ratio outside "
+                f"[1/{SCALE_BAND:g}, {SCALE_BAND:g}] over {scale['cells']} forested cells: "
+                f"{scale['out_of_band']} -- a wrong column scale (log1p? other units?). If the "
+                "shift is real, re-plan with --skip-scale-check"
+            )
 
     census_info: dict[str, Any] | None = None
     if getattr(args, "census", None):
@@ -961,6 +1103,7 @@ def segments_for(work: Path, plan: dict[str, Any]) -> list[Segment]:
 def cmd_assemble(work: Path, *, skip_disk_check: bool = False) -> dict[str, Any]:
     plan = _load_plan(work)
     dest = Path(plan["out"])
+    refuse_template_as_output(dest, Path(plan["template"]), "the plan's out")
     dest.parent.mkdir(parents=True, exist_ok=True)
     segs = segments_for(work, plan)
     # An existing output is replaced only by the final rename, so it and the new one coexist.
@@ -1312,9 +1455,16 @@ def cmd_t0(args: argparse.Namespace) -> dict[str, Any]:
     first = int(args.first_cell)
     ncell = reader.ncell - first if args.ncell is None else int(args.ncell)
     dest = Path(args.out)
+    rep_path = Path(args.report) if args.report else dest.with_suffix(".t0.json")
+    # `t0` deletes its copy after a clean cmp, so `--out <template>` would delete the template.
+    refuse_template_as_output(dest, src, "t0 --out")
+    refuse_template_as_output(rep_path, src, "t0 --report")
     dest.parent.mkdir(parents=True, exist_ok=True)
     wall0, cpu0 = time.perf_counter(), time.process_time()
-    with reader, RestartWriter(dest, reader.generic, reader.restart, ncell, firstcell=first) as w:
+    # The copy is framed at the source's own absolute cell, which is `first` only for a source
+    # that starts at cell 0.
+    at = reader.generic.firstcell + first
+    with reader, RestartWriter(dest, reader.generic, reader.restart, ncell, firstcell=at) as w:
         for i, cell in enumerate(range(first, first + ncell)):
             w.append(reader.cell_bytes(cell))
             if (i + 1) % 5000 == 0:
@@ -1355,7 +1505,6 @@ def cmd_t0(args: argparse.Namespace) -> dict[str, Any]:
     if not args.keep and report["verdict"] == "BYTE-IDENTICAL":
         dest.unlink()
         report["dest_deleted_after_cmp"] = True
-    rep_path = Path(args.report) if args.report else dest.with_suffix(".t0.json")
     _write_json(rep_path, report)
     print(json.dumps(report, indent=1, default=_jsonable), flush=True)
     return report
@@ -1505,6 +1654,11 @@ def build_parser() -> argparse.ArgumentParser:  # noqa: PLR0915 -- one flat list
             "with no admissible tree type to copy) or synthesise it anyway",
         )
         p.add_argument("--skip-disk-check", action="store_true")
+        p.add_argument(
+            "--skip-scale-check",
+            action="store_true",
+            help="plan even if the predictions sit far from the template's own values (recorded)",
+        )
         p.add_argument(
             "--census", default=None, help="the template's census parquet (see `census`)"
         )

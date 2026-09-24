@@ -14,7 +14,10 @@ What must hold, and why each is its own test:
   * a template holding no tree passes through whatever is predicted for it (the product
     synthesises the cells with any stem, and only those);
   * shard writing is RESTARTABLE: a task that failed is re-run alone, writes only what it owns and
-    is missing, and the result is byte-identical to a run that never failed.
+    is missing, and the result is byte-identical to a run that never failed;
+  * `plan` refuses, before any work, predictions with duplicate cells, on the wrong scale, or in
+    another cell ordering, an output that is the template itself, and a template not framed from
+    cell 0; `verify` fails a bad litter index and warns of a foreign tree type.
 
 The template here is a 40-cell restart file with real-shaped records and sane stems; the scale
 version runs on SLURM against the real 67,420-cell file.
@@ -44,7 +47,13 @@ from vegemu.binfmt.restart import (
     read_cell,
     write_cell,
 )
-from vegemu.models.synth import DonorPool, SynthReport, build_donor_pool, synthesise_cell
+from vegemu.models.synth import (
+    LITTER_BYTE_IN_TREE,
+    DonorPool,
+    SynthReport,
+    build_donor_pool,
+    synthesise_cell,
+)
 
 from .test_restart_roundtrip import _synth_record
 from .test_synth_admissibility import _stem
@@ -80,6 +89,12 @@ def _record(cell: int) -> bytes:
             "raw": struct.pack("<i", len(stems))
             + b"".join(s.view(np.uint8).reshape(PFT_TREE_BYTES).tobytes() for s in stems)
         }
+        # Soil carbon of a real magnitude (4000 gC/m2; the round-trip generator's pools span
+        # +-1e8), so the plan's scale check compares the predicted 5000 against something sane.
+        pool = np.array(patch["soil"]["pool"], dtype=np.float64, copy=True)
+        pool[:, 0] = pool[:, 2] = 4000.0 / (2 * pool.shape[0])
+        pool[:, 1] = pool[:, 3] = 10.0
+        patch["soil"]["pool"] = pool
     return write_cell(rec, lay)
 
 
@@ -532,3 +547,172 @@ def test_the_census_counts_stems_and_makes_the_plan_exact(
             w.append(_record(c))
     with pytest.raises(ValueError, match="not a census of this template"):
         sg.census_counts(census, RestartReader(other), set())
+
+
+# --------------------------------------------------------------------------------------------
+# What `plan` refuses, before any work: a prediction file that is not about this grid or not on
+# the natural scale, an output that is the template itself, a template not framed from cell 0.
+# --------------------------------------------------------------------------------------------
+def _pred_variant(world: dict[str, Path], name: str, fn: Any) -> Path:
+    dest = world["root"] / "variants" / f"{name}.parquet"
+    dest.parent.mkdir(exist_ok=True)
+    fn(pl.read_parquet(world["pred"])).write_parquet(dest)
+    return dest
+
+
+def _plan_with(world: dict[str, Path], name: str, pred: Path, *extra: str) -> list[str]:
+    run = Run(world["root"], name)
+    args = ["plan", *_plan_args(world, run, "--only", "10:30", *extra)]
+    args[args.index("--predictions") + 1] = str(pred)
+    return args
+
+
+def test_a_plan_refuses_duplicate_cells(world: dict[str, Path]) -> None:
+    dup = _pred_variant(world, "dup", lambda df: pl.concat([df, df.head(1)]))
+    with pytest.raises(ValueError, match="duplicate cell ids"):
+        sg.main(_plan_with(world, "dup", dup))
+
+
+def test_a_plan_refuses_predictions_on_the_wrong_scale(world: dict[str, Path]) -> None:
+    """The equilibrium model's own fitted scale is log1p for counts and stocks; an unconverted
+    column would thin every forest and divide every soil pool by ~1000, in a file that loads."""
+    ok = sg.main(_plan_with(world, "scale-ok", world["pred"]))
+    assert ok == 0
+    plan = json.loads((Run(world["root"], "scale-ok").work / "plan.json").read_text())
+    check = plan["predictions"]["scale_check"]
+    assert check["cells"] >= sg.SCALE_MIN_CELLS and not check["out_of_band"]
+    assert {"stems_per_patch", "soilc", "height_p50", "wooddens_p50"} <= set(check["median_ratio"])
+
+    logged = _pred_variant(
+        world,
+        "log1p",
+        lambda df: df.with_columns(pl.col("pred_stems_per_patch", "pred_soilc").log1p()),
+    )
+    with pytest.raises(ValueError, match="wrong column scale") as err:
+        sg.main(_plan_with(world, "scale-log1p", logged))
+    assert "soilc" in str(err.value)
+    cm = _pred_variant(world, "cm", lambda df: df.with_columns(pl.col("^pred_height_p.*$") * 100.0))
+    with pytest.raises(ValueError, match="height_p50"):
+        sg.main(_plan_with(world, "scale-cm", cm))
+    # A shift that is real is planned on request, and the plan says it was.
+    assert sg.main(_plan_with(world, "scale-forced", logged, "--skip-scale-check")) == 0
+    forced = json.loads((Run(world["root"], "scale-forced").work / "plan.json").read_text())
+    assert forced["predictions"]["scale_check"]["skipped"]
+    assert "soilc" in forced["predictions"]["scale_check"]["out_of_band"]
+
+
+def test_a_plan_refuses_predictions_of_another_cell_ordering(
+    world: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    grid = np.column_stack([np.arange(NCELL) * 0.5 - 10.0, np.full(NCELL, 50.25)])
+    coord = world["root"] / "grid.clm"
+    coord.write_bytes(b"stand-in: read_grid is replaced below")
+    real_path = sg.path
+    monkeypatch.setattr(sg, "path", lambda k: coord if k == "inputs.coord" else real_path(k))
+    monkeypatch.setattr(sg, "read_grid", lambda _p: grid)
+
+    def with_lonlat(shift: int) -> Any:
+        def fn(df: pl.DataFrame) -> pl.DataFrame:
+            c = df["cell"].to_numpy() + shift
+            return df.with_columns(lon=pl.Series(grid[c, 0]), lat=pl.Series(grid[c, 1]))
+
+        return fn
+
+    right = _pred_variant(world, "grid-right", with_lonlat(0))
+    assert sg.main(_plan_with(world, "grid-right", right)) == 0
+    plan = json.loads((Run(world["root"], "grid-right").work / "plan.json").read_text())
+    assert plan["predictions"]["grid_check"]["checked"]
+    shifted = _pred_variant(world, "grid-shifted", with_lonlat(1))
+    with pytest.raises(ValueError, match="another cell ordering"):
+        sg.main(_plan_with(world, "grid-shifted", shifted))
+
+
+def test_nothing_may_write_over_the_template(world: dict[str, Path]) -> None:
+    """The default template is the only real restart each cell has, and writable."""
+    copy = world["root"] / "precious" / "template.lpj"
+    copy.parent.mkdir(exist_ok=True)
+    shutil.copyfile(world["template"], copy)
+    before = copy.read_bytes()
+    base = ["--template", str(copy), "--predictions", str(world["pred"])]
+    with pytest.raises(ValueError, match="is the template itself"):
+        sg.main(["plan", "--out", str(copy), *base])
+    with pytest.raises(ValueError, match="is the template itself"):
+        sg.main(["t0", "--template", str(copy), "--out", str(copy)])  # would cmp, then delete it
+    alias = copy.parent / "alias.lpj"
+    alias.symlink_to(copy)
+    with pytest.raises(ValueError, match="is the template itself"):
+        sg.main(["t0", "--template", str(alias), "--out", str(copy)])
+    with pytest.raises(ValueError, match="is the template itself"):
+        sg.main(["census", "--template", str(copy), "--out", str(copy), "--workers", "1"])
+    assert copy.read_bytes() == before
+
+
+def test_a_template_not_framed_from_cell_zero_is_refused(world: dict[str, Path]) -> None:
+    """Prediction cell ids are global and used as record indices: they agree only from cell 0."""
+    cut = world["root"] / "cut_from_7.lpj"
+    tmpl = RestartReader(world["template"])
+    with tmpl, RestartWriter(cut, tmpl.generic, tmpl.restart, NCELL - 7, firstcell=7) as w:
+        for c in range(7, NCELL):
+            w.append(tmpl.cell_bytes(c))
+    run = Run(world["root"], "firstcell")
+    args = _plan_args(world, run)
+    args[args.index("--template") + 1] = str(cut)
+    with pytest.raises(ValueError, match="firstcell 7"):
+        sg.main(["plan", *args])
+    # t0 of a sub-range of such a file is framed at the source's own absolute cell.
+    part = world["root"] / "t0" / "from_cut.lpj"
+    assert sg.main(["t0", "--template", str(cut), "--out", str(part), "--first-cell", "3",
+                    "--ncell", "5", "--keep"]) == 0  # fmt: skip
+    assert RestartReader(part).generic.firstcell == 10
+
+
+def test_a_census_of_another_template_is_refused(world: dict[str, Path]) -> None:
+    """Same cell count, different file: its counts would be reported as this plan's."""
+    census = world["root"] / "census2" / "census.parquet"
+    assert sg.main(["census", "--template", str(world["template"]), "--out", str(census),
+                    "--workers", "1"]) == 0  # fmt: skip
+    twin = world["root"] / "census2" / "twin.lpj"
+    with RestartWriter(twin, GENERIC, RESTART, ncell=NCELL) as w:
+        for c in range(NCELL):
+            w.append(_record((c + 1) % NCELL))
+    with pytest.raises(ValueError, match="not a census of this template"):
+        sg.census_counts(census, RestartReader(twin), set())
+    assert sg.census_counts(census, RestartReader(world["template"]), set())["template_skip"] == 2
+
+
+# --------------------------------------------------------------------------------------------
+# verify re-derives from the WRITTEN records what the synthesiser's report could hide.
+# --------------------------------------------------------------------------------------------
+class Corrupting(sg.CurrentApi):
+    """`current-api`, then one stem broken in each of two cells: in BAD_LITTER a litter index past
+    its patch's litter list (the model aborts on it, ERROR195), in FOREIGN a tree type the cell's
+    own state never holds (the fixture's cells hold types 1 and 3 only)."""
+
+    BAD_LITTER, FOREIGN = 11, 12
+
+    def __call__(self, template: Any, prediction: Any, pool: Any, layout: Any, **kw: Any) -> Any:
+        rec, rep = super().__call__(template, prediction, pool, layout, **kw)
+        if kw["cell"] in (self.BAD_LITTER, self.FOREIGN):
+            patch = rec["stands"][0]["patches"][0]
+            pft = patch["pftlist"]
+            raw = bytearray(pft["raw"])
+            at = int(pft["tree_offsets"][0])
+            if kw["cell"] == self.BAD_LITTER:
+                raw[at + LITTER_BYTE_IN_TREE] = int(patch["soil"]["litter"]["n"]) + 5
+            else:
+                raw[at] = 0
+            patch["pftlist"] = {**pft, "raw": bytes(raw)}
+        return rec, rep
+
+
+def test_verify_fails_a_bad_litter_index_and_warns_of_a_foreign_type(
+    world: dict[str, Path],
+) -> None:
+    run = Run(world["root"], "corrupt")
+    args = _plan_args(world, run, "--only", "10:20", "--cell-rule", f"{__name__}:Corrupting")
+    assert sg.main(["run", *args, "--workers", "1"]) == 1
+    verify = json.loads((run.work / "verify.json").read_text())
+    assert verify["verdict"] == "FAIL"
+    assert verify["bad_litter_index"] == 1 and verify["foreign_type_stems"] == 1
+    assert verify["warnings"] and "never holds" in verify["warnings"][0]
+    assert list((run.work / "shards").glob("*.lpj")), "a failed verify keeps the shard bodies"
