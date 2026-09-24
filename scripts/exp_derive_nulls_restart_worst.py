@@ -330,7 +330,9 @@ def ceilings(args: argparse.Namespace, basis: dict[str, Any]) -> dict[str, Any]:
         res = score_arm(pred.reshape(shape), truth.reshape(shape), band.reshape(shape), points)
         res["basis"] = (
             "seed 1 of each perturbed spin-up against the two-run mean, band from the same cell's "
-            "other climates: the error of a perfect expectation-predictor, i.e. ATTAINABLE"
+            "other climates: approximately the error of a perfect expectation-predictor, i.e. "
+            "ATTAINABLE. Seed 1 is one of the two runs the truth averages, so this is NOT what an "
+            "independent rerun scores (the 2026-09-24 pass rule's reference, lower than this)"
         )
         out["one_run_vs_two_run_mean"] = res
         return out

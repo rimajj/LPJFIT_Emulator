@@ -650,11 +650,20 @@ def ceiling_arm(
 
     `truth_is` must be stated, because the two cases bound different things:
       "mean"   truth = (run + other) / 2, the two-run expectation the arms are scored against when a
-               second run exists. |run - truth| = |run - other| / 2 has exactly the distribution of
-               a PERFECT expectation-predictor's error against a two-run truth, so this is the
-               attainable score, not merely a bound on it.
+               second run exists. |run - truth| = |run - other| / 2 has the same mean and
+               covariance as a PERFECT expectation-predictor's error against a two-run truth (the
+               same distribution when the run-to-run noise is symmetric, e.g. Gaussian; only
+               approximately for a skewed quantity such as stems near collapse), so this is,
+               approximately, the score a perfect emulator attains -- not merely a bound on it.
       "other"  truth = the other run alone, for a single-seed truth. One run predicting another
                carries both runs' noise, so this is a LOWER bound on the attainable score.
+
+    ⚠ NEITHER IS THE OWNER'S "AS GOOD AS A RERUN" REFERENCE (2026-09-24). That rule compares the
+    emulator's pass rate with an INDEPENDENT real run's against the two-run truth. In "mean" the
+    run is one of the two the truth averages, so its error variance is half one run's (sigma^2/2);
+    an independent third run's is 1.5 sigma^2, and "other" is 2 sigma^2. The rerun reference
+    therefore lies between the two modes and needs a third run to be measured -- quote "mean" as
+    the perfect-emulator score, never as what a rerun achieves.
 
     ⚠ `rel_spread` must not come from this same pair at these same rows -- that band is circular
     and the ceiling is 1.0 by arithmetic. The literal mistake (passing `relative_spread(run,
