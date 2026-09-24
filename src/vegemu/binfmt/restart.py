@@ -995,6 +995,7 @@ class RestartWriter:
         self._count = 0
         self._pos = PREFIX_BYTES + 8 * ncell
         self._fh: BinaryIO | None = None
+        self._closed = False
 
     @property
     def records_written(self) -> int:
@@ -1015,6 +1016,8 @@ class RestartWriter:
         return self._fh
 
     def append(self, record: bytes | memoryview) -> None:
+        if self._closed:
+            raise ValueError(f"{self.path}: append after close()")
         if self._count >= self.ncell:
             self.abort()
             raise ValueError(f"declared ncell={self.ncell} but appended more")
@@ -1025,15 +1028,26 @@ class RestartWriter:
         self._count += 1
 
     def close(self) -> None:
+        # IDEMPOTENT, as the in-memory writer was (a second close rewrote the same bytes). Without
+        # this, an explicit `close()` inside a `with` block let `__exit__` close again: a fresh
+        # `.partial` holding only the prefix and the offset table replaced the finished file --
+        # which `RestartReader` accepts, every record then reading back as zero bytes.
+        if self._closed:
+            return
         if self._count != self.ncell:
             self.abort()
             raise ValueError(f"declared ncell={self.ncell} but appended {self._count}")
-        fh = self._open()
-        fh.seek(PREFIX_BYTES)
-        fh.write(self._offsets.tobytes())
-        fh.close()
-        self._fh = None
-        _partial(self.path).replace(self.path)
+        try:
+            fh = self._open()
+            fh.seek(PREFIX_BYTES)
+            fh.write(self._offsets.tobytes())
+            fh.close()
+            self._fh = None
+            _partial(self.path).replace(self.path)
+        except BaseException:
+            self.abort()  # a failed fix-up (a full disk) must not leave the partial file behind
+            raise
+        self._closed = True
 
     def abort(self) -> None:
         """Discard the partial file. Nothing at `path` is created or changed."""

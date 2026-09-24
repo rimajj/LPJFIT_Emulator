@@ -171,6 +171,25 @@ def test_empty_file_matches_reference(tmp_path: Path) -> None:
     assert out.read_bytes() == _reference_file([], GENERIC, RESTART, None)
 
 
+def test_a_second_close_changes_nothing(tmp_path: Path) -> None:
+    """`close()` inside a `with` block, then `__exit__`'s own close: the in-memory writer rewrote
+    the same bytes. A streaming one must not replace the file with a record-less copy of its
+    framing -- which the reader accepts, every record then reading back as zero bytes."""
+    records = _blobs(11, 4)
+    dest = tmp_path / "twice.lpj"
+    with RestartWriter(dest, GENERIC, RESTART, ncell=len(records)) as w:
+        for rec in records:
+            w.append(rec)
+        w.close()
+        assert dest.read_bytes() == _reference_file(records, GENERIC, RESTART, None)
+    assert dest.read_bytes() == _reference_file(records, GENERIC, RESTART, None)
+    w.close()
+    assert dest.read_bytes() == _reference_file(records, GENERIC, RESTART, None)
+    with pytest.raises(ValueError, match="after close"):
+        w.append(b"late")
+    assert dest.read_bytes() == _reference_file(records, GENERIC, RESTART, None)
+
+
 # ---------------------------------------------------------------------------------------------
 # Shards + assembly against one writer.
 # ---------------------------------------------------------------------------------------------
