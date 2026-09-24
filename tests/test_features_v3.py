@@ -112,6 +112,18 @@ def test_unknown_soil_code_is_nan_not_zero() -> None:
     assert np.isnan(whc[0]) and np.isnan(whc[2]) and whc[1] > 0
 
 
+def test_soil_capacity_comes_from_the_library_and_equals_the_transcription_bitwise() -> None:
+    """`soil_whc` reads the soil library; for every code the file can hold it must equal the
+    pinned transcription `SOIL_TYPES` to the last bit (so the refactor moved no feature), with
+    NaN where the soilmap names no soil."""
+    got = fv3.soil_whc(np.arange(256))
+    for code in range(256):
+        if code in fv3.SOIL_TYPES:
+            assert got[code] == fv3.SOIL_TYPES[code].whc, code
+        else:
+            assert np.isnan(got[code]), code
+
+
 def test_vpd_is_zero_at_saturation_and_rises_with_dryness() -> None:
     t = np.array([20.0, 20.0, 20.0])
     q = np.array([0.0147, 0.008, 0.002])  # ~saturated at 20 C, then drier
@@ -131,6 +143,47 @@ def test_every_feature_is_computed_once_in_order() -> None:
     for k, v in cols.items():
         assert v.shape == (n,), k
         assert np.isfinite(v).all(), k
+
+
+def test_the_extension_follows_the_120_and_leaves_them_unchanged() -> None:
+    n = 5
+    codes, depth = _soil(n)
+    clim = _climate(n, seed=4)
+    base = fv3.v3_columns(clim, codes, depth)
+    ext = fv3.v3_columns(clim, codes, depth, extras=True)
+    assert tuple(ext) == fv3.V3_ALL == fv3.V3_FEATURES + fv3.V3X_FEATURES
+    assert not set(fv3.V3_FEATURES) & set(fv3.V3X_FEATURES)
+    for k in fv3.V3_FEATURES:
+        np.testing.assert_array_equal(ext[k], base[k], err_msg=k)
+    for k in fv3.V3X_FEATURES:
+        assert ext[k].shape == (n,) and np.isfinite(ext[k]).all(), k
+    # And the extension is batch-independent too: row 3 alone equals row 3 among the others.
+    alone = fv3.v3_columns({v: clim[v][3:4] for v in VARS}, codes[3:4], depth[3:4], extras=True)
+    for k in fv3.V3X_FEATURES:
+        assert alone[k][0] == ext[k][3], k
+
+
+def test_fire_fraction_is_the_globfirm_curve() -> None:
+    """fire_prob.c: a year dry every day burns completely (index 1, sm 0), a wet year sits on the
+    0.001 floor, and the curve rises in between."""
+    s = np.array([0.0, 30.0, 120.0, 250.0, 365.0])
+    f = fv3.fire_fraction(s)
+    assert f[0] == pytest.approx(fv3.FIRE_FLOOR) and f[-1] == pytest.approx(1.0)
+    assert all(a <= b for a, b in itertools.pairwise(f))
+
+
+def test_more_rain_means_less_fire_and_less_deficit() -> None:
+    clim = _climate(1, seed=5)
+    codes, depth = np.array([9]), np.array([2.0])
+    dry = fv3.v3_columns(clim, codes, depth, extras=True)
+    wet = fv3.v3_columns({**clim, "pr": clim["pr"] * 3.0}, codes, depth, extras=True)
+    for d in fv3.ROOT_PROFILES_CM:
+        p = f"d{d:g}"
+        assert wet[f"fire_{p}"][0] <= dry[f"fire_{p}"][0]
+        assert wet[f"deficit_{p}"][0] <= dry[f"deficit_{p}"][0]
+    assert dry["pr_year_min_frac"][0] <= 1.0 <= dry["pr_year_max_frac"][0]
+    assert dry["tas_year_min"][0] <= dry["tas_year_max"][0]
+    assert dry["gsl0"][0] >= dry["gsl5"][0] and dry["rsds_gs0"][0] >= dry["rsds_gs5"][0]
 
 
 def test_a_rows_features_do_not_depend_on_its_batch() -> None:

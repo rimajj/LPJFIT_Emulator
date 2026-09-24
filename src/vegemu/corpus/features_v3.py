@@ -29,6 +29,10 @@ WHAT IS COMPUTED, AND WHERE EACH PIECE COMES FROM IN THE C MODEL
   boreal needle-leaved summergreen type, and the daily cold-stress band of `tree/tempstress_tree.c`.
 * Degree days at several bases, frost and heat day counts at the thresholds those files use,
   interannual variability of the monthly means, precipitation seasonality and timing.
+* THE EXTENSION, `V3X_FEATURES` (only with `v3_columns(..., extras=True)`, appended after the 120
+  so a table pinned on those stays valid): the model's own GlobFIRM fire curve on the bucket's
+  top layer, the annual water deficit and its worst year, the window's extreme years, and the
+  growing season's length and shortwave. See the block above `V3X_FEATURES`.
 
 ⚠ WHAT IS DELIBERATELY NOT HERE
 * **CO2.** Never a feature (invariant 8); nothing below reads it.
@@ -66,6 +70,7 @@ import numpy.typing as npt
 
 from vegemu.binfmt.clm import ClmReader
 from vegemu.corpus.climate import MONTH_LEN, MONTH_START, NDAYYEAR, NMONTH, VARS
+from vegemu.corpus.soil import SOILMAP, SOILPAR
 
 Array = npt.NDArray[np.float64]
 IntArray = npt.NDArray[np.int64]
@@ -276,10 +281,57 @@ def _feature_names() -> tuple[str, ...]:
 
 V3_FEATURES: tuple[str, ...] = _feature_names()
 
+# --------------------------------------------------------------------------------------------
+# THE EXTENSION (2026-09-24), for the stored spin-up's vegetation carbon. `V3_FEATURES` stays the
+# 120 columns a draft pre-registration already pinned by table hash; these are appended AFTER
+# them, and `v3_columns(..., extras=True)` returns both. What they add:
+# * GlobFIRM fire, the model's own. The config runs `"fire": "fire"`, so every day above 0 degrees
+#   adds `exp(-pi * (w0 / moistfactor)^2)` to a patch's fire sum (`lpj/update_daily.c`,
+#   `soil/fire_sum.c`), where w0 is the top layer's relative wetness and the moisture factor is the
+#   litter-weighted `flam`, 0.3 for every natural type (`par/pft_lpjmlfit.js`, so the weighting is
+#   moot); the year's burnt fraction is `fire_prob.c`'s curve of that sum over 365. Here w0 is the
+#   bucket's 0-20 cm layer under each rooting profile, and the 200 gC/m2 fuel threshold is not
+#   applied (there is no litter in a forcing).
+# * The water deficit (demand minus supply-limited evapotranspiration) per profile: its mean, its
+#   worst year, and the driest year's evapotranspiration relative to the mean.
+# * The window's extreme years: coldest and warmest annual mean, driest and wettest year relative to
+#   the mean, the most negative annual water balance, the warmest year's degree days.
+# * Growing-season length above 0 and 5 degrees, and the shortwave received in it.
+# --------------------------------------------------------------------------------------------
+
+FIRE_MOIST = 0.3  # `flam` of all seven tree types and the three grasses; moistfactor.c returns it
+FIRE_FLOOR = 0.001  # fire_prob.c: a burnt fraction below this is raised to it
+FIRE_PROFILE = MID_PROFILE  # the profile whose worst fire year is reported
+SECONDS_PER_DAY = 86400.0
+
+
+def _extra_names() -> tuple[str, ...]:
+    names: list[str] = []
+    for d in ROOT_PROFILES_CM:
+        p = f"d{d:g}"
+        names += [f"deficit_{p}", f"deficit_max_{p}", f"aet_min_frac_{p}", f"fire_{p}"]
+    names += [f"fire_max_d{ROOT_PROFILES_CM[FIRE_PROFILE]:g}"]
+    names += ["tas_year_min", "tas_year_max", "pr_year_min_frac", "pr_year_max_frac"]
+    names += ["cwb_year_min", "gdd5_max", "gsl0", "gsl5", "rsds_gs0", "rsds_gs5"]
+    return tuple(names)
+
+
+V3X_FEATURES: tuple[str, ...] = _extra_names()
+V3_ALL: tuple[str, ...] = V3_FEATURES + V3X_FEATURES
+
 
 # --------------------------------------------------------------------------------------------
 # The model's own formulas, transcribed.
 # --------------------------------------------------------------------------------------------
+
+
+def fire_fraction(fire_sum: Array) -> Array:
+    """fire_prob.c: the year's burnt fraction from its cumulative daily fire probability."""
+    idx = np.asarray(fire_sum, dtype=np.float64) / NDAYYEAR
+    sm = idx - 1.0
+    frac = idx * np.exp(sm / (0.45 * sm * sm * sm + 2.83 * sm * sm + 2.96 * sm + 1.04))
+    out: Array = np.where(frac < FIRE_FLOOR, FIRE_FLOOR, frac)
+    return out
 
 
 def beta_root(d95_cm: float, bottom_cm: float = ROOT_BOTTOM_CM) -> float:
@@ -428,11 +480,20 @@ def _phase(monthly: Array) -> tuple[Array, Array]:
 
 
 def soil_whc(codes: npt.ArrayLike) -> Array:
-    """Available water capacity per mm for each soil code; NaN for code 0 or any unknown code."""
+    """Available water capacity per mm for each soil code; NaN for code 0 or any unknown code.
+
+    Read from the soil library (`vegemu.corpus.soil`: its code -> name map and its `soilpar`
+    rows), so the bucket and the five soil columns can never describe different soils. One
+    deliberate difference: the library reports rock and ice as NaN in its physical columns (not a
+    texture), but the model still runs those cells with that row's near-zero capacity, and so does
+    the bucket. `SOIL_TYPES` above is the independent transcription the tests pin against
+    `par/soil_20m.js`; a test asserts the two agree bitwise for every code.
+    """
     c = np.asarray(codes, dtype=np.int64)
-    table = np.full(max(SOIL_TYPES) + 1, np.nan)
-    for k, st in SOIL_TYPES.items():
-        table[k] = st.whc
+    table = np.full(len(SOILMAP), np.nan)
+    for k, name in enumerate(SOILMAP):
+        if name is not None:
+            table[k] = SOILPAR[name].w_avail
     out: Array = np.where((c >= 0) & (c < table.size), table[np.clip(c, 0, table.size - 1)], np.nan)
     return out
 
@@ -491,6 +552,11 @@ def run_bucket(  # noqa: PLR0915, PLR0917 -- one daily loop; splitting it costs 
     wet_grow = np.zeros((ng, n))
     snow_max = np.zeros((ny, n))
     snow_days = np.zeros(n)
+    # Per-year sums for the extension (V3X_FEATURES); kept apart so the 120 V3_FEATURES are
+    # accumulated exactly as before, in the same order, to the last bit.
+    aet_y = np.zeros((ny, n, npf))
+    dem_y = np.zeros((ny, n))
+    fire_y = np.zeros((ny, n, npf))
 
     with np.errstate(invalid="ignore", divide="ignore"):
         for ip in range(passes):
@@ -534,6 +600,10 @@ def run_bucket(  # noqa: PLR0915, PLR0917 -- one daily loop; splitting it costs 
                 wet_grow += wet[:, :, MID_PROFILE] * grow[None, :]
                 np.maximum(snow_max[y], snow, out=snow_max[y])
                 snow_days += snow > 1.0
+                aet_y[y] += aet
+                dem_y[y] += dd
+                w0 = wet[0] / FIRE_MOIST  # (n, P): update_daily.c counts only days above 0 C
+                fire_y[y] += np.where((temp > 0.0)[:, None], np.exp(-np.pi * w0 * w0), 0.0)
 
     out: dict[str, Array] = {}
     with np.errstate(invalid="ignore", divide="ignore"):
@@ -560,6 +630,21 @@ def run_bucket(  # noqa: PLR0915, PLR0917 -- one daily loop; splitting it costs 
         for g, name in enumerate(GROUP_NAMES):
             out[f"wet_{name}"] = np.where(grow_days > 0, wet_grow[g] / grow_days, np.nan)
             out[f"wet_{name}"] = np.where(np.isfinite(whc), out[f"wet_{name}"], np.nan)
+        # The extension: deficits, the driest year, and GlobFIRM's burnt fraction per profile.
+        deficit = dem_y[:, :, None] - aet_y  # (ny, n, P), mm per year
+        aet_mean = aet_y.mean(axis=0)
+        burnt = fire_fraction(fire_y)
+        for j, d in enumerate(ROOT_PROFILES_CM):
+            p = f"d{d:g}"
+            out[f"deficit_{p}"] = deficit[:, :, j].mean(axis=0)
+            out[f"deficit_max_{p}"] = deficit[:, :, j].max(axis=0)
+            out[f"aet_min_frac_{p}"] = np.where(
+                aet_mean[:, j] > 0,
+                aet_y[:, :, j].min(axis=0) / np.where(aet_mean[:, j] > 0, aet_mean[:, j], 1.0),
+                1.0,
+            )
+            out[f"fire_{p}"] = burnt[:, :, j].mean(axis=0)
+        out[f"fire_max_d{ROOT_PROFILES_CM[FIRE_PROFILE]:g}"] = burnt[:, :, FIRE_PROFILE].max(axis=0)
     out["snow_max"] = snow_max.mean(axis=0)
     out["snow_days"] = snow_days / ny
     return out
@@ -575,12 +660,15 @@ def v3_columns(  # noqa: PLR0912, PLR0915 -- a flat sequence of independent feat
     soil_code: npt.ArrayLike,
     soildepth_m: npt.ArrayLike,
     passes: int = N_PASSES,
+    *,
+    extras: bool = False,
 ) -> dict[str, Array]:
     """Every V3 feature, one value per row, from (n, nyear, 365) daily arrays of the five VARS.
 
     `soil_code` is the soil.bin byte and `soildepth_m` the soil-depth input in metres, per row.
     Units follow the forcing: tas in deg C, pr in mm/day, rsds and lwnet in W m-2 (lwnet net,
-    downward positive, so normally negative), huss in kg/kg.
+    downward positive, so normally negative), huss in kg/kg. With `extras`, the extension's
+    `V3X_FEATURES` follow the 120, in `V3_ALL` order; the 120 are identical either way.
     """
     for v in VARS:
         if v not in daily:
@@ -707,11 +795,29 @@ def v3_columns(  # noqa: PLR0912, PLR0915 -- a flat sequence of independent feat
 
     cols.update(run_bucket(tas, pr, dem, vpd_pa(tas, huss), whc, usable, passes=passes))
 
-    missing = set(V3_FEATURES) - set(cols)
-    extra = set(cols) - set(V3_FEATURES)
+    # -- the extension: the window's extreme years and the growing season -------------------
+    tas_y = tas.mean(axis=2)
+    pr_mean = pr_y.mean(axis=1)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        safe = np.where(pr_mean > 0, pr_mean, 1.0)
+        cols["pr_year_min_frac"] = np.where(pr_mean > 0, pr_y.min(axis=1) / safe, 1.0)
+        cols["pr_year_max_frac"] = np.where(pr_mean > 0, pr_y.max(axis=1) / safe, 1.0)
+    cols["tas_year_min"] = tas_y.min(axis=1)
+    cols["tas_year_max"] = tas_y.max(axis=1)
+    cols["cwb_year_min"] = (pr_y - dem.sum(axis=2)).min(axis=1)
+    cols["gdd5_max"] = gdd5_y.max(axis=1)
+    for base in (0.0, 5.0):
+        season = tas > base
+        cols[f"gsl{base:g}"] = season.sum(axis=2).mean(axis=1).astype(np.float64)
+        mj = (rsds * season).sum(axis=2).mean(axis=1) * SECONDS_PER_DAY / 1e6
+        cols[f"rsds_gs{base:g}"] = mj  # MJ m-2 per year of shortwave on days above the base
+
+    missing = set(V3_ALL) - set(cols)
+    extra = set(cols) - set(V3_ALL)
     if missing or extra:
         raise AssertionError(f"feature list out of step: missing {missing}, extra {extra}")
-    return {k: np.asarray(cols[k], dtype=np.float64) for k in V3_FEATURES}
+    names = V3_ALL if extras else V3_FEATURES
+    return {k: np.asarray(cols[k], dtype=np.float64) for k in names}
 
 
 # --------------------------------------------------------------------------------------------
