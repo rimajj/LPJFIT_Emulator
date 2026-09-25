@@ -18,15 +18,16 @@ triaged, a disposition each, into `journal/X/2026-09b.md`); the integrator refre
 session end. Basis of every number: pilot corpus v2-constco2 (200 cells × 30 climates × 1 seed,
 CO₂ 276.59 ppm), 200 of 54,020 tree-bearing cells — no fidelity claim, acceptance untouched.
 
-🆕 **2026-09-25 evening (journal): the continuation test's bar was UNREACHABLE.** A 10-year mean
-of a REAL run lands in band on 0.598 of the 56,986 cells (1 yr 0.498, 250 yr = the rerun 0.859;
-`scripts/diag_window_ceiling.py`), so a perfect restart scores D ≈ −0.26 under the sealed rule.
-Constant-CO₂ donors (PilotBank) + `SpinupRule(match_vegc=True)` to the screen's carbon map, on the
-51-member sample (2,904 cells, dev): in band y1 0.490 (ceiling 0.497), y1-10 0.490 (0.599),
-y21-30 0.476; year-5 kill −9.4 % (worse where stems were added). `…-recipe-v2` sealed: `fail`,
-0.606 vs rerun 0.869 on folds 3-4. **NEXT, each a new exp_id:** (1) a continuation test whose
-reference is a real run on the SAME window (tell the owner: it re-reads "as good as a rerun");
-(2) the global carbon-matched file; (3) the year-5 kill — per-tree output of which stems die.
+🆕 **2026-09-25 (journal).** Owner: a continuation is judged against a real run on the SAME window
+(decision record `20260925-INT-…-same-window`; a real 10-yr window lands in band on 0.598 of all
+cells, 0.622 on folds 3-4; the old 250-yr bar was unreachable). **`X-20260925-continuation-same-
+window` = `fail` (b):** global carbon-matched restart (PilotBank donors + `match_vegc`,
+`runs/spinup-product-v3vegc-global`, sha256 6cef14e0…) continued 30 yr: D −0.129 on folds 3-4
+(0.494 vs 0.622), best null −0.303; **year 1 is real-run grade** (D −0.018; all cells +0.001);
+the loss is the year-5 die-off (678 → 607 PgC). **NEXT: find why placed mid-canopy stems shrink
+from year 1** — NOT inherited counters (`reset_counters` made it worse), NOT crowding
+(`vegc_lever="size"` no better), NOT grass (4 % of carbon, flat). Suspect the per-stem pools a donor
+brings (leaf/sapwood/root, crown) set for its donor stand's light. Needs per-stem output (`ind`).
 
 | experiment | model | bar | best null | ceiling | blind arm |
 |---|---|---|---|---|---|
