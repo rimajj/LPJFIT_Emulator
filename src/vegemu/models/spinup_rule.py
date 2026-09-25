@@ -25,6 +25,10 @@ instead of copying from 1999 is derived:
                     protocol, exactly as the pilot's synth stream solved its control's
     rescale_litter  on, rule "soilc": the template's litter times predicted / template soil carbon
                     (the rule the pilot's bank stage chose, `synth_pilot.LITTER_RULE`)
+    stems_per_patch OPTIONAL, `match_vegc` (off by default, and off the output is unchanged): the
+                    cell's total VegC is pinned to `prediction["vegc_target"]` (gC/m2 of cell, the
+                    model's own `VegC` sum, `corpus.vegc.cell_vegc`) by rescaling the stem count
+                    and re-synthesising, see `match_vegc`
 
 WHAT STAYS 1999 AND IS DISCLOSED, NOT HIDDEN. The restart HEADER (`synth_global` copies it, and its
 `verify` requires it): its year reads 1999 and its global RNG state is the one after 901 draws, not
@@ -51,6 +55,7 @@ import numpy.typing as npt
 from vegemu.binfmt.clm import ClmReader, read_grid
 from vegemu.binfmt.restart import Layout, RestartReader, trees_of
 from vegemu.corpus.state import summarise_cell
+from vegemu.corpus.vegc import cell_vegc
 from vegemu.models import climbuf as cb
 from vegemu.models.synth import (
     MATCH_TRAITS,
@@ -241,6 +246,89 @@ class SpinupReport(SynthReport):
     tmax20: float = math.nan
     albedo_mean: float = math.nan
     climbuf_seed_after: str = ""
+    # `match_vegc` only; NaN / 0 / "" when it is off or the cell is not rescaled.
+    vegc_target: float = math.nan
+    vegc_first: float = math.nan
+    vegc_written: float = math.nan
+    vegc_passes: int = 0
+    vegc_stems_factor: float = math.nan
+    vegc_why: str = ""
+
+
+@dataclass
+class VegcMatch:
+    target: float = math.nan
+    first: float = math.nan
+    written: float = math.nan
+    passes: int = 0
+    stems_factor: float = math.nan
+    why: str = ""
+
+
+def match_vegc(
+    synth: Any,
+    pred: dict[str, float],
+    *,
+    passes: int,
+    tol: float,
+    max_factor: float,
+) -> tuple[dict[str, Any], SynthReport, VegcMatch]:
+    """Synthesise, then rescale `stems_per_patch` until the cell's VegC is `pred["vegc_target"]`.
+
+    WHY THE STEM COUNT. The equilibrium map this rule was built for predicts no carbon: a cell's
+    carbon falls out of how many stems are placed and at what sizes, and that product came out
+    20 % low globally (year 0 of `restart_1699_emulated.lpj`: 0.80 of the stored equilibrium's
+    total), where a dedicated carbon map is within 2 %. The sizes are the map's (height and wood-density
+    quantiles), so the count is the one free lever; a stand's carbon is close to linear in it
+    because the placement draws the same size quantiles whatever the count.
+
+    `synth(pred) -> (rec, rep)` is one synthesis. Grass carbon is the template's and does not move,
+    so the trees are asked for `target - grass`; at or below the grass, the cell gets no tree. At
+    most `passes` re-syntheses, stopping inside `tol` (relative, on the total); the stem count never
+    exceeds `max_factor` times the map's, so a cell whose placed stems carry almost no carbon is
+    reported (`why`), not filled with thousands of saplings. A cell the map calls treeless
+    (`stems_per_patch` 0) is left treeless.
+    """
+    rec, rep = synth(pred)
+    v = cell_vegc(rec)
+    target = pred.get("vegc_target", math.nan)
+    m = VegcMatch(target=target, first=v["total"], written=v["total"])
+    spp0 = float(pred["stems_per_patch"])
+    if not math.isfinite(target):
+        m.why = "no-target"
+        return rec, rep, m
+    if not spp0 > 0:
+        m.why = "treeless-prediction"
+        return rec, rep, m
+    spp = spp0
+    m.why = "passes-exhausted"
+    for _ in range(passes):
+        if abs(v["total"] - target) <= tol * max(target, 1.0):
+            m.why = "matched"
+            break
+        tree_want = target - v["grass"]
+        if tree_want <= 0:
+            spp = 0.0
+        elif v["tree"] > 0:
+            spp = min(spp * tree_want / v["tree"], max_factor * spp0)
+        else:
+            m.why = "no-tree-carbon"
+            break
+        rec, rep = synth({**pred, "stems_per_patch": spp})
+        v = cell_vegc(rec)
+        m.passes += 1
+        if spp == 0.0:
+            m.why = "below-grass"
+            break
+        if spp >= max_factor * spp0:
+            m.why = "capped"
+            break
+    else:
+        if abs(v["total"] - target) <= tol * max(target, 1.0):
+            m.why = "matched"
+    m.written = v["total"]
+    m.stems_factor = spp / spp0
+    return rec, rep, m
 
 
 def _extend(rep: SynthReport, **extra: Any) -> SpinupReport:
@@ -255,6 +343,8 @@ class SpinupRule:
       stop_year           the model year whose buffer is written (1699)
       litter_rule         "soilc" (default), "predicted" or "none"
       min_establish_frac, max_mort_temp   the admission thresholds (the pilot's)
+      match_vegc          pin each cell's VegC to `pred_vegc_target` (off; `match_vegc`), with
+                          vegc_passes (3), vegc_tol (0.02) and vegc_max_factor (4.0)
     Anything else in `--synth-kwargs` is passed to `synthesise_cell`, which must accept it.
     """
 
@@ -270,6 +360,10 @@ class SpinupRule:
         litter_rule: str = LITTER_RULE,
         min_establish_frac: float = ADMIT_MIN_ESTABLISH_FRAC,
         max_mort_temp: float = ADMIT_MAX_MORT_TEMP,
+        match_vegc: bool = False,
+        vegc_passes: int = 3,
+        vegc_tol: float = 0.02,
+        vegc_max_factor: float = 4.0,
         forcing: BlockForcing | None = None,
         **synth_kwargs: Any,
     ) -> None:
@@ -286,6 +380,15 @@ class SpinupRule:
         self.litter_rule = litter_rule
         self.min_establish_frac = float(min_establish_frac)
         self.max_mort_temp = float(max_mort_temp)
+        if vegc_passes < 1 or not 0 < vegc_tol < 1 or not vegc_max_factor >= 1:
+            raise ValueError(
+                f"match_vegc needs passes >= 1, 0 < tol < 1, max_factor >= 1; got "
+                f"{vegc_passes}, {vegc_tol}, {vegc_max_factor}"
+            )
+        self.match_vegc = bool(match_vegc)
+        self.vegc_passes = int(vegc_passes)
+        self.vegc_tol = float(vegc_tol)
+        self.vegc_max_factor = float(vegc_max_factor)
         self.synth_kwargs = dict(synth_kwargs)
         self.template_protocol = cb.STORED_SPINUP
         self.target_protocol = cb.STORED_SPINUP.until(int(stop_year))
@@ -340,26 +443,40 @@ class SpinupRule:
             max_mort_temp=self.max_mort_temp,
         )
         shares, shares_from = predicted_shares(prediction, clim.allowed)
-        pred = {k: v for k, v in prediction.items() if k != "litterc"}
+        pred = {k: v for k, v in prediction.items() if k not in ("litterc", "vegc_target")}
         state = summarise_cell(template, cell, layout)
         lit = litter_target(self.litter_rule, state, prediction)
         if lit is not None:
             pred["litterc"] = lit
-        rec, rep = synthesise_cell(
-            template,
-            pred,
-            pool,
-            layout,
-            cell=cell,
-            template_cell=cell,
-            seed=seed,
-            match_traits=self.match_traits,
-            type_shares=shares,
-            allowed_types=clim.allowed,
-            climbuf=clim.climbuf,
-            rescale_litter=lit is not None,
-            **self.synth_kwargs,
-        )
+
+        def synth(p: dict[str, float]) -> tuple[dict[str, Any], SynthReport]:
+            return synthesise_cell(
+                template,
+                p,
+                pool,
+                layout,
+                cell=cell,
+                template_cell=cell,
+                seed=seed,
+                match_traits=self.match_traits,
+                type_shares=shares,
+                allowed_types=clim.allowed,
+                climbuf=clim.climbuf,
+                rescale_litter=lit is not None,
+                **self.synth_kwargs,
+            )
+
+        if self.match_vegc:
+            want = {**pred, "vegc_target": prediction.get("vegc_target", math.nan)}
+            rec, rep, vm = match_vegc(
+                synth,
+                want,
+                passes=self.vegc_passes,
+                tol=self.vegc_tol,
+                max_factor=self.vegc_max_factor,
+            )
+        else:
+            (rec, rep), vm = synth(pred), VegcMatch()
         ids = np.concatenate(
             [np.asarray(trees_of(p["pftlist"])["id"]) for p in template["stands"][0]["patches"]]
         ).astype(np.int64)
@@ -376,6 +493,7 @@ class SpinupRule:
             tmax20=clim.verdict.temp_max20,
             albedo_mean=float(np.mean(clim.albedo)),
             climbuf_seed_after=",".join(map(str, clim.seed_after)),
+            **{f"vegc_{f.name}": getattr(vm, f.name) for f in fields(VegcMatch)},
         )
 
     def describe(self) -> dict[str, Any]:
@@ -391,6 +509,17 @@ class SpinupRule:
             "litter_rule": self.litter_rule,
             "min_establish_frac": self.min_establish_frac,
             "max_mort_temp": self.max_mort_temp,
+            # Off, the description is what it was before the option existed, so is a plan's.
+            **(
+                {
+                    "match_vegc": True,
+                    "vegc_passes": self.vegc_passes,
+                    "vegc_tol": self.vegc_tol,
+                    "vegc_max_factor": self.vegc_max_factor,
+                }
+                if self.match_vegc
+                else {}
+            ),
             "synth_kwargs": self.synth_kwargs,
         }
 

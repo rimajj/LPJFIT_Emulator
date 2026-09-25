@@ -15,6 +15,7 @@ What must hold:
 
 from __future__ import annotations
 
+import math
 import struct
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,7 @@ from vegemu.binfmt.restart import (
     write_cell,
 )
 from vegemu.corpus.state import summarise_cell
+from vegemu.corpus.vegc import cell_vegc
 from vegemu.models import climbuf as cb
 from vegemu.models import spinup_rule as sr
 from vegemu.models.synth import build_donor_pool
@@ -212,3 +214,54 @@ def test_the_rule_owns_its_options(template: Path) -> None:
     short.temp = short.temp[:, :30]
     with pytest.raises(ValueError, match="rule needs"):
         sr.SpinupRule(template, 0, NCELL, donors=None, forcing=short)
+
+
+def _run_matched(
+    template: Path, cell: int, pred: dict[str, float], **opts: Any
+) -> tuple[dict[str, Any], Any]:
+    reader = RestartReader(template)
+    rule = sr.SpinupRule(template, 0, NCELL, donors=None, forcing=_block(), match_vegc=True, **opts)
+    pool = build_donor_pool(RestartReader(template), [c for c in range(NCELL) if c != cell])
+    with reader:
+        tmpl = reader.read(cell)
+    return rule(tmpl, pred, pool, reader.layout, cell=cell, seed=7)
+
+
+def test_match_vegc_off_changes_nothing(template: Path) -> None:
+    (plain, _rep), _ = _run(template, 0, _prediction())
+    (with_target, rep2), _ = _run(template, 0, _prediction(vegc_target=1.0))
+    assert write_cell(plain, RestartReader(template).layout) == write_cell(
+        with_target, RestartReader(template).layout
+    )
+    assert rep2.vegc_why == "" and math.isnan(rep2.vegc_target)
+    rule = sr.SpinupRule(template, 0, NCELL, donors=None, forcing=_block())
+    assert "match_vegc" not in rule.describe()
+
+
+def test_match_vegc_moves_the_stem_count_toward_the_target(template: Path) -> None:
+    (base, _), _ = _run(template, 1, _prediction())
+    first = cell_vegc(base)["total"]
+    for scale in (2.0, 0.5):
+        want = cell_vegc(base)["grass"] + scale * cell_vegc(base)["tree"]
+        rec, rep = _run_matched(template, 1, _prediction(vegc_target=want), vegc_tol=0.05)
+        got = cell_vegc(rec)["total"]
+        assert rep.vegc_first == pytest.approx(first)
+        assert rep.vegc_written == pytest.approx(got)
+        assert abs(got - want) < abs(first - want), (scale, first, got, want)
+        assert rep.vegc_passes >= 1
+        assert (rep.vegc_stems_factor > 1) == (scale > 1)
+
+
+def test_match_vegc_edges(template: Path) -> None:
+    (base, _), _ = _run(template, 1, _prediction())
+    grass = cell_vegc(base)["grass"]
+    rec, rep = _run_matched(template, 1, _prediction(vegc_target=0.5 * grass))
+    assert rep.vegc_why == "below-grass" and cell_vegc(rec)["tree"] == 0.0
+    _rec, rep = _run_matched(template, 1, _prediction())
+    assert rep.vegc_why == "no-target" and rep.vegc_passes == 0
+    _rec, rep = _run_matched(template, 1, _prediction(vegc_target=1e9), vegc_max_factor=1.5)
+    assert rep.vegc_why == "capped" and rep.vegc_stems_factor == pytest.approx(1.5)
+    _rec, rep = _run_matched(template, 1, _prediction(stems_per_patch=0.0, vegc_target=1e4))
+    assert rep.vegc_why == "treeless-prediction" and rep.vegc_passes == 0
+    with pytest.raises(ValueError, match="match_vegc needs"):
+        sr.SpinupRule(template, 0, NCELL, donors=None, forcing=_block(), vegc_passes=0)
