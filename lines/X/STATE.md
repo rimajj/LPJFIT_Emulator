@@ -18,6 +18,14 @@ triaged, a disposition each, into `journal/X/2026-09b.md`); the integrator refre
 session end. Basis of every number: pilot corpus v2-constco2 (200 cells × 30 climates × 1 seed,
 CO₂ 276.59 ppm), 200 of 54,020 tree-bearing cells — no fidelity claim, acceptance untouched.
 
+🆕 **2026-09-25: the continuation test's year-5 die-off is the CO₂ step** (`journal/X/2026-09b.md`,
+dev diagnostic, 51 of 1,015 members). Continued at 367.26 ppm (the CO₂ restart_1999 was written
+at) instead of 276.59, restart_1999 holds within 0.5 %/yr (vs −29 % in year 5); the emulated file
+drops −5 % (vs −17 %) — its stems are donor copies of 367-ppm trees, plus a residual synthesis
+defect. So `X-20260925-spinup-restart-continuation`'s null arm is no "holds the state" bar, and its
+`fail` says nothing about equilibrium. **Next, each a new exp_id:** a constant-CO₂ null (continue
+the pilot's own v2-constco2 restarts), and the synthesiser's donors from a constant-CO₂ source.
+
 | experiment | model | bar | best null | ceiling | blind arm |
 |---|---|---|---|---|---|
 | warming response `…-warming-response-constco2-resealed` | 0.558968 | 0.257725 | 0.162725 | 0.848545 | 0.362322 |
