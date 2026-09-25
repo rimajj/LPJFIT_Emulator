@@ -25,6 +25,8 @@ drops −5 % (vs −17 %) — its stems are donor copies of 367-ppm trees, plus 
 defect. So `X-20260925-spinup-restart-continuation`'s null arm is no "holds the state" bar, and its
 `fail` says nothing about equilibrium. **Next, each a new exp_id:** a constant-CO₂ null (continue
 the pilot's own v2-constco2 restarts), and the synthesiser's donors from a constant-CO₂ source.
+✅ **Merged 2026-09-25 (`int/score2`):** centred kill tests pass, blind arm scores 0 — response
+0.377 (bar 0.133), composition 0.259 (bar 0.082); soil texture +0.0013 (fail); learning curve +0.034.
 
 | experiment | model | bar | best null | ceiling | blind arm |
 |---|---|---|---|---|---|
