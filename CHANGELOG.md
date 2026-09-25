@@ -8,6 +8,12 @@ Entries are written as `changelog.d/<line>-<slug>.md` fragments and folded in at
 <!-- collated 2026-09-25 from 1 fragment(s) -->
 
 ### Added
+- **The emulated restart can now be built to a predicted vegetation carbon, and the 30-year continuation test turns out to have had an unreachable pass bar.** The restart builder takes a target carbon per cell and adjusts how many trees it places until the cell's carbon matches (`SpinupRule(match_vegc=True)`, off by default). Built from the best carbon map and continued 30 years on 51 of the 1,015 cell ranges (2,904 cells; a development test, not sealed), the share of cells inside the band in years 1-10 rises from 30.8 % to 49.0 %; by years 21-30 it is back to 47.6 % (was 45.8 %), and the year-5 die-off grows from 5.9 % to 9.4 %. A new diagnostic (`scripts/diag_window_ceiling.py`) measured how often a 10-year average of a real run of the original model lands inside the same band: 59.8 % of cells, not the 85.9 % the test compared against (that figure compares two 250-year averages). So even a perfect restart would have failed that test. Against the right ceiling the new file reaches 99 % of attainable in its first year and 82 % over its first decade.
+- **Sealed record of the best vegetation-carbon map** (`X-20260925-spinup-vegc-recipe-v2`): 60.6 % of 20,123 held-out cells inside the band, against 86.9 % for a rerun, a fail (as stated before sealing), and ahead of the earlier recipe (42.6 %) and the best lookup (31.9 %).
+
+<!-- collated 2026-09-25 from 1 fragment(s) -->
+
+### Added
 - **Trees for the emulated restart can now be taken from constant-CO2 forests.** The emulated restart was built from trees copied out of the stored run's 1999 state, which grew at 1999's CO2 level (367 ppm). Run on at the pre-industrial 276.59 ppm, those trees shrank and a mass die-off followed in year 5. A new donor source (`vegemu.models.pilot_donors`) takes the trees instead from the pilot's constant-CO2 runs, picked from the most similar climates outside the cell's own spatial fold. In a test on 51 of the 1,015 cell ranges (3,509 cells), not a sealed experiment, the year-5 loss falls from 16.8 % to 5.9 %. That is about the 5.3 % the old file loses even at its own CO2, so the CO2 part of the die-off is gone. The rest is a separate synthesis defect. Cells in band against the stored equilibrium: 30.8 % over years 1-10 (was 29.8 %) and 45.8 % over years 21-30 (was 41.3 %). A rerun of the model reaches 85.1 %, so this is still far from passing.
 
 <!-- collated 2026-09-25 from 1 fragment(s) -->
