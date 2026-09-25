@@ -18,15 +18,15 @@ triaged, a disposition each, into `journal/X/2026-09b.md`); the integrator refre
 session end. Basis of every number: pilot corpus v2-constco2 (200 cells × 30 climates × 1 seed,
 CO₂ 276.59 ppm), 200 of 54,020 tree-bearing cells — no fidelity claim, acceptance untouched.
 
-🆕 **2026-09-25: the continuation's year-5 die-off is the CO₂ step, and constant-CO₂ donors remove
-it** (journal, dev diagnostics, 51 of 1,015 members). restart_1999 (written at 367.26 ppm) holds at
-its own CO₂; the `pilot_donors:PilotBank` rule (58e860a) cuts the emulated file's year-5 kill from
-−16.8 % to −5.9 % = the residual synthesis defect; in band 0.308 / 0.458 (y1-10 / y21-30) vs a
-rerun's 0.851. So the sealed continuation's null arm is no "holds the state" bar. **Next, each a
-new exp_id:** the global file with PilotBank donors + a sealed re-run of the continuation test;
-the residual year-5 kill (stems shrinking 5 years running); the file starting ~20 % low.
-✅ **Merged 2026-09-25 (`int/score2`):** centred kill tests pass, blind arm scores 0 — response
-0.377 (bar 0.133), composition 0.259 (bar 0.082); soil texture +0.0013 (fail); learning curve +0.034.
+🆕 **2026-09-25 evening (journal): the continuation test's bar was UNREACHABLE.** A 10-year mean
+of a REAL run lands in band on 0.598 of the 56,986 cells (1 yr 0.498, 250 yr = the rerun 0.859;
+`scripts/diag_window_ceiling.py`), so a perfect restart scores D ≈ −0.26 under the sealed rule.
+Constant-CO₂ donors (PilotBank) + `SpinupRule(match_vegc=True)` to the screen's carbon map, on the
+51-member sample (2,904 cells, dev): in band y1 0.490 (ceiling 0.497), y1-10 0.490 (0.599),
+y21-30 0.476; year-5 kill −9.4 % (worse where stems were added). `…-recipe-v2` sealed: `fail`,
+0.606 vs rerun 0.869 on folds 3-4. **NEXT, each a new exp_id:** (1) a continuation test whose
+reference is a real run on the SAME window (tell the owner: it re-reads "as good as a rerun");
+(2) the global carbon-matched file; (3) the year-5 kill — per-tree output of which stems die.
 
 | experiment | model | bar | best null | ceiling | blind arm |
 |---|---|---|---|---|---|
