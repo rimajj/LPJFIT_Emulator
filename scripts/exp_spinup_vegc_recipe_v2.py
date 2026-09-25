@@ -95,7 +95,21 @@ def pinned_tables(prereg: dict[str, Any]) -> tuple[Path, Path | None]:
     return (root, None) if tag == "v3x" else (root, root)
 
 
-def main() -> int:
+def _sealed_nulls(nulls_path: Path, prereg: dict[str, Any]) -> dict[str, Any]:
+    """The nulls arm's per-null details, each held to its sealed value.
+
+    They were measured by an earlier job into ITS own --out, so the model arm reads them BEFORE
+    the fit: a missing file used to surface only after ten minutes of it.
+    """
+    prior: dict[str, Any] = json.loads(nulls_path.read_text())["arm_details"]
+    for nl in prereg["nulls"]:
+        got, want = float(prior[nl["id"]]["D"]), nl["expected"]
+        if abs(got - float(want["value"])) > float(want["tolerance"]):
+            raise SystemExit(f"{nulls_path}: null {nl['id']} D {got} is not its sealed {want}")
+    return prior
+
+
+def main() -> int:  # noqa: PLR0915 -- the two arms in one sequential pass, read top to bottom
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--arm", choices=("nulls", "model"), required=True)
     ap.add_argument("--exp-id", default=DEFAULT_EXP)
@@ -108,6 +122,7 @@ def main() -> int:
         choices=("", "spinup", "pilot"),
         help="nulls arm only: the pool, before a pre-registration exists to name it",
     )
+    ap.add_argument("--nulls", default="", help="model arm: the nulls arm's nulls.json")
     args = ap.parse_args()
 
     prereg: dict[str, Any] = {}
@@ -148,6 +163,8 @@ def main() -> int:
         print(f"wrote {out / 'nulls.json'}")
         return 0
 
+    nulls_path = Path(args.nulls) if args.nulls else out / "nulls.json"
+    prior = _sealed_nulls(nulls_path, prereg)
     recipe = recipe_from(prereg)
     threshold = float(str(prereg["decision_rule"]["pass_if"]).split(">=")[-1])
     d = load(*pinned_tables(prereg))
@@ -169,7 +186,7 @@ def main() -> int:
     model = score(pred[mask][held], sub)
     report["arm_details"] = {"model": model, "sealed_recipe_beside": score(sealed[mask][held], sub)}
     report["fit"] = info
-    prior = json.loads((out / "nulls.json").read_text())["arm_details"]
+    report["nulls_from"] = {"path": str(nulls_path), "sha256": _sha256(nulls_path)}
     report["decision"] = {
         "D": model["D"],
         "threshold": threshold,
