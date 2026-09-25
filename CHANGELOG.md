@@ -5,6 +5,13 @@ Entries are written as `changelog.d/<line>-<slug>.md` fragments and folded in at
 
 ## [Unreleased]
 
+<!-- collated 2026-09-25 from 1 fragment(s) -->
+
+### Added
+- **Both kill tests re-scored so that a model blind to the climate change cannot pass them.** The earlier finding was that a model which knows the starting forest but not the climate change already clears both kill tests' bars. Each place's own average change is now removed before scoring, which makes that blind model score exactly 0 (checked, not assumed). The same models, unchanged, then score 0.377 on how a forest changes (bar 0.133, 44 % of the attainable 0.854) and 0.259 on how its species mix changes (bar 0.082, 30 % of the attainable 0.852), at held-out 15-degree tiles, beating the best information-free competitor at all 29 climate changes. A placebo that pairs the right forcing values with the wrong climate change falls below "no change" in both, so the skill comes from reading the climate change. Pilot only, 200 of 54,020 cells, the same corpus as the original tests: a sharper reading, not a replication (`X-20260924-centred-*`).
+- **Soil texture barely helps the equilibrium map on the pilot** (`X-20260924-equilibrium-soil-ablation`, fail): removing it lowers held-out skill by 0.0013 against a pre-registered 0.015. Three texture classes hold 167 of the 200 pilot cells, so the test has little power; it is no reason to drop texture.
+- **The equilibrium map is still improving when it runs out of training places** (`X-20260924-equilibrium-learning-curve`, pass): with about 40, 80, 120 and 160 training cells per fold the held-out skill is 0.421, 0.522, 0.573 and 0.608; the last quarter adds 0.034 against a bar of 0.020, with no sign of flattening. Nothing beyond 160 cells is extrapolated.
+
 <!-- collated 2026-09-24 from 2 fragment(s) -->
 
 ### Added
