@@ -27,6 +27,20 @@ A SECOND SEED ON A SUBSET -- the replicate. Same stages, `--seed 2 --subset 20`:
     scripts/sbatch_py.sh D-pilot-s2-plan scripts/corpus_pilot.py \\
         --stage plan --version v1 --seed 2 --subset 20
 
+A NEW TABLE SCHEMA FROM EXISTING SPIN-UPS -- no model run at all. `--out-version` reads one
+version's runs and writes the table under another, in the CURRENT schema (`vegemu.corpus.schema`),
+then diffs it column by column against the source table and refuses anything the schema change
+does not explain:
+
+    NCPUS=16 TIME=00:30:00 scripts/sbatch_py.sh D-pilot-v3-decode scripts/corpus_pilot.py \\
+        --stage decode --version v2-constco2 --out-version v3-constco2 --workers 16
+
+A LARGER TIER. `--tier mid` is 1,000 cells x 100 climates, CONSTANT CO2, NESTED in the pilot: its
+cells include all of `pilot-v2-constco2`'s 200 and its climates all of the pilot's 30. Directories
+are named by tier (`mid-<version>`), every later stage takes the same `--tier`, and the build reads
+the CO2 mode, the design and the point count from the PLAN, refusing a command line that disagrees.
+`--co2-ppm X` pins CO2 at another constant level.
+
 WHY IT EXISTS, AND IT IS NOT "more data". The acceptance tolerance is `max(10 %, THE MODEL'S OWN
 TWO-RUN SPREAD)`, and that spread has never been measured on a PERTURBED spin-up -- only on
 present-day climate, from which it is currently transferred. Its median there is exactly 0.100, i.e.
@@ -80,11 +94,15 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
+import shutil
+import socket
 import subprocess
 import sys
 import time
 import traceback
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
@@ -93,14 +111,17 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 import numpy as np
+import numpy.typing as npt
 import polars as pl
 
 from vegemu.binfmt.restart import RestartReader
 from vegemu.corpus import climate as climate_mod
+from vegemu.corpus import schema as schema_mod
 from vegemu.corpus import state as state_mod
-from vegemu.corpus.perturb import DESIGN_SEED, VARS, pilot_design
+from vegemu.corpus.perturb import DESIGN_SEED, VARS, Perturbation, nested_design, pilot_design
 from vegemu.corpus.select import pilot_cells
-from vegemu.paths import paths, scratch
+from vegemu.corpus.soil import SOIL_FEATURES
+from vegemu.paths import path, paths, scratch
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -108,6 +129,47 @@ NCELL = 200
 NPOINT = 30
 SEED = 1
 NSPINUP = 1000
+
+
+@dataclass(frozen=True)
+class Tier:
+    """A corpus tier's defaults. Each is overridable on the command line, and each is RECORDED."""
+
+    ncell: int
+    npoint: int
+    design: str
+    """`pilot` = `pilot_design(npoint)`; `nested` = `nested_design(npoint, base_n=30)`."""
+    nest_in: str | None
+    """The corpus directory whose cells (and design) this tier must contain, or None."""
+    const_co2: bool
+
+
+# ⚠ THE MID TIER IS CONSTANT-CO2 AND NESTED BY DEFAULT, and both are load-bearing. Constant CO2
+# because Product A's target is a settled forest and a CO2 ramp in the last 300 spin-up years makes
+# it a forced transient (`20260915-D-the-spinup-did-converge-*.md`). Nested because a mid tier that
+# re-chose its cells and climates from scratch would share neither with the pilot, so no pilot
+# result could be checked against it at the same place and climate.
+TIERS: dict[str, Tier] = {
+    "pilot": Tier(ncell=NCELL, npoint=NPOINT, design="pilot", nest_in=None, const_co2=False),
+    "mid": Tier(
+        ncell=1000, npoint=100, design="nested", nest_in="pilot-v2-constco2", const_co2=True
+    ),
+}
+NESTED_BASE_NPOINT = 30
+
+# PROJECTIONS, printed by the plan stage and recorded in its provenance -- never measurements of
+# the tier being planned. Basis of each:
+#   SPINUP_CPU_SECONDS   216 CPU-s per 1000-year single-cell spin-up, measured on the pilot
+#                        (integrator, 2026-09-23); pilot-v1 cost 337 core-hours for 6,000, i.e. 202
+#   ALLOCATION_FACTOR    ~1.9x: what one-core-per-member task farms have been billed over the CPU
+#                        they used, unless the members are packed
+#   RUN_DISK_BYTES       ~2.17 MB per run directory (restart, logs, two spin-up outputs), pilot mean
+#   FORCING_SET_BYTES    1,315,530,000 B / 6,000 = 219,255 B per (cell, climate) forcing set,
+#                        measured by pilot-v2-constco2's own build; a replicate seed writes none
+SPINUP_CPU_SECONDS = 216.0
+ALLOCATION_FACTOR = 1.9
+RUN_DISK_BYTES = 2.17e6
+FORCING_SET_BYTES = 219_255
 # One SLURM job per this many single-cell spin-ups. Each member is ~6 minutes, so a shard of 250 is
 # a job of well under an hour -- short enough to requeue cheaply, few enough steps that SLURM
 # launches them all promptly. ⚠ PARTITION=priority is capped at 64 CPU per job, so a shard larger
@@ -139,33 +201,43 @@ def _load(name: str) -> ModuleType:
     return mod
 
 
-def _vdir(version: str, seed: int) -> str:
-    """The per-version directory name.
+def _vdir(version: str, seed: int, tier: str = "pilot") -> str:
+    """The per-version directory name: `<tier>-<version>`, plus `-s<seed>` for a replicate.
 
     ⚠ SEED 1 IS DELIBERATELY UNSUFFIXED. The 6,000 runs of `pilot-v1` are on disk under that exact
     name and three pre-registrations cite a hash computed over them, so adding an `-s1` here would
     silently orphan the corpus this project's only positive result was scored on. A second seed gets
-    its own tree; seed 1's paths are byte-for-byte what they were.
+    its own tree; seed 1's paths are byte-for-byte what they were. The TIER prefix is the same rule:
+    `pilot` keeps every existing path, and a new tier gets its own tree instead of a `pilot-` name.
     """
-    return f"pilot-{version}" if seed == SEED else f"pilot-{version}-s{seed}"
+    if tier not in TIERS:
+        raise ValueError(f"unknown tier {tier!r}; known: {sorted(TIERS)}")
+    return f"{tier}-{version}" if seed == SEED else f"{tier}-{version}-s{seed}"
 
 
-def meta_dir(version: str, seed: int = SEED) -> Path:
-    return scratch("corpus", _vdir(version, seed))
+def meta_dir(version: str, seed: int = SEED, tier: str = "pilot") -> Path:
+    return scratch("corpus", _vdir(version, seed, tier))
 
 
-def manifest_dir(version: str, seed: int = SEED) -> Path:
+def _meta_path(version: str, seed: int = SEED, tier: str = "pilot") -> Path:
+    """`meta_dir` without creating it -- for asking whether a version exists."""
+    return Path(str(paths()["scratch"]["corpus"])) / _vdir(version, seed, tier)
+
+
+def manifest_dir(version: str, seed: int = SEED, tier: str = "pilot") -> Path:
     """Manifests live with the runs: `sbatch_cmodel.sh` writes its task-farm runner beside them."""
-    return scratch("runs", _vdir(version, seed), "manifests")
+    return scratch("runs", _vdir(version, seed, tier), "manifests")
 
 
-def _under(kind: str, version: str, cell: int, point: str, seed: int = SEED) -> Path:
+def _under(
+    kind: str, version: str, cell: int, point: str, *, seed: int = SEED, tier: str = "pilot"
+) -> Path:
     """A per-run directory. `Path`, not `scratch()`: the plan stage must not create 12,000 dirs."""
     root = Path(str(paths()["scratch"]["root"]))
-    return root / kind / _vdir(version, seed) / f"c{cell}" / point
+    return root / kind / _vdir(version, seed, tier) / f"c{cell}" / point
 
 
-def forcing_dir(version: str, cell: int, point: str) -> Path:
+def forcing_dir(version: str, cell: int, point: str, tier: str = "pilot") -> Path:
     """SEED-INDEPENDENT ON PURPOSE, and this is the whole point of a second seed.
 
     The forcing IS the climate. A random seed changes the draws LPJmL-FIT makes, never the input it
@@ -173,26 +245,89 @@ def forcing_dir(version: str, cell: int, point: str) -> Path:
     rebuild of them. Sharing the directory makes that true by construction instead of by assertion,
     and it is why a second seed costs no forcing-generation time at all.
     """
-    return _under("forcing", version, cell, point)
+    return _under("forcing", version, cell, point, tier=tier)
 
 
-def run_dir(version: str, cell: int, point: str, seed: int = SEED) -> Path:
-    return _under("runs", version, cell, point, seed)
+def run_dir(version: str, cell: int, point: str, seed: int = SEED, tier: str = "pilot") -> Path:
+    return _under("runs", version, cell, point, seed=seed, tier=tier)
 
 
 def run_tag(cell: int, point: str, seed: int = SEED) -> str:
     return f"c{cell}-{point}-s{seed}"
 
 
-def constant_co2_path(version: str) -> Path:
-    """Where a constant-CO2 corpus keeps its own CO2 forcing. One file for the whole version."""
-    return scratch("forcing", f"pilot-{version}") / "co2_constant.txt"
+def constant_co2_path(version: str, tier: str = "pilot") -> Path:
+    """Where a constant-CO2 corpus keeps its own CO2 forcing. One file for the whole version.
+
+    A `Path`, not `scratch()`, so naming it creates nothing; the build stage makes the directory.
+    """
+    return (
+        Path(str(paths()["scratch"]["root"]))
+        / "forcing"
+        / _vdir(version, SEED, tier)
+        / ("co2_constant.txt")
+    )
 
 
-def config_path(version: str, cell: int, point: str, seed: int = SEED) -> Path:
+def config_path(version: str, cell: int, point: str, seed: int = SEED, tier: str = "pilot") -> Path:
     """Where `corpus_spinup_config.py` puts this run's config. Named once, used by every stage."""
     tag = run_tag(cell, point, seed)
-    return run_dir(version, cell, point, seed) / f"lpjml_spinup_{tag}.js"
+    return run_dir(version, cell, point, seed, tier) / f"lpjml_spinup_{tag}.js"
+
+
+def input_path(version: str, cell: int, point: str, seed: int = SEED, tier: str = "pilot") -> Path:
+    """The run's input list, written by `corpus_spinup_config.build_input_js` beside its config."""
+    return run_dir(version, cell, point, seed, tier) / f"input_{run_tag(cell, point, seed)}.js"
+
+
+# ------------------------------------------------------------------------------------------------
+# CO2: which mode a plan is in, said once, read by every later stage
+# ------------------------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Co2:
+    """A plan's CO2 forcing. `ppm` is None exactly when the mode is transient."""
+
+    constant: bool
+    ppm: float | None
+
+    @classmethod
+    def of_provenance(cls, prov: dict[str, Any]) -> Co2:
+        """What a plan recorded. A plan from before `co2_ppm` existed and was constant is 276.59:
+        that is the only constant level any such plan was ever built at."""
+        constant = bool(prov.get("co2_constant", False))
+        if not constant:
+            return cls(False, None)
+        ppm = prov.get("co2_ppm")
+        return cls(True, float(ppm) if ppm is not None else _cfg().CO2_PREINDUSTRIAL_PPM)
+
+    def describe(self, version: str, tier: str) -> str:
+        if self.constant:
+            return f"CONSTANT {self.ppm} ppm, own forcing file ({constant_co2_path(version, tier)})"
+        return (
+            "INHERITED FROM THE GROUND TRUTH AND THEREFORE TRANSIENT: "
+            "global_co2_ann_1700_2022.txt over model years 1000-1999, so the last 300 spin-up "
+            "years carry the historical CO2 rise 276.59 -> 367.26 ppm. Never PERTURBED and never "
+            "written by us, and identical in every run, so it confounds no contrast between design "
+            "points -- but the state is NOT an equilibrium under constant CO2 "
+            "(20260915-D-the-spinup-did-converge-the-late-rise-is-transient-co2.md)."
+        )
+
+
+def co2_from_cli(const_co2: bool | None, co2_ppm: float | None) -> Co2 | None:
+    """What the command line asked for, or None if it said nothing. `--co2-ppm` implies constant."""
+    if co2_ppm is not None:
+        if const_co2 is False:
+            raise SystemExit("--transient-co2 and --co2-ppm contradict each other")
+        return Co2(True, float(co2_ppm))
+    if const_co2 is None:
+        return None
+    return Co2(True, _cfg().CO2_PREINDUSTRIAL_PPM) if const_co2 else Co2(False, None)
+
+
+def _cfg() -> ModuleType:
+    return _load("corpus_spinup_config")
 
 
 # ------------------------------------------------------------------------------------------------
@@ -200,7 +335,89 @@ def config_path(version: str, cell: int, point: str, seed: int = SEED) -> Path:
 # ------------------------------------------------------------------------------------------------
 
 
-def stage_plan(
+def _design(kind: str, npoint: int) -> list[Perturbation]:
+    """The design a plan names, regenerated from its kind and size -- never from a CSV."""
+    if kind == "pilot":
+        return pilot_design(npoint)
+    if kind == "nested":
+        return nested_design(npoint, base_n=NESTED_BASE_NPOINT)
+    raise ValueError(f"unknown design kind {kind!r}; known: pilot, nested")
+
+
+def _plan_design(prov: dict[str, Any]) -> tuple[str, int, list[Perturbation]]:
+    """`(kind, npoint, design)` as a plan recorded them; one older than `design_kind` is pilot."""
+    kind = str(prov.get("design_kind", "pilot"))
+    npoint = int(prov["npoint"])
+    return kind, npoint, _design(kind, npoint)
+
+
+def _nesting(nest_in: str | None) -> tuple[list[int], Path | None]:
+    """The cells an earlier corpus directory ran, and that directory, or `([], None)`."""
+    if not nest_in:
+        return [], None
+    base = Path(str(paths()["scratch"]["corpus"])) / nest_in
+    cells_csv = base / "cells.csv"
+    if not cells_csv.is_file():
+        raise SystemExit(f"--nest-in {nest_in}: no {cells_csv}; nothing to nest in")
+    return [int(c) for c in pl.read_csv(cells_csv)["cell"].to_list()], base
+
+
+def _check_design_nests(design: list[Perturbation], base_csv: Path) -> int:
+    """Every point of the earlier tier's design.csv is in `design`, in order, coefficient for
+    coefficient. Returns how many. The regeneration is what runs, so it is what is checked."""
+    base = pl.read_csv(base_csv)
+    if base.height > len(design):
+        raise SystemExit(
+            f"{base_csv} holds {base.height} points; the new design only {len(design)}"
+        )
+    for i, row in enumerate(base.iter_rows(named=True)):
+        p = design[i]
+        got = (p.name, p.dtemp, p.fprec, p.sprec, p.frad, p.fiav)
+        want = (row["point"], row["dtemp_k"], row["fprec"], row["sprec"], row["frad"], row["fiav"])
+        if got != want:
+            raise SystemExit(
+                f"design point {i} is {got}, but the tier it must nest in ran {want} ({base_csv}). "
+                "A nested design that does not reproduce its base exactly nests nothing."
+            )
+    return base.height
+
+
+def _projection(nrun: int, nforcing: int) -> dict[str, Any]:
+    """Cost and disk of a plan, from the pilot's measured unit costs. A PROJECTION, and says so."""
+    cpu_h = nrun * SPINUP_CPU_SECONDS / 3600.0
+    return {
+        "is_projection": True,
+        "basis": (
+            f"{SPINUP_CPU_SECONDS:g} CPU-s per spin-up and {RUN_DISK_BYTES / 1e6:g} MB per run "
+            f"directory (pilot means), {FORCING_SET_BYTES:,} B per forcing set (pilot-v2-constco2 "
+            f"build), x{ALLOCATION_FACTOR:g} allocated over used unless members are packed"
+        ),
+        "spinups": nrun,
+        "forcing_sets_written": nforcing,
+        "cpu_core_hours": round(cpu_h, 1),
+        "allocated_core_hours_unpacked": round(cpu_h * ALLOCATION_FACTOR, 1),
+        "run_disk_gb": round(nrun * RUN_DISK_BYTES / 1e9, 1),
+        "forcing_disk_gb": round(nforcing * FORCING_SET_BYTES / 1e9, 1),
+    }
+
+
+def _plan_schema(version: str, seed: int, tier: str) -> int:
+    """The table schema a (re-)planned version decodes under.
+
+    FIXED AT A VERSION'S FIRST PLAN. Re-planning an existing version keeps its recorded schema --
+    otherwise re-running the plan stage over `pilot-v2-constco2` would silently promote it to schema
+    3, and its next decode would overwrite a hash-pinned table with a different one. A replicate
+    seed inherits seed 1's for the same reason: the pair is only a pair if both halves are decoded
+    alike. Only a genuinely new version gets `schema.CURRENT`.
+    """
+    for d in (_meta_path(version, seed, tier), _meta_path(version, SEED, tier)):
+        prov = d / "provenance.json"
+        if prov.is_file():
+            return schema_mod.of_provenance(json.loads(prov.read_text()))
+    return schema_mod.CURRENT
+
+
+def stage_plan(  # noqa: PLR0912, PLR0915 -- one flat pass: choose, write, record, report
     version: str,
     ncell: int,
     npoint: int,
@@ -208,11 +425,50 @@ def stage_plan(
     *,
     seed: int = SEED,
     subset: int = 0,
-    const_co2: bool = False,
+    co2: Co2 | None = None,
+    tier: str = "pilot",
+    design_kind: str = "pilot",
+    nest_in: str | None = None,
+    max_per_tile: int | None = None,
 ) -> int:
-    out = meta_dir(version, seed)
-    sel = pilot_cells(ncell)
-    design = pilot_design(npoint)
+    co2 = co2 or Co2(False, None)
+    out = meta_dir(version, seed, tier)
+    for d in (out, _meta_path(version, SEED, tier)):
+        existing = d / "provenance.json"
+        if existing.is_file() and json.loads(existing.read_text()).get("derived_from"):
+            raise SystemExit(f"{d.name} is a re-decode of another version; plan the source instead")
+    # ⚠ A PLAN MADE BEFORE HASH SCHEME 2 IS NEVER RE-PLANNED IN PLACE. Sealed pre-registrations cite
+    # such a version's `plan_sha256` under the OLD formula (`pilot-v2-constco2`: `bad787ad...`), and
+    # a re-plan here would rewrite that key under the new one -- the directory would stop matching
+    # every citation of it, although neither its cells nor its climates changed. Under scheme 1 a
+    # re-plan was harmless because it reproduced the same hash; now it cannot.
+    here = out / "provenance.json"
+    if here.is_file() and "plan_hash_scheme" not in json.loads(here.read_text()):
+        raise SystemExit(
+            f"{out.name} was planned under plan-hash scheme 1 and its plan_sha256 is cited by that "
+            "value; re-planning it would rewrite the hash under scheme 2. Plan a new version."
+        )
+    # ⚠ A REPLICATE TAKES ITS FIRST SEED'S CO2 AND CLIMATES, OR IT IS NOT A REPLICATE. The build now
+    # reads the CO2 mode from THIS plan, so a seed-2 plan made without `--const-co2` under a
+    # constant-CO2 seed 1 builds transient-CO2 configs, verify passes them against their own plan,
+    # and the "two-seed spread" then mixes the seed with a CO2 ramp. Refused here, before any file
+    # is written, for the same reason `_plan_schema` makes a replicate inherit seed 1's schema.
+    first = _meta_path(version, SEED, tier) / "provenance.json"
+    if seed != SEED and first.is_file():
+        first_prov = json.loads(first.read_text())
+        first_co2 = Co2.of_provenance(first_prov)
+        first_kind, first_npoint = str(first_prov.get("design_kind", "pilot")), first_prov["npoint"]
+        if co2 != first_co2 or (design_kind, npoint) != (first_kind, first_npoint):
+            raise SystemExit(
+                f"seed {seed} of {version} must replicate seed {SEED}, which was planned with "
+                f"{first_co2} and a {first_npoint}-point {first_kind} design; this plan asks for "
+                f"{co2} and a {npoint}-point {design_kind} design. Give the same CO2 flags "
+                f"(seed {SEED}: {first_prov.get('co2')})."
+            )
+    schema = _plan_schema(version, seed, tier)
+    nest_cells, nest_dir = _nesting(nest_in)
+    sel = pilot_cells(ncell, include=nest_cells, max_per_tile=max_per_tile)
+    design = _design(design_kind, npoint)
     if design[0].name != "control" or not design[0].is_neutral:
         raise AssertionError("design point one must be the exactly-neutral control")
     if any(p.hold_huss_diagnostic for p in design):
@@ -222,6 +478,18 @@ def stage_plan(
         )
 
     cells = sel.cells()
+    # ⚠ REFUSE A SHORT SELECTION HERE TOO. `pilot_cells` already raises, but the plan is what a
+    # campaign is launched from, so the count it promises is asserted where it is written.
+    if len(cells) != ncell:
+        raise SystemExit(f"asked for {ncell} cells, the selection holds {len(cells)}; refusing")
+    lost = sorted(set(nest_cells) - set(cells))
+    if lost:
+        raise SystemExit(
+            f"{len(lost)} cells of {nest_in} are missing from the selection: {lost[:5]}"
+        )
+    nested_points = 0
+    if nest_dir is not None and design_kind == "nested":
+        nested_points = _check_design_nests(design, nest_dir / "design.csv")
     # ⚠ A SUBSET IS AN EVENLY SPACED SAMPLE OF THE FULL SELECTION, NEVER A RE-SELECTION AND NEVER
     # A PREFIX.
     #
@@ -244,53 +512,59 @@ def stage_plan(
         cells = cells[::step][:subset]
     sel.table.write_parquet(out / "cells.parquet")
     sel.table.write_csv(out / "cells.csv")
-    pl.DataFrame(
-        [
-            {
-                "point": p.name,
-                "dtemp_k": p.dtemp,
-                "fprec": p.fprec,
-                "sprec": p.sprec,
-                "frad": p.frad,
-                "fiav": p.fiav,
-                "kind": "control"
-                if p.is_neutral
-                else ("core" if p.name.startswith("core_") else "lhs"),
-            }
-            for p in design
-        ]
-    ).write_csv(out / "design.csv")
+    design_rows = [
+        {
+            "point": p.name,
+            "dtemp_k": p.dtemp,
+            "fprec": p.fprec,
+            "sprec": p.sprec,
+            "frad": p.frad,
+            "fiav": p.fiav,
+            "kind": "control"
+            if p.is_neutral
+            else ("core" if p.name.startswith("core_") else "lhs"),
+        }
+        for p in design
+    ]
+    if design_kind == "nested":
+        # Only a nested design gains the column, so a pilot design.csv -- and the hash over it --
+        # is byte-for-byte what it always was.
+        for i, row in enumerate(design_rows):
+            row["base"] = i < NESTED_BASE_NPOINT
+    pl.DataFrame(design_rows).write_csv(out / "design.csv")
 
     rows = [
         {
             "name": run_tag(cell, p.name, seed),
             "cell": cell,
             "point": p.name,
-            "config": str(config_path(version, cell, p.name, seed)),
-            "run_dir": str(run_dir(version, cell, p.name, seed)),
-            "forcing": str(forcing_dir(version, cell, p.name)),
+            "config": str(config_path(version, cell, p.name, seed, tier)),
+            "run_dir": str(run_dir(version, cell, p.name, seed, tier)),
+            "forcing": str(forcing_dir(version, cell, p.name, tier)),
         }
         for cell in cells
         for p in design
     ]
     pl.DataFrame(rows).write_csv(out / "runs.csv")
 
-    mdir = manifest_dir(version, seed)
+    mdir = manifest_dir(version, seed, tier)
     for old in sorted(mdir.glob("manifest_s*.tsv")):
         old.unlink()
     shards: list[Path] = []
     for i in range(0, len(rows), shard_size):
         chunk = rows[i : i + shard_size]
-        path = mdir / f"manifest_s{i // shard_size:02d}.tsv"
-        path.write_text(
+        mpath = mdir / f"manifest_s{i // shard_size:02d}.tsv"
+        mpath.write_text(
             "".join(f"{r['name']}\t{r['config']}\t{r['run_dir']}\n" for r in chunk), "utf-8"
         )
-        shards.append(path)
+        shards.append(mpath)
 
-    prov = {
+    nfree = sum(1 for p in design if p.name.startswith("lhs"))
+    projection = _projection(len(rows), 0 if seed != SEED else len(cells) * len(design))
+    prov: dict[str, Any] = {
         "created_utc": datetime.now(UTC).isoformat(timespec="seconds"),
         "built_by": "scripts/corpus_pilot.py --stage plan",
-        "tier": "pilot",
+        "tier": tier,
         "corpus_version": version,
         "git_commit": _git_commit(),
         "nrun": len(rows),
@@ -298,6 +572,8 @@ def stage_plan(
         "npoint": len(design),
         "seed": seed,
         "nspinup": NSPINUP,
+        "schema": schema,
+        "schema_note": schema_mod.SCHEMAS[schema],
         # A second seed is a REPLICATE, not a corpus. It exists to measure the model's own two-run
         # spread on PERTURBED climates -- which nobody has ever measured, while the acceptance
         # tolerance `max(10 %, that spread)` depends on it -- so it must never be concatenated onto
@@ -310,9 +586,9 @@ def stage_plan(
             "ncell_full_selection": len(all_cells),
             "shares_forcing": True,
             "note": (
-                "same cells, same 30 climates, same config, SAME forcing bytes; only "
+                f"same cells, same {len(design)} climates, same config, SAME forcing bytes; only "
                 f'"random_seed" differs ({SEED} -> {seed}). Its purpose is the two-seed '
-                "spread of a PERTURBED spin-up, which the pilot's single seed cannot give."
+                "spread of a PERTURBED spin-up, which a single seed cannot give."
             ),
         },
         "spinup_note": (
@@ -321,62 +597,106 @@ def stage_plan(
             "(docs/decisions/20260908-D-spinup-is-not-converged.md)."
         ),
         "design_seed": DESIGN_SEED,
+        "design_kind": design_kind,
+        "design_base_npoint": NESTED_BASE_NPOINT if design_kind == "nested" else None,
         "design_shared_across_cells": True,
         "design_note": (
-            "the same 30 climates at every cell, which is what makes a held-out perturbation LEVEL "
-            "a meaningful test; the cost is that the five-dimensional axis space is sampled at 18 "
-            "free points, not 200 x 18"
+            f"the same {len(design)} climates at every cell, which is what makes a held-out "
+            "perturbation LEVEL a meaningful test; the cost is that the five-dimensional axis "
+            f"space is sampled at {nfree} free points, not {len(all_cells)} x {nfree}"
         ),
+        "nested_in": None
+        if nest_dir is None
+        else {
+            "corpus_dir": nest_in,
+            "cells": len(nest_cells),
+            "cells_all_included": True,
+            "design_points_reproduced": nested_points,
+            "cells_csv_sha256": sha256_of(nest_dir / "cells.csv"),
+            "design_csv_sha256": sha256_of(nest_dir / "design.csv"),
+        },
         "selection": sel.as_dict(),
         "base_window": [1970, 1999],
         # ⚠ "untouched" IS NOT "constant", and this key used to say only the first. The ground
         # truth's CO2 input is transient (1700-2022) and the spin-up runs model years 1000-1999, so
         # an untouched corpus carries a +32.8 % CO2 rise over its last 300 years.
-        "co2": (
-            f"CONSTANT {_load('corpus_spinup_config').CO2_PREINDUSTRIAL_PPM} ppm, own forcing file "
-            f"({constant_co2_path(version)})"
-            if const_co2
-            else "INHERITED FROM THE GROUND TRUTH AND THEREFORE TRANSIENT: "
-            "global_co2_ann_1700_2022.txt over model years 1000-1999, so the last 300 spin-up "
-            "years carry the historical CO2 rise 276.59 -> 367.26 ppm. Never PERTURBED and never "
-            "written by us, and identical in every run, so it confounds no contrast between design "
-            "points -- but the state is NOT an equilibrium under constant CO2 "
-            "(20260915-D-the-spinup-did-converge-the-late-rise-is-transient-co2.md)."
-        ),
-        "co2_constant": const_co2,
+        "co2": co2.describe(version, tier),
+        "co2_constant": co2.constant,
+        "co2_ppm": co2.ppm,
+        "co2_file": str(constant_co2_path(version, tier)) if co2.constant else None,
         "shards": [str(p) for p in shards],
         "shard_size": shard_size,
         "sources": _source_provenance(),
         "binary": _binary_provenance(),
+        "projection": projection,
+        "plan_hash_scheme": 2,
+        "design_sha256": "",
         "plan_sha256": "",
     }
-    # The hash a pre-registration cites. Over the PLAN -- the cell list and the design -- and the
-    # identity of every source file, not over the 11.7 GB inputs themselves: hashing five global
-    # `.clm` files would read 60 GB to restate what size and mtime already pin down. Said plainly
-    # here rather than left for a reader to assume it is a content hash of everything.
-    prov["plan_sha256"] = hashlib.sha256(
+    # TWO HASHES, BECAUSE THEY ANSWER TWO QUESTIONS.
+    #
+    # `design_sha256` is what `plan_sha256` used to be, formula unchanged: the cell list, the design
+    # and the identity of every source file -- not the 11.7 GB inputs themselves, since hashing five
+    # global `.clm` files would read 60 GB to restate what size and mtime already pin down. It is
+    # equal for any two plans over the same cells and climates, which is exactly the guarantee the
+    # v1-vs-v2 comparisons cite ("same 200 cells, same 30 points, CO2 the only difference"). For
+    # every plan made before scheme 2 it IS the recorded `plan_sha256`.
+    #
+    # `plan_sha256` now covers everything that makes two plans produce different runs: that, plus
+    # the CO2 mode and level, the seed, the cells actually run (a subset is not in cells.csv), the
+    # spin-up length and the table schema. Under scheme 1 a seed-2 replicate and a constant-CO2
+    # re-run both carried their seed-1 transient twin's hash -- one hash for different corpora.
+    prov["design_sha256"] = hashlib.sha256(
         (out / "cells.csv").read_bytes()
         + (out / "design.csv").read_bytes()
         + json.dumps(prov["sources"], sort_keys=True).encode()
     ).hexdigest()
+    terms = {
+        "design_sha256": prov["design_sha256"],
+        "co2_constant": co2.constant,
+        "co2_ppm": co2.ppm,
+        "seed": seed,
+        "run_cells": cells,
+        "nspinup": NSPINUP,
+        "schema": schema,
+        "plan_hash_scheme": 2,
+    }
+    prov["plan_sha256"] = hashlib.sha256(json.dumps(terms, sort_keys=True).encode()).hexdigest()
     (out / "provenance.json").write_text(json.dumps(prov, indent=2, sort_keys=True) + "\n", "utf-8")
 
-    print(f"pilot corpus {version}: {len(cells)} cells x {len(design)} climates = {len(rows)} runs")
+    print(
+        f"{tier} corpus {version}: {len(cells)} cells x {len(design)} climates = {len(rows)} runs"
+    )
     print(f"  eligible tree-bearing cells   {sel.eligible}")
     print(
         f"  populated {int(sel.as_dict()['tile_degrees'])}-degree tiles      "
         f"{sel.tiles_populated}, of which covered {sel.tiles_covered}"
     )
+    print(f"  per-tile cap                  {sel.max_per_tile}")
     for stage, count in sorted(sel.as_dict()["by_stage"].items()):
         print(f"  cells chosen by {stage:12s}  {count}")
+    if nest_dir is not None:
+        print(
+            f"  nested in {nest_in}: all {len(nest_cells)} of its cells included"
+            + (f", its {nested_points} climates reproduced exactly" if nested_points else "")
+        )
     print(
-        f"  design: {sum(1 for p in design if p.is_neutral)} control, "
+        f"  design ({design_kind}): {sum(1 for p in design if p.is_neutral)} control, "
         f"{sum(1 for p in design if p.name.startswith('core_'))} factorial core, "
-        f"{sum(1 for p in design if p.name.startswith('lhs'))} hypercube"
+        f"{nfree} hypercube"
     )
-    print(f"  plan_sha256 {prov['plan_sha256']}")
-    print(f"  tables      {out}")
-    print(f"  manifests   {len(shards)} shards of <= {shard_size} in {mdir}")
+    print(f"  co2           {prov['co2']}")
+    print(f"  schema        {schema} -- {schema_mod.SCHEMAS[schema]}")
+    print(f"  design_sha256 {prov['design_sha256']}")
+    print(f"  plan_sha256   {prov['plan_sha256']}")
+    print(f"  tables        {out}")
+    print(f"  manifests     {len(shards)} shards of <= {shard_size} in {mdir}")
+    print(
+        f"  PROJECTED (not measured): {projection['cpu_core_hours']:,} CPU core-hours, "
+        f"~{projection['allocated_core_hours_unpacked']:,} allocated unpacked; "
+        f"{projection['run_disk_gb']:,} GB of runs + "
+        f"{projection['forcing_disk_gb']:,} GB of forcing"
+    )
     if shard_size > 64:
         print(
             "  ⚠ a shard larger than 64 must go to PARTITION=standard; priority is capped at "
@@ -413,19 +733,41 @@ def _source_provenance() -> dict[str, Any]:
     return out
 
 
+def _binary_key() -> str:
+    """The `config/paths.yaml` key of the build the spin-ups will run: `LPJ_BINARY_KEY`, as
+    `sbatch_cmodel.sh` resolves it, default `lpjml.binary`. A key, never a path, for the same
+    reason the wrapper gives: a run can only use a binary the provenance file already knows."""
+    key = os.environ.get("LPJ_BINARY_KEY", "lpjml.binary")
+    if not key.startswith("lpjml."):
+        raise SystemExit(
+            f"LPJ_BINARY_KEY must be a config/paths.yaml key under lpjml., got {key!r}"
+        )
+    return key
+
+
 def _binary_provenance() -> dict[str, Any]:
-    """Which LPJmL-FIT build will run. Two builds are never byte-identical, so this is recorded."""
-    p = Path(str(paths()["lpjml"]["binary"]))
+    """Which LPJmL-FIT build will run. Two builds are never byte-identical, so this is recorded.
+
+    ⚠ IT HONOURS `LPJ_BINARY_KEY`, and used not to: it always recorded `lpjml.binary`, so a
+    campaign submitted with `LPJ_BINARY_KEY=lpjml.binary_pristine` would have carried the WRONG
+    build in its provenance. The key must be exported for the plan job AND the spin-up jobs alike;
+    the wrapper's ledger row records the latter.
+    """
+    key = _binary_key()
+    p = path(key)
     st = p.stat()
+    built = datetime.fromtimestamp(st.st_mtime, UTC)
     return {
+        "key": key,
         "path": str(p),
         "bytes": st.st_size,
-        "mtime_utc": datetime.fromtimestamp(st.st_mtime, UTC).isoformat(timespec="seconds"),
+        "mtime_utc": built.isoformat(timespec="seconds"),
         "version": str(paths()["lpjml"]["version"]),
         "note": (
             "generate the WHOLE corpus with ONE binary. The stored historical ground truth came "
-            "from the 2026-02-05 build; this is the 2026-08-12 one, so corpus runs are comparable "
-            "to each other and NOT to the stored global output (MEMORY.md:subset-diverges)."
+            f"from the 2026-02-05 build; this one ({key}) was built {built.date()}, so corpus runs "
+            "are comparable to each other and NOT to the stored global output unless the dates "
+            "agree (MEMORY.md:subset-diverges)."
         ),
     }
 
@@ -435,7 +777,11 @@ def _binary_provenance() -> dict[str, Any]:
 # ------------------------------------------------------------------------------------------------
 
 
-def _build_cell(args: tuple[str, int, int, int, bool]) -> dict[str, Any]:
+# One build job: (version, tier, cell, design kind, npoint, seed, constant-CO2 file or "").
+BuildJob = tuple[str, str, int, str, int, int, str]
+
+
+def _build_cell(args: BuildJob) -> dict[str, Any]:
     """One cell: read its baseline once, then write all `npoint` forcing sets and configs.
 
     Runs in a worker process, so it imports what it needs itself and returns only small summaries.
@@ -444,24 +790,24 @@ def _build_cell(args: tuple[str, int, int, int, bool]) -> dict[str, Any]:
     at best redo work and at worst race a concurrent reader of the corpus the pilot is scored on.
     The files are required to be there already and are checked, never regenerated.
     """
-    version, cell, npoint, seed, const_co2 = args
+    version, tier, cell, design_kind, npoint, seed, co2_path = args
     perturb = _load("corpus_perturb_clm")
     cfgmod = _load("corpus_spinup_config")
-    design = pilot_design(npoint)
+    design = _design(design_kind, npoint)
     replicate = seed != SEED
-    co2_file = constant_co2_path(version) if const_co2 else None
+    co2_file = Path(co2_path) if co2_path else None
 
     # The one read that must not be repeated per point: the 30-year baseline block plus the
     # calibration contrast out of the scenario leg. A replicate reads no baseline at all.
     cb = None if replicate else perturb.load_base(range(cell, cell + 1))
     wrote: list[dict[str, Any]] = []
     for pert in design:
-        fdir = forcing_dir(version, cell, pert.name)
+        fdir = forcing_dir(version, cell, pert.name, tier)
         if replicate:
             record = _existing_forcing(fdir, perturb)
         else:
             record = perturb.write_point(cb, pert, fdir)
-        rdir = run_dir(version, cell, pert.name, seed)
+        rdir = run_dir(version, cell, pert.name, seed, tier)
         (rdir / "output").mkdir(parents=True, exist_ok=True)
         (rdir / "restart").mkdir(parents=True, exist_ok=True)
         tag = run_tag(cell, pert.name, seed)
@@ -503,57 +849,122 @@ def _existing_forcing(fdir: Path, perturb: ModuleType) -> dict[str, Any]:
     return {"files": files, "diagnostics": {"tas_ann_c": None, "pr_ann_mm": None}}
 
 
-def _write_co2_if_constant(version: str, const_co2: bool) -> None:
-    """Write this version's constant-CO2 forcing once, before the workers fan out.
+def _write_co2_if_constant(version: str, tier: str, co2: Co2) -> str:
+    """Write this version's constant-CO2 forcing once, before the workers fan out; its path or "".
 
     In the build stage rather than the plan stage because the plan deliberately creates no
     directories, and in the PARENT rather than in `_build_cell` because 20 workers writing the same
     file is a race with no upside.
+
+    ⚠ AN EXISTING FILE IS CHECKED, NOT REWRITTEN. A replicate seed builds while seed 1's spin-ups
+    may still be reading this file, and a rewrite truncates it first -- a run opening it in that
+    instant reads an empty CO2 input. Same bytes: left alone. Different bytes: refused, because the
+    two seeds would then not share a CO2 path.
+
+    ⚠ THE CANDIDATE NAME IS UNIQUE PER CALL. `--shard/--nshard` builds run as concurrent jobs, and
+    with one fixed candidate name two shards wrote, compared, renamed and unlinked THE SAME file:
+    the second shard's read or unlink then found it gone and the shard died before building a cell.
+    Each call now writes its own temporary file and `os.replace`s it into place, which is atomic, so
+    two shards racing to create the file both land identical bytes and a reader never sees half.
     """
-    if not const_co2:
-        return
-    cfgmod = _load("corpus_spinup_config")
-    written = cfgmod.write_constant_co2(constant_co2_path(version))
-    print(f"constant CO2 forcing: {written}  ({cfgmod.CO2_PREINDUSTRIAL_PPM} ppm, every year)")
+    if not co2.constant:
+        return ""
+    cfgmod = _cfg()
+    dest = constant_co2_path(version, tier)
+    assert co2.ppm is not None
+    # Host AND pid: shards run on different nodes, where pids repeat. Not `mkstemp`, whose 0600 mode
+    # would survive the rename and make the version's CO2 input unreadable to the group.
+    fresh = dest.with_name(f".{dest.name}.{socket.gethostname()}.{os.getpid()}.candidate")
+    try:
+        cfgmod.write_constant_co2(fresh, ppm=co2.ppm)
+        if dest.is_file():
+            if dest.read_bytes() != fresh.read_bytes():
+                raise SystemExit(
+                    f"{dest} exists and differs from a {co2.ppm} ppm file. This version's runs "
+                    "would not share one CO2 path; refusing to overwrite it."
+                )
+            print(f"constant CO2 forcing: {dest}  ({co2.ppm} ppm) -- already present, identical")
+        else:
+            os.replace(fresh, dest)
+            print(f"constant CO2 forcing: {dest}  ({co2.ppm} ppm, every year the spin-up reads)")
+    finally:
+        fresh.unlink(missing_ok=True)
+    return str(dest)
 
 
-def _build_cell_guarded(args: tuple[str, int, int, int, bool]) -> dict[str, Any]:
+def _build_cell_guarded(args: BuildJob) -> dict[str, Any]:
     try:
         return _build_cell(args)
     # One bad cell must not lose the other 199, so the traceback is returned rather than raised --
     # and `stage_build` exits non-zero on any of them, so a partial corpus is never silently green.
     except Exception:
-        return {"cell": args[1], "error": traceback.format_exc(limit=6)}
+        return {"cell": args[2], "error": traceback.format_exc(limit=6)}
 
 
-def stage_build(
+def _read_plan(version: str, seed: int, tier: str) -> dict[str, Any]:
+    """The plan's provenance, refusing a tier the plan was not made for."""
+    prov_path = _meta_path(version, seed, tier) / "provenance.json"
+    if not prov_path.is_file():
+        raise SystemExit(f"no plan at {prov_path}: run --stage plan first (same --tier/--seed)")
+    prov: dict[str, Any] = json.loads(prov_path.read_text())
+    planned = str(prov.get("tier", "pilot"))
+    if planned != tier:
+        raise SystemExit(f"{prov_path} was planned as tier {planned!r}, not {tier!r}")
+    return prov
+
+
+def stage_build(  # noqa: PLR0912 -- the plan-versus-CLI refusals, then one pass
     version: str,
     workers: int,
     shard: int,
     nshard: int,
-    npoint: int,
+    npoint: int | None = None,
     *,
     seed: int = SEED,
-    const_co2: bool = False,
+    co2: Co2 | None = None,
+    tier: str = "pilot",
 ) -> int:
-    out = meta_dir(version, seed)
-    _write_co2_if_constant(version, const_co2)
+    """⚠ THE PLAN DECIDES, THE COMMAND LINE MAY ONLY AGREE. The CO2 mode, the design and the point
+    count are read from the plan's provenance. They used to come from the command line, so a build
+    that forgot `--const-co2` would have written TRANSIENT-CO2 configs under a plan that says
+    constant, and every later stage would have believed the plan."""
+    out = meta_dir(version, seed, tier)
+    prov = _read_plan(version, seed, tier)
+    if prov.get("derived_from"):
+        raise SystemExit(
+            f"{out.name} is a re-decode of {prov['derived_from']['corpus_dir']}: it has no "
+            "spin-ups of its own to build. Build the source version."
+        )
+    planned_co2 = Co2.of_provenance(prov)
+    if co2 is not None and co2 != planned_co2:
+        raise SystemExit(
+            f"the command line asks for {co2}, the plan says {planned_co2} ({prov['co2']}). "
+            "Re-plan, or drop the flag: the build takes the CO2 mode from the plan."
+        )
+    design_kind, planned_npoint, _ = _plan_design(prov)
+    if npoint is not None and npoint != planned_npoint:
+        raise SystemExit(f"--npoint {npoint} but the plan has {planned_npoint} climates")
+    npoint = planned_npoint
+    co2_path = _write_co2_if_constant(version, tier, planned_co2)
     runs = pl.read_csv(out / "runs.csv")
     cells = sorted(set(int(c) for c in runs["cell"].to_list()))
     mine = cells[shard::nshard] if nshard > 1 else cells
     print(
-        f"building {len(mine)} of {len(cells)} cells x {npoint} climates, seed {seed} "
-        f"(shard {shard}/{nshard}, {workers} workers)"
+        f"building {len(mine)} of {len(cells)} cells x {npoint} climates ({design_kind} design), "
+        f"seed {seed}, tier {tier} (shard {shard}/{nshard}, {workers} workers)"
     )
+    print(f"  co2 (from the plan): {prov['co2']}")
     if seed != SEED:
         print(f"  replicate of seed {SEED}: configs only, forcing is REUSED and checked in place")
 
     done: list[dict[str, Any]] = []
     failed: list[dict[str, Any]] = []
-    jobs = [(version, cell, npoint, seed, const_co2) for cell in mine]
+    jobs: list[BuildJob] = [
+        (version, tier, cell, design_kind, npoint, seed, co2_path) for cell in mine
+    ]
     if workers > 1:
         with ProcessPoolExecutor(max_workers=workers) as pool:
-            futures = {pool.submit(_build_cell_guarded, j): j[1] for j in jobs}
+            futures = {pool.submit(_build_cell_guarded, j): j[2] for j in jobs}
             for i, fut in enumerate(as_completed(futures), 1):
                 res = fut.result()
                 (failed if "error" in res else done).append(res)
@@ -576,6 +987,8 @@ def stage_build(
         "cells_failed": len(failed),
         "forcing_bytes": total_bytes,
         "seed": seed,
+        "tier": tier,
+        "co2": prov["co2"],
         "neutral_points_checked": len(neutral),
         "neutral_byte_identity_all_pass": all(bool(p["neutral_byte_identity"]) for p in neutral),
         "failures": failed,
@@ -617,8 +1030,62 @@ def stage_build(
 # ------------------------------------------------------------------------------------------------
 
 
-def stage_verify(version: str, seed: int = SEED) -> int:
-    out = meta_dir(version, seed)
+def _check_co2(
+    runs: pl.DataFrame, co2: Co2, version: str, tier: str
+) -> tuple[set[str], list[str], list[str]]:
+    """Every run's input list names the plan's CO2 file, and that file is what the plan says.
+
+    Returns `(runs with a problem, per-run problems, problems with the CO2 file itself)`. Kept
+    apart because a missing, short or wrong-level FILE is not a problem with any one run, and
+    counting it as one used to make "co2 inputs as planned" read 5,999/6,000 when no run could
+    start.
+
+    ⚠ THIS IS THE CHECK WHOSE ABSENCE HID A CO2 RAMP FOR A WEEK. The old verify stage looked for
+    configs and forcing and never opened the CO2 entry, so a transient-CO2 build under a plan that
+    believed itself constant -- or the reverse -- would have been declared READY.
+    """
+    cfgmod = _cfg()
+    if co2.constant:
+        expected = str(constant_co2_path(version, tier))
+    else:
+        saved = path("ground_truth.historical_seed1") / cfgmod.SAVED_INPUT
+        expected = cfgmod.read_co2_input(saved)
+    problems: list[str] = []
+    file_problems: list[str] = []
+    bad_runs: set[str] = set()
+    for name, config in zip(runs["name"].to_list(), runs["config"].to_list(), strict=True):
+        input_js = Path(config).with_name(f"input_{name}.js")
+        if not input_js.is_file():
+            problems.append(f"{name}: no input list {input_js.name}")
+            bad_runs.add(name)
+            continue
+        got = cfgmod.read_co2_input(input_js)
+        if got != expected:
+            problems.append(f"{name}: co2 input {got}, the plan says {expected}")
+            bad_runs.add(name)
+        text = Path(config).read_text(encoding="utf-8") if Path(config).is_file() else ""
+        if text.count(f'#include "{input_js}"') != 2:
+            problems.append(f"{name}: the config does not include its own input list twice")
+            bad_runs.add(name)
+    if not Path(expected).is_file():
+        return bad_runs, problems, [f"the CO2 file {expected} does not exist"]
+    span = range(cfgmod.SPINUP_FIRST_MODEL_YEAR, cfgmod.SPINUP_LAST_MODEL_YEAR + 1)
+    seen = cfgmod.co2_seen_by_model(Path(expected), span)
+    if any(np.isnan(v) for v in seen.values()):
+        file_problems.append(f"{expected} ends before model year {span[-1]}: runs would die there")
+    if co2.constant and any(v != co2.ppm for v in seen.values()):
+        bad = sorted(y for y, v in seen.items() if v != co2.ppm)
+        file_problems.append(
+            f"the model would see a CO2 other than {co2.ppm} ppm in {len(bad)} spin-up years "
+            f"({bad[0]}-{bad[-1]}): the file starts too late for the clamp to agree"
+        )
+    return bad_runs, problems, file_problems
+
+
+def stage_verify(version: str, seed: int = SEED, tier: str = "pilot") -> int:
+    out = meta_dir(version, seed, tier)
+    prov = _read_plan(version, seed, tier)
+    co2 = Co2.of_provenance(prov)
     runs = pl.read_csv(out / "runs.csv")
     filenames = list(_load("corpus_perturb_clm").OUT_NAME.values())
     missing_cfg: list[str] = []
@@ -636,21 +1103,31 @@ def stage_verify(version: str, seed: int = SEED) -> int:
             else:
                 size = f.stat().st_size
                 sizes[size] = sizes.get(size, 0) + 1
+    co2_bad_runs, co2_run_problems, co2_file_problems = _check_co2(runs, co2, version, tier)
+    co2_problems = [*co2_file_problems, *co2_run_problems]
 
     total = runs.height
-    print(f"pilot corpus {version}: {total} runs promised by the manifests")
+    print(f"{tier} corpus {version} seed {seed}: {total} runs promised by the manifests")
     print(f"  configs present        {total - len(missing_cfg)}/{total}")
     print(f"  forcing files present  {sum(sizes.values())}/{total * 5}")
     print(f"  distinct forcing sizes {sorted(sizes.items(), reverse=True)[:4]}")
+    print(f"  co2 (plan)             {prov['co2']}")
+    print(f"  co2 inputs as planned  {total - len(co2_bad_runs)}/{total}")
+    if co2_file_problems:
+        print(f"  ⚠ the CO2 FILE itself fails its check, so NO run is ready: {co2_file_problems}")
     if len(sizes) > 1:
         print(
             "  ⚠ forcing files are NOT all the same size. A `.clm` size mismatch means the "
             "dtype or the year count is wrong and every value read is silently shifted."
         )
-    for label, items in (("configs", missing_cfg), ("forcing files", missing_forcing)):
+    for label, items in (
+        ("configs", missing_cfg),
+        ("forcing files", missing_forcing),
+        ("CO2 checks failed", co2_problems),
+    ):
         if items:
-            print(f"  ⚠ {len(items)} missing {label}, first few: {items[:5]}", file=sys.stderr)
-    ok = not missing_cfg and not missing_forcing and len(sizes) == 1
+            print(f"  ⚠ {len(items)} {label}, first few: {items[:5]}", file=sys.stderr)
+    ok = not missing_cfg and not missing_forcing and len(sizes) == 1 and not co2_problems
     print(f"verdict: {'READY to submit' if ok else 'NOT READY -- do not submit'}")
     return 0 if ok else 1
 
@@ -660,13 +1137,18 @@ def stage_verify(version: str, seed: int = SEED) -> int:
 # ------------------------------------------------------------------------------------------------
 
 
-def stage_harvest(version: str, seed: int = SEED) -> int:
+DONE_LINE = re.compile(r"^lpjml successfully terminated", re.MULTILINE)
+
+
+def stage_harvest(version: str, seed: int = SEED, tier: str = "pilot") -> int:
     """Count the runs that printed the MODEL'S OWN completion line, and the restarts they wrote.
 
     Never the exit codes: the stock job files always exit 0, so a run that died mid-spin-up leaves a
-    plausible truncated output behind a green row (`MEMORY.md:c-log-truth`).
+    plausible truncated output behind a green row (`MEMORY.md:c-log-truth`). And the line is matched
+    ANCHORED, at the start of a line: an unanchored search also matches any advice text that merely
+    quotes the phrase, which is how a failed job once counted as a success.
     """
-    out = meta_dir(version, seed)
+    out = meta_dir(version, seed, tier)
     runs = pl.read_csv(out / "runs.csv")
     ok, no_line, no_log, no_restart = 0, [], [], []
     sizes: list[int] = []
@@ -676,7 +1158,7 @@ def stage_harvest(version: str, seed: int = SEED) -> int:
         if not log.is_file() or log.stat().st_size == 0:
             no_log.append(name)
             continue
-        if "successfully terminated" in log.read_text(errors="replace"):
+        if DONE_LINE.search(log.read_text(errors="replace")):
             ok += 1
         else:
             no_line.append(name)
@@ -690,7 +1172,7 @@ def stage_harvest(version: str, seed: int = SEED) -> int:
             treeless.append(name)
 
     total = runs.height
-    print(f"pilot corpus {version} seed {seed}: {total} runs")
+    print(f"{tier} corpus {version} seed {seed}: {total} runs")
     print(f"  printed the model's own completion line  {ok}/{total}")
     print(f"  no log at all (never started, or dead)   {len(no_log)}")
     print(f"  log without the completion line          {len(no_line)}")
@@ -742,9 +1224,18 @@ def stage_harvest(version: str, seed: int = SEED) -> int:
 STATE_YEAR = 1999
 
 
-def _decode_run(args: tuple[str, int, str, str, str, int]) -> dict[str, Any]:
-    """One run: its restart record and its own perturbed forcing, as one corpus row."""
-    name, cell, point, rdir, fdir, seed = args
+# One decode job: (run name, cell, point, run dir, forcing dir, seed, table schema).
+DecodeJob = tuple[str, int, str, str, str, int, int]
+
+
+def _decode_run(args: DecodeJob) -> dict[str, Any]:
+    """One run: its restart record and its own perturbed forcing, as one corpus row.
+
+    The row also carries `restart_sha256`, which the table does not (`_corpus_frame` selects its
+    columns by name): it is what lets a re-decode into a new version prove it read the SAME
+    restarts, file by file, rather than assert it.
+    """
+    name, cell, point, rdir, fdir, seed, schema = args
     perturb = _load("corpus_perturb_clm")
     restart = Path(rdir) / "restart" / f"restart_{name}.lpj"
 
@@ -759,15 +1250,20 @@ def _decode_run(args: tuple[str, int, str, str, str, int]) -> dict[str, Any]:
         "seed": seed,
         "restart_year": restart_year,
         "restart_bytes": restart.stat().st_size,
+        "restart_sha256": sha256_of(restart),
     }
-    row.update(state_mod.single_cell_state(restart, cell))
+    row.update(state_mod.single_cell_state(restart, cell, schema=schema))
 
     # ⚠ `climate_columns`, NEVER `climate_table`: this runs in a forked worker, and polars' thread
     # pool does not survive a fork -- a DataFrame touched here hangs the child forever with no
     # error, so the job burns its whole wall-clock limit and produces nothing.
+    #
+    # The window's leg label stays "pilot" for every tier: it is a column VALUE in the table, and a
+    # schema-2 re-decode must reproduce its bytes. It names the forcing kind (a perturbed copy of
+    # the historical window), not the tier.
     window = climate_mod.Window("pilot", *perturb.BASE_WINDOW, STATE_YEAR)
     files = {v: str(Path(fdir) / perturb.OUT_NAME[v]) for v in climate_mod.VARS}
-    cl = climate_mod.climate_columns(window, files=files)
+    cl = climate_mod.climate_columns(window, files=files, with_soil=schema >= 3)
     if cl["cell"].size != 1:
         raise AssertionError(f"{name}: forcing describes {cl['cell'].size} cells, expected 1")
     if int(cl["cell"][0]) != cell:
@@ -779,12 +1275,12 @@ def _decode_run(args: tuple[str, int, str, str, str, int]) -> dict[str, Any]:
     row["lat"] = float(cl["lat"][0])
     row["leg"] = str(cl["leg"][0])
     row["state_year"] = int(cl["state_year"][0])
-    for feat in climate_mod.CLIMATE_FEATURES:
+    for feat in climate_mod.climate_features(schema):
         row[feat] = float(cl[feat][0])
     return row
 
 
-def _decode_run_guarded(args: tuple[str, int, str, str, str, int]) -> dict[str, Any]:
+def _decode_run_guarded(args: DecodeJob) -> dict[str, Any]:
     # One unreadable restart must not lose the other 5,999, and `stage_decode` exits non-zero on
     # any of them, so a partial corpus table is never silently green.
     try:
@@ -794,7 +1290,7 @@ def _decode_run_guarded(args: tuple[str, int, str, str, str, int]) -> dict[str, 
 
 
 def _decode_all(
-    jobs: list[tuple[str, int, str, str, str, int]], nproc: int
+    jobs: list[DecodeJob], nproc: int
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Every run decoded, split into the rows that worked and the ones that raised."""
     done: list[dict[str, Any]] = []
@@ -816,7 +1312,10 @@ def _decode_all(
 
 
 def _corpus_frame(
-    done: list[dict[str, Any]], design: pl.DataFrame, cells: pl.DataFrame
+    done: list[dict[str, Any]],
+    design: pl.DataFrame,
+    cells: pl.DataFrame,
+    features: tuple[str, ...] = climate_mod.CLIMATE_FEATURES,
 ) -> pl.DataFrame:
     """The decoded rows joined to the design and the cell table, in the corpus column order.
 
@@ -824,7 +1323,8 @@ def _corpus_frame(
     NAME the climate a row was grown under, then the features a model may see, then the targets.
     `cell`, `lon` and `lat` sit with the keys because the geographic address is a pre-registered
     NULL, not a feature (`vegemu.corpus.climate` header) -- a feature set that quietly contains it
-    turns any per-cell score into a spatial-interpolation score.
+    turns any per-cell score into a spatial-interpolation score. `features` is the schema's
+    (`climate.climate_features`): schema 3 adds the five soil columns right after the climate ones.
     """
     keys = ("name", "cell", "point", "kind", "tile", "stage", "seed", "leg", "state_year")
     coeff = ("dtemp_k", "fprec", "sprec", "frad", "fiav")
@@ -848,7 +1348,7 @@ def _corpus_frame(
                 *coeff,
                 "lon",
                 "lat",
-                *climate_mod.CLIMATE_FEATURES,
+                *features,
                 *targets,
                 "restart_year",
                 "restart_bytes",
@@ -902,16 +1402,251 @@ def _report_decode(frame: pl.DataFrame, summary: dict[str, Any], dest: Path) -> 
     print(f"  corpus_sha256 {summary['corpus_sha256']}")
 
 
-def stage_decode(version: str, nproc: int, limit: int | None, seed: int = SEED) -> int:
-    out = meta_dir(version, seed)
-    runs = pl.read_csv(out / "runs.csv")
-    design = pl.read_csv(out / "design.csv")
-    cells = pl.read_csv(out / "cells.csv")
+PFT_FRAC_COLUMNS: tuple[str, ...] = tuple(f"pft_frac_{i}" for i in range(state_mod.NTREE_PFT))
+
+
+def _differs(a: pl.Series, b: pl.Series) -> npt.NDArray[np.bool_]:
+    """Row-wise "not the same value", with NaN equal to NaN and null equal to null."""
+    if a.dtype.is_float() and b.dtype.is_float():
+        x = a.to_numpy().astype(np.float64)
+        y = b.to_numpy().astype(np.float64)
+        same = (x == y) | (np.isnan(x) & np.isnan(y))
+        return np.asarray(~same, dtype=bool)
+    return np.asarray((~a.eq_missing(b)).to_numpy(), dtype=bool)
+
+
+def compare_tables(
+    old: pl.DataFrame, new: pl.DataFrame, old_schema: int, new_schema: int
+) -> dict[str, Any]:
+    """Every difference between two decodes of the SAME runs, and whether the schema explains it.
+
+    Rows are matched by run `name`, never by position. A difference is EXPECTED only where the two
+    schemas say the decoder changed (`vegemu.corpus.schema`): across the 2 -> 3 bump, `pft_frac_*`
+    on a treeless row going from 0.0 to NaN, and the five soil columns appearing. Anything else --
+    a value that moved, a column that vanished, a dtype that changed -- is a re-decode that did not
+    reproduce its source, and the caller refuses it.
+    """
+    old = old.filter(pl.col("name").is_in(new["name"].implode()))
+    if old.height != new.height or old["name"].n_unique() != old.height:
+        return {"ok": False, "unexpected": [f"{old.height} source rows match {new.height} new"]}
+    a, b = old.sort("name"), new.sort("name")
+    bump = old_schema < 3 <= new_schema
+    treeless = np.asarray((b["stems_total"] <= 0).to_numpy(), dtype=bool)
+    shared = [c for c in a.columns if c in b.columns]
+    added = [c for c in b.columns if c not in a.columns]
+    dropped = [c for c in a.columns if c not in b.columns]
+    unexpected: list[str] = []
+    if dropped:
+        unexpected.append(f"columns dropped: {dropped}")
+    expected_new = set(SOIL_FEATURES) if bump else set()
+    if set(added) != expected_new:
+        unexpected.append(
+            f"columns added {added}, the schema change explains {sorted(expected_new)}"
+        )
+    differing: dict[str, int] = {}
+    for c in shared:
+        if a[c].dtype != b[c].dtype:
+            unexpected.append(f"{c}: dtype {a[c].dtype} -> {b[c].dtype}")
+            continue
+        diff = _differs(a[c], b[c])
+        if not diff.any():
+            continue
+        differing[c] = int(diff.sum())
+        if not (bump and c in PFT_FRAC_COLUMNS):
+            unexpected.append(f"{c}: {int(diff.sum())} rows differ")
+            continue
+        was, now = a[c].to_numpy()[diff], b[c].to_numpy()[diff]
+        if (diff & ~treeless).any() or not (np.isnan(now).all() and (was == 0.0).all()):
+            unexpected.append(f"{c}: differs outside 'treeless 0.0 -> NaN'")
+    # ...and the fix must have landed on EVERY treeless row, not only on the ones that differ: a
+    # schema-3 decode that left a treeless row's share at 0.0 differs from nothing and would pass
+    # the loop above, so "only treeless rows changed" would be reported with the fix half-applied.
+    if bump:
+        for c in PFT_FRAC_COLUMNS:
+            if c not in b.columns:
+                continue
+            kept = int((~np.isnan(b[c].to_numpy().astype(np.float64)[treeless])).sum())
+            if kept:
+                unexpected.append(
+                    f"{c}: {kept} treeless rows are not NaN under schema {new_schema}"
+                )
+    return {
+        "ok": not unexpected,
+        "rows": b.height,
+        "treeless_rows": int(treeless.sum()),
+        "shared_columns": len(shared),
+        "identical_columns": len(shared) - len(differing),
+        "differing_columns": differing,
+        "added_columns": added,
+        "dropped_columns": dropped,
+        "unexpected": unexpected,
+    }
+
+
+def _claim_out_dir(out: Path, src: Path) -> None:
+    """Refuse to write a derived version over anything but an earlier derivation of the SAME source.
+
+    A planned version has spin-ups of its own, so overwriting its provenance with "derived from
+    X" would orphan them; and a derivation of a DIFFERENT source would mix two corpora in one name.
+    """
+    prov = out / "provenance.json"
+    if not prov.is_file():
+        return
+    derived = json.loads(prov.read_text()).get("derived_from")
+    if not derived:
+        raise SystemExit(f"{out} is a planned version with runs of its own; not overwriting it")
+    if derived.get("corpus_dir") != src.name:
+        raise SystemExit(f"{out} is derived from {derived.get('corpus_dir')}, not {src.name}")
+
+
+def _write_derived(
+    out: Path,
+    src: Path,
+    src_prov: dict[str, Any],
+    *,
+    out_version: str,
+    schema: int,
+    done: list[dict[str, Any]],
+    source_table: Path,
+) -> dict[str, Any]:
+    """Make `out` a self-describing version whose every row is a re-decode of `src`'s runs.
+
+    The plan tables are COPIED, so `runs.csv` still points at the source's run directories -- that
+    is where the restarts are, and a later in-place decode of this version reads the same files.
+    Every restart's sha256 goes into `restarts_sha256.csv`, and the digest of that file into the
+    provenance, so "the spin-ups are v2-constco2's" is checkable file by file, not a sentence.
+    """
+    for name in ("cells.csv", "cells.parquet", "design.csv", "runs.csv"):
+        if (src / name).is_file():
+            shutil.copyfile(src / name, out / name)
+    shas = pl.DataFrame(
+        sorted(
+            ({"name": r["name"], "restart_sha256": r["restart_sha256"]} for r in done),
+            key=lambda r: r["name"],
+        )
+    )
+    shas.write_csv(out / "restarts_sha256.csv")
+    carried = {
+        k: src_prov[k]
+        for k in (
+            "tier",
+            "nrun",
+            "ncell",
+            "npoint",
+            "nspinup",
+            "design_seed",
+            "design_kind",
+            "design_base_npoint",
+            "base_window",
+            "co2",
+            "co2_constant",
+            "co2_ppm",
+            "co2_file",
+            "binary",
+            "sources",
+            "selection",
+            "replicate_of",
+            "spinup_note",
+            "design_note",
+            "plan_sha256",
+            "design_sha256",
+            "plan_hash_scheme",
+        )
+        if k in src_prov
+    }
+    prov: dict[str, Any] = {
+        **carried,
+        "created_utc": datetime.now(UTC).isoformat(timespec="seconds"),
+        "built_by": "scripts/corpus_pilot.py --stage decode --out-version",
+        "corpus_version": out_version,
+        "git_commit": _git_commit(),
+        "seed": int(src_prov.get("seed", SEED)),
+        "schema": schema,
+        "schema_note": schema_mod.SCHEMAS[schema],
+        "derived_from": {
+            "corpus_dir": src.name,
+            "corpus_version": src_prov.get("corpus_version"),
+            "no_new_spinups": True,
+            "note": (
+                f"NO MODEL WAS RUN FOR THIS VERSION. Every row re-decodes a restart and a forcing "
+                f"set of {src.name}, under table schema {schema}; `plan_sha256` is that plan's, "
+                "because these are that plan's runs."
+            ),
+            "source_schema": schema_mod.of_provenance(src_prov),
+            "provenance_sha256": sha256_of(src / "provenance.json"),
+            "runs_csv_sha256": sha256_of(src / "runs.csv"),
+            "cells_csv_sha256": sha256_of(src / "cells.csv"),
+            "design_csv_sha256": sha256_of(src / "design.csv"),
+            "source_table": {"file": source_table.name, "sha256": sha256_of(source_table)}
+            if source_table.is_file()
+            else None,
+            "restarts": {
+                "count": shas.height,
+                "manifest": "restarts_sha256.csv",
+                "manifest_sha256": sha256_of(out / "restarts_sha256.csv"),
+            },
+        },
+    }
+    (out / "provenance.json").write_text(json.dumps(prov, indent=2, sort_keys=True) + "\n", "utf-8")
+    return dict(prov["derived_from"])
+
+
+def stage_decode(  # noqa: PLR0912, PLR0915 -- decode, write, derive, compare, report
+    version: str,
+    nproc: int,
+    limit: int | None,
+    seed: int = SEED,
+    *,
+    tier: str = "pilot",
+    out_version: str | None = None,
+    schema: int | None = None,
+) -> int:
+    """Decode a version's runs into its table -- in place, or into `out_version` with no new runs.
+
+    ⚠ IN PLACE, THE SCHEMA IS THE VERSION'S OWN AND MAY NOT BE OVERRIDDEN. Its table is pinned by
+    hash; decoding it under another schema would overwrite that table with a different one. A new
+    schema is a new version: `--out-version`, which defaults to `schema.CURRENT` and diffs the
+    result against the source table before calling it decoded.
+    """
+    src = meta_dir(version, seed, tier)
+    src_prov = _read_plan(version, seed, tier)
+    src_schema = schema_mod.of_provenance(src_prov)
+    full_stem = "corpus" if seed == SEED else f"replicate_s{seed}"
+    source_table = src / f"{full_stem}.parquet"
+    if out_version is None:
+        use = src_schema if schema is None else schema_mod.check(schema)
+        if use != src_schema:
+            raise SystemExit(
+                f"{src.name} is schema {src_schema}; decoding it in place under schema {use} would "
+                "overwrite its pinned table with a different one. Use --out-version."
+            )
+        out = src
+    else:
+        if out_version == version:
+            raise SystemExit("--out-version must differ from --version")
+        use = schema_mod.CURRENT if schema is None else schema_mod.check(schema)
+        # ⚠ NO SOURCE TABLE, NO RE-DECODE. The column-by-column diff against the source's own table
+        # is the only evidence a derived version reproduces its source beyond the schema change; it
+        # used to be skipped with `ok: True` when the table was missing, so a re-decode run before
+        # the source's own decode came out "DECODED" having been compared with nothing. Checked
+        # here, before anything is decoded or any directory is claimed.
+        if not source_table.is_file():
+            raise SystemExit(
+                f"no {source_table}: a re-decode is diffed against its source's own table, and "
+                f"{src.name} has none. Decode it in place first (--stage decode"
+                f"{'' if tier == 'pilot' else f' --tier {tier}'} --version {version}"
+                f"{'' if seed == SEED else f' --seed {seed}'}), then re-run this."
+            )
+        out = meta_dir(out_version, seed, tier)
+        _claim_out_dir(out, src)
+    runs = pl.read_csv(src / "runs.csv")
+    design = pl.read_csv(src / "design.csv")
+    cells = pl.read_csv(src / "cells.csv")
     if limit:
         runs = runs.head(limit)
 
-    jobs = [
-        (str(n), int(c), str(p), str(r), str(f), seed)
+    jobs: list[DecodeJob] = [
+        (str(n), int(c), str(p), str(r), str(f), seed, use)
         for n, c, p, r, f in zip(
             runs["name"].to_list(),
             runs["cell"].to_list(),
@@ -921,8 +1656,10 @@ def stage_decode(version: str, nproc: int, limit: int | None, seed: int = SEED) 
             strict=True,
         )
     ]
+    target = f" into {out.name}" if out != src else ""
     print(
-        f"decoding {len(jobs)} runs of pilot corpus {version} seed {seed} on {nproc} processes",
+        f"decoding {len(jobs)} runs of {src.name} (tier {tier}, seed {seed}){target} under table "
+        f"schema {use} on {nproc} processes",
         flush=True,
     )
 
@@ -936,7 +1673,8 @@ def stage_decode(version: str, nproc: int, limit: int | None, seed: int = SEED) 
         print("no run decoded; nothing to write", file=sys.stderr)
         return 1
 
-    frame = _corpus_frame(done, design, cells)
+    features = climate_mod.climate_features(use)
+    frame = _corpus_frame(done, design, cells, features)
     bad_year = frame.filter(pl.col("restart_year") != STATE_YEAR).height
     if bad_year:
         raise AssertionError(
@@ -952,17 +1690,48 @@ def stage_decode(version: str, nproc: int, limit: int | None, seed: int = SEED) 
     # same cells and the same climates as the corpus, so a table called `corpus.parquet` holding
     # them is one path typo away from doubling the pilot with re-runs and calling it more evidence.
     # It is a second measurement of the same thing, which is a SPREAD, never extra rows.
-    stem = "corpus_smoke" if limit else ("corpus" if seed == SEED else f"replicate_s{seed}")
+    # (`full_stem` is fixed above, where a re-decode checks its source table exists.)
+    #
+    # ⚠ A RE-DECODE ONLY GETS THE TABLE'S NAME AFTER ITS DIFF PASSES. It is written under a pending
+    # name first; a refused one lands at `<stem>.refused.parquet` and its sha256 is withheld from
+    # the decode JSON, as `corpus_build.check_seeds_differ` withholds a refused build's -- that hash
+    # is the only handle a pre-registration has. Written straight to `<stem>.parquet`, a refused
+    # table sat at the name a derived version is cited by, and overwrote a good one from an earlier
+    # run. An in-place decode is unchanged: it writes its own name directly, as it always has.
+    stem = "corpus_smoke" if limit else full_stem
     dest = out / f"{stem}.parquet"
-    frame.write_parquet(dest)
+    written = dest if out == src else out / f".{stem}.pending.parquet"
+    frame.write_parquet(written)
     treeless, control, ctrl_treeless = _decode_parts(frame)
     truth_treed = ctrl_treeless.filter(pl.col("truth_stems_total") > 0).height
+
+    derived: dict[str, Any] | None = None
+    comparison: dict[str, Any] | None = None
+    refused = False
+    if out != src:
+        derived = _write_derived(
+            out,
+            src,
+            src_prov,
+            out_version=str(out_version),
+            schema=use,
+            done=done,
+            source_table=source_table,
+        )
+        comparison = compare_tables(pl.read_parquet(source_table), frame, src_schema, use)
+        comparison["byte_identical"] = sha256_of(source_table) == sha256_of(written)
+        refused = not comparison["ok"]
+        if refused:
+            dest = out / f"{stem}.refused.parquet"
+        os.replace(written, dest)
 
     summary: dict[str, Any] = {
         "created_utc": datetime.now(UTC).isoformat(timespec="seconds"),
         "built_by": "scripts/corpus_pilot.py --stage decode",
-        "corpus_version": version,
-        "plan_sha256": json.loads((out / "provenance.json").read_text())["plan_sha256"],
+        "tier": tier,
+        "corpus_version": out_version or version,
+        "schema": use,
+        "plan_sha256": src_prov["plan_sha256"],
         "git_commit": _git_commit(),
         "seed": seed,
         "is_replicate": seed != SEED,
@@ -974,7 +1743,7 @@ def stage_decode(version: str, nproc: int, limit: int | None, seed: int = SEED) 
         "runs_failed": len(failed),
         "failures": failed,
         "seconds": round(time.time() - t0, 1),
-        "nfeature": len(climate_mod.CLIMATE_FEATURES),
+        "nfeature": len(features),
         "ntarget": len(state_mod.STATE_COLUMNS) - 1,
         "state_year": STATE_YEAR,
         "state_year_note": (
@@ -985,14 +1754,32 @@ def stage_decode(version: str, nproc: int, limit: int | None, seed: int = SEED) 
         "treeless_control_rows": ctrl_treeless.height,
         "control_rows": control.height,
         "treeless_control_cells_treed_in_ground_truth": truth_treed,
-        "corpus_sha256": sha256_of(dest),
-        "co2": "untouched, not a feature (MEMORY.md:co2-closed)",
+        "corpus_sha256": None if refused else sha256_of(dest),
+        "refused_table": str(dest) if refused else None,
+        # ⚠ This used to say "untouched" whatever the plan was -- the word that hid a CO2 ramp for
+        # a week. It now states the plan's CO2 forcing, and that it is never a feature.
+        "co2": f"{src_prov['co2']} -- as planned; never a feature (MEMORY.md:co2-closed)",
+        "derived_from": derived,
+        "comparison_to_source": comparison,
     }
     report = out / ("decode_smoke.json" if limit else f"decode_s{seed}.json")
     report.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", "utf-8")
     _report_decode(frame, summary, dest)
+    if comparison is not None:
+        print(
+            f"  vs {src.name}: {comparison.get('identical_columns')} of "
+            f"{comparison.get('shared_columns')} shared columns identical over "
+            f"{comparison.get('rows')} rows; differing {comparison.get('differing_columns')}; "
+            f"added {comparison.get('added_columns')}; byte-identical "
+            f"{comparison.get('byte_identical')}"
+        )
+        for item in comparison.get("unexpected", []):
+            print(f"  ⚠ UNEXPLAINED DIFFERENCE: {item}", file=sys.stderr)
     if failed:
         print("verdict: INCOMPLETE -- fix the failures before any score cites this table")
+        return 1
+    if comparison is not None and not comparison["ok"]:
+        print("verdict: REFUSED -- the re-decode differs from its source beyond the schema change")
         return 1
     if seed != SEED:
         print(
@@ -1022,8 +1809,44 @@ def main() -> int:
         "--stage", choices=("plan", "build", "verify", "harvest", "decode"), required=True
     )
     ap.add_argument("--version", default="v1", help="corpus version; a new design is a new version")
-    ap.add_argument("--ncell", type=int, default=NCELL)
-    ap.add_argument("--npoint", type=int, default=NPOINT)
+    ap.add_argument(
+        "--tier",
+        choices=sorted(TIERS),
+        default="pilot",
+        help=(
+            "which tier's defaults and directory tree (<tier>-<version>). Every stage of one "
+            "campaign must be given the same tier; `mid` = 1,000 cells x 100 climates, constant "
+            "CO2, nested in pilot-v2-constco2"
+        ),
+    )
+    ap.add_argument("--ncell", type=int, default=None, help="plan stage; default: the tier's")
+    ap.add_argument(
+        "--npoint",
+        type=int,
+        default=None,
+        help="plan stage; default: the tier's. the build reads the plan's, refusing a clash",
+    )
+    ap.add_argument(
+        "--design",
+        choices=("pilot", "nested"),
+        default=None,
+        help="plan stage: `nested` keeps the pilot's 30 climates and extends them; default: tier's",
+    )
+    ap.add_argument(
+        "--nest-in",
+        default=None,
+        help=(
+            "plan stage: a corpus directory (e.g. pilot-v2-constco2) whose cells must all be in "
+            "the selection, and whose design a nested design must reproduce. `none` disables the "
+            "tier default"
+        ),
+    )
+    ap.add_argument(
+        "--max-per-tile",
+        type=int,
+        default=None,
+        help="plan stage: per-tile cap; default scales with --ncell (select.tile_cap)",
+    )
     ap.add_argument("--shard-size", type=int, default=SHARD_SIZE, help="runs per SLURM job")
     ap.add_argument("--shard", type=int, default=0, help="build stage: which slice of cells")
     ap.add_argument("--nshard", type=int, default=1)
@@ -1052,12 +1875,47 @@ def main() -> int:
     )
     ap.add_argument(
         "--const-co2",
-        action="store_true",
+        dest="const_co2",
+        action="store_const",
+        const=True,
+        default=None,
         help=(
             "drive the spin-up with a CONSTANT CO2 file instead of the ground truth's transient "
             "one. Without this the last 300 of the 1000 spin-up years carry the historical CO2 "
-            "rise, so the end state is not an equilibrium. A new corpus VERSION, never an edit."
+            "rise, so the end state is not an equilibrium. A new corpus VERSION, never an edit. "
+            "Plan stage only needs it; a later stage reads it from the plan and refuses a clash."
         ),
+    )
+    ap.add_argument(
+        "--transient-co2",
+        dest="const_co2",
+        action="store_const",
+        const=False,
+        help="the explicit opposite of --const-co2, for a tier whose default is constant",
+    )
+    ap.add_argument(
+        "--co2-ppm",
+        type=float,
+        default=None,
+        help=(
+            "constant CO2 at this level instead of 276.59 ppm (implies --const-co2). The file "
+            "then starts at model year 1000, so no spin-up year falls back to the model's own "
+            "276.59 clamp"
+        ),
+    )
+    ap.add_argument(
+        "--out-version",
+        default=None,
+        help=(
+            "decode stage: write the table as a NEW version from --version's existing runs, under "
+            "the current table schema, and diff it against the source table. No spin-up is run"
+        ),
+    )
+    ap.add_argument(
+        "--schema",
+        type=int,
+        default=None,
+        help="decode stage: table schema (vegemu.corpus.schema); in place it must be the version's",
     )
     ap.add_argument(
         "--subset",
@@ -1070,16 +1928,23 @@ def main() -> int:
         ),
     )
     args = ap.parse_args()
+    tier = TIERS[args.tier]
+    cli_co2 = co2_from_cli(args.const_co2, args.co2_ppm)
 
     if args.stage == "plan":
+        nest_in = tier.nest_in if args.nest_in is None else args.nest_in
         return stage_plan(
             args.version,
-            args.ncell,
-            args.npoint,
+            args.ncell or tier.ncell,
+            args.npoint or tier.npoint,
             args.shard_size,
             seed=args.seed,
             subset=args.subset,
-            const_co2=args.const_co2,
+            co2=cli_co2 or co2_from_cli(tier.const_co2, None),
+            tier=args.tier,
+            design_kind=args.design or tier.design,
+            nest_in=None if nest_in in (None, "", "none") else nest_in,
+            max_per_tile=args.max_per_tile,
         )
     if args.stage == "build":
         return stage_build(
@@ -1089,13 +1954,22 @@ def main() -> int:
             args.nshard,
             args.npoint,
             seed=args.seed,
-            const_co2=args.const_co2,
+            co2=cli_co2,
+            tier=args.tier,
         )
     if args.stage == "verify":
-        return stage_verify(args.version, args.seed)
+        return stage_verify(args.version, args.seed, args.tier)
     if args.stage == "decode":
-        return stage_decode(args.version, args.workers, args.limit, args.seed)
-    return stage_harvest(args.version, args.seed)
+        return stage_decode(
+            args.version,
+            args.workers,
+            args.limit,
+            args.seed,
+            tier=args.tier,
+            out_version=args.out_version,
+            schema=args.schema,
+        )
+    return stage_harvest(args.version, args.seed, args.tier)
 
 
 if __name__ == "__main__":

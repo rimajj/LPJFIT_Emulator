@@ -33,6 +33,7 @@ import numpy.typing as npt
 import polars as pl
 
 from vegemu.binfmt.restart import Layout, RestartReader, trees_of
+from vegemu.corpus import schema as schema_mod
 
 # The five traits LPJmL-FIT samples per individual, plus the three size/age variables that make the
 # roster a roster. `age` is included because a forest at equilibrium is defined as much by its age
@@ -95,23 +96,48 @@ STATE_COLUMNS: tuple[str, ...] = (
 )
 
 
-def _empty_summary(cell: int, npatch: int, skip: int) -> dict[str, float]:
-    """A vegetation-free cell. Zeros, not NaN: "no trees" is a state, not a missing measurement."""
+def _empty_summary(
+    cell: int, npatch: int, skip: int, schema: int = schema_mod.LEGACY
+) -> dict[str, float]:
+    """A vegetation-free cell. Zeros, not NaN: "no trees" is a state, not a missing measurement.
+
+    ...for the COUNTS and STOCKS. A trait has no value where there is no stem, and a zero median
+    would be a lie a model would happily fit, so those columns are NaN and every downstream score
+    must mask them.
+
+    ⚠ THE TREE-TYPE SHARES ARE THE SAME CASE, AND SCHEMA 2 GOT THEM WRONG. A share is a count of
+    one type over a count of stems, so with no stems it is 0/0 -- yet schema 2 zeroes every column
+    and re-blanks only the traits, so a treeless row reads "0 % of every type", and a cell that
+    goes treeless reads as "type 3 fell from 0.81 to 0.00": a collapse scored a second time as a
+    composition shift (`score.blank_treeless_composition`, 15-18 % of the squared change on
+    pilot-v1). Schema 3 writes NaN. Schema 2 stays reachable because its tables are pinned by hash,
+    and the dict's key ORDER is identical under both, so a schema-2 decode is byte-for-byte what it
+    always was.
+    """
+    schema_mod.check(schema)
     out: dict[str, float] = dict.fromkeys(STATE_COLUMNS, 0.0)
     out["cell"] = float(cell)
     out["skip"] = float(skip)
     out["npatch"] = float(npatch)
-    # A trait has no value where there is no stem, and a zero median would be a lie a model would
-    # happily fit. Those columns stay NaN and every downstream score must mask them.
     for name in (*_quantile_names(), *(f"{t}_mean" for t in TRAITS)):
         out[name] = float("nan")
+    if schema >= 3:
+        for i in range(NTREE_PFT):
+            out[f"pft_frac_{i}"] = float("nan")
     return out
 
 
-def summarise_cell(rec: dict[str, Any], cell: int, lay: Layout) -> dict[str, float]:
-    """Reduce one decoded cell record to the state vector. Pure; no I/O."""
+def summarise_cell(
+    rec: dict[str, Any], cell: int, lay: Layout, *, schema: int = schema_mod.LEGACY
+) -> dict[str, float]:
+    """Reduce one decoded cell record to the state vector. Pure; no I/O.
+
+    `schema` is the corpus table schema (`vegemu.corpus.schema`); it changes only what a TREELESS
+    row carries in `pft_frac_*`. The default is the legacy one because every caller outside the
+    corpus pipeline re-decodes an existing, hash-pinned version.
+    """
     if rec["skip"]:
-        return _empty_summary(cell, 0, 1)
+        return _empty_summary(cell, 0, 1, schema)
 
     stand = rec["stands"][0]
     npatch = int(stand["npatch"])
@@ -136,7 +162,7 @@ def summarise_cell(rec: dict[str, Any], cell: int, lay: Layout) -> dict[str, flo
     litterc /= npatch
 
     if counts.sum() == 0:
-        out = _empty_summary(cell, npatch, 0)
+        out = _empty_summary(cell, npatch, 0, schema)
         out["grass_entries"] = float(n_grass)
         out["soilc"] = soilc
         out["litterc"] = litterc
@@ -204,17 +230,19 @@ def summarise_cell(rec: dict[str, Any], cell: int, lay: Layout) -> dict[str, flo
     return out
 
 
-def _chunk(reader: RestartReader, cells: Sequence[int]) -> list[dict[str, float]]:
+def _chunk(
+    reader: RestartReader, cells: Sequence[int], schema: int = schema_mod.LEGACY
+) -> list[dict[str, float]]:
     rows: list[dict[str, float]] = []
     with reader:
         for cell in cells:
-            rows.append(summarise_cell(reader.read(cell), cell, reader.layout))
+            rows.append(summarise_cell(reader.read(cell), cell, reader.layout, schema=schema))
     return rows
 
 
-def _worker(args: tuple[str, list[int]]) -> list[dict[str, float]]:
-    path, cells = args
-    return _chunk(RestartReader(Path(path)), cells)
+def _worker(args: tuple[str, list[int], int]) -> list[dict[str, float]]:
+    path, cells, schema = args
+    return _chunk(RestartReader(Path(path)), cells, schema)
 
 
 def state_table(
@@ -222,13 +250,16 @@ def state_table(
     cells: Iterable[int] | None = None,
     nproc: int = 1,
     chunk: int = 256,
+    *,
+    schema: int = schema_mod.LEGACY,
 ) -> pl.DataFrame:
     """Every requested cell of a restart file, as one table.
 
     `nproc > 1` forks workers over contiguous cell chunks. Contiguous on purpose: the records are
     laid out in cell order, so a chunk is a sequential read rather than 256 seeks scattered across
-    119 GiB.
+    119 GiB. `schema` as in `summarise_cell`.
     """
+    schema_mod.check(schema)
     reader = RestartReader(Path(restart))
     cell_list = list(range(reader.ncell)) if cells is None else [int(c) for c in cells]
     chunks = [cell_list[i : i + chunk] for i in range(0, len(cell_list), chunk)]
@@ -236,9 +267,9 @@ def state_table(
     rows: list[dict[str, float]] = []
     if nproc <= 1:
         for part in chunks:
-            rows.extend(_chunk(reader, part))
+            rows.extend(_chunk(reader, part, schema))
     else:
-        payload = [(str(restart), part) for part in chunks]
+        payload = [(str(restart), part, schema) for part in chunks]
         ctx = mp.get_context("fork")
         with ctx.Pool(processes=nproc) as pool:
             for result in pool.imap(_worker, payload, chunksize=1):
@@ -248,7 +279,9 @@ def state_table(
     return frame.with_columns(pl.col("cell").cast(pl.Int32))
 
 
-def single_cell_state(restart: Path | str, cell: int) -> dict[str, float]:
+def single_cell_state(
+    restart: Path | str, cell: int, *, schema: int = schema_mod.LEGACY
+) -> dict[str, float]:
     """The state vector of a restart file that holds exactly ONE cell.
 
     ⚠ THE CELL NUMBER IS NOT AN INDEX INTO THIS FILE. A corpus run writes a restart for one cell, so
@@ -265,7 +298,7 @@ def single_cell_state(restart: Path | str, cell: int) -> dict[str, float]:
             "files a per-cell corpus run writes. Use state_table for a multi-cell restart."
         )
     with reader:
-        return summarise_cell(reader.read(0), cell, reader.layout)
+        return summarise_cell(reader.read(0), cell, reader.layout, schema=schema)
 
 
 def basis(restart: Path | str) -> dict[str, Any]:

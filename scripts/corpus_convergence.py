@@ -26,6 +26,17 @@ unconverged for noise the model produces on identical input.
 Also reported: `trend_pct_per_century`, the slope of the smoothed trajectory over the LAST 200
 years. A cell can sit inside a band and still be climbing; the slope is the direct test.
 
+⚠ AND THE LAST 200 YEARS ARE THE WRONG WINDOW FOR A TRANSIENT-CO2 RUN. The ground truth's spin-up
+reads a transient CO2 file over model years 1000-1999, flat at 276.59 ppm up to 1700 and rising
++32.8 % after, so a slope over its last 200 years measures CO2 fertilisation, not drift -- which is
+exactly how "+6.5 %/century, not converged" came to be reported
+(`20260915-D-the-spinup-did-converge-the-late-rise-is-transient-co2.md`). So the script now reads
+the CO2 the run actually saw, year by year (`corpus_spinup_config.co2_seen_by_model`), and ALSO
+fits `trend_pct_per_century_const_co2` over the last 200 smoothed years whose whole 30-year span
+lies before the first CO2 change. For a constant-CO2 run that is the last 200 years, the same
+window as before. `trend_pct_per_century` keeps its old meaning, so a re-run's column means what an
+old table's column meant; the summary says whether that window sat inside a CO2 ramp.
+
 ⚠ The trajectory is on a (lat, lon) grid, NOT in orderA cell order. `grid_1999.nc: cellid(lat,lon)`
 is the map. Pairing them by position would silently relabel every cell.
 """
@@ -35,15 +46,18 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import netCDF4
 import numpy as np
 import numpy.typing as npt
 import polars as pl
 
+import corpus_spinup_config as cfgmod
 from vegemu.paths import path, paths
 
 NSPINYEAR = 30  # the spin-up's climate cycle length; the running-mean width
@@ -110,9 +124,50 @@ def last_exit(
     return np.where(outside.any(axis=0), nrow - 1 - outside[::-1].argmax(axis=0), -1)
 
 
+def constant_co2_rows(
+    co2: Sequence[float], smooth: int = NSPINYEAR, trend_years: int = TREND_YEARS
+) -> tuple[int, int, int]:
+    """`(first_row, last_row, constant_years)` of the smoothed series inside constant CO2.
+
+    `co2` is the CO2 the run saw in each spin-up year, in order. `constant_years` counts the
+    leading years at the first year's value; the window is the `trend_years` smoothed rows ending
+    at the one whose 30-year span ends on the last of them (row i spans years i+1..i+smooth). For a
+    run constant throughout, those are the last `trend_years` rows -- the window this script always
+    used, so nothing moves for a constant-CO2 run.
+    """
+    nyear = len(co2)
+    constant = 1
+    while constant < nyear and co2[constant] == co2[0]:
+        constant += 1
+    last_row = constant - smooth
+    first_row = last_row - trend_years + 1
+    if first_row < 0:
+        raise ValueError(
+            f"CO2 is constant for only {constant} years; a {trend_years}-year trend of a "
+            f"{smooth}-year running mean needs {trend_years + smooth - 1}"
+        )
+    return first_row, last_row, constant
+
+
+def _slope_pct_per_century(block: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+    """OLS slope of each column over its rows (one row per year), in % of the column mean per
+    century. A column whose mean is not positive has no meaningful percentage and is NaN."""
+    xs = np.arange(block.shape[0], dtype=np.float64)
+    xs -= xs.mean()
+    mean = block.mean(axis=0)
+    slope = (xs[:, None] * (block - mean)).sum(axis=0) / (xs**2).sum()
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return np.asarray(np.where(mean > 0, slope * 100.0 / mean * 100.0, np.nan))
+
+
 def main() -> int:  # noqa: PLR0915 -- one flat measurement pass, reported in one place
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out-version", default="v0")
+    ap.add_argument(
+        "--co2-file",
+        default=None,
+        help="the CO2 input the trajectories' run read; default: the ground truth's own",
+    )
     args = ap.parse_args()
 
     out = Path(str(paths()["scratch"]["corpus"])) / args.out_version
@@ -156,6 +211,22 @@ def main() -> int:  # noqa: PLR0915 -- one flat measurement pass, reported in on
     with np.errstate(divide="ignore", invalid="ignore"):
         trend = np.where(level > 0, slope * 100.0 / level * 100.0, np.nan)
 
+    # The same slope inside CONSTANT CO2, from the CO2 the run actually read in each model year.
+    # In % of that window's own mean: the level of interest is the state CO2 was constant at.
+    co2_file = (
+        Path(args.co2_file)
+        if args.co2_file
+        else Path(cfgmod.read_co2_input(path("ground_truth.historical_seed1") / cfgmod.SAVED_INPUT))
+    )
+    first_model_year = cfgmod.SPINUP_FIRST_MODEL_YEAR
+    seen = cfgmod.co2_seen_by_model(co2_file, range(first_model_year, first_model_year + nyear))
+    co2_by_year = [seen[y] for y in sorted(seen)]
+    if any(np.isnan(v) for v in co2_by_year):
+        raise SystemExit(f"{co2_file} does not cover all {nyear} spin-up years")
+    c_first, c_last, c_years = constant_co2_rows(co2_by_year)
+    trend_const = _slope_pct_per_century(smooth[c_first : c_last + 1])
+    ramp = c_years < nyear
+
     vegetated = mean_final > VEG_THRESHOLD
     frame = pl.DataFrame(
         {
@@ -168,6 +239,7 @@ def main() -> int:  # noqa: PLR0915 -- one flat measurement pass, reported in on
             "settle_year": settle.astype(np.int32),
             "annual_settle_year": annual_settle.astype(np.int32),
             "trend_pct_per_century": trend,
+            "trend_pct_per_century_const_co2": trend_const,
             "vegetated": vegetated,
         }
     )
@@ -204,10 +276,16 @@ def main() -> int:  # noqa: PLR0915 -- one flat measurement pass, reported in on
     gx -= gx.mean()
     gtail = gsm[-TREND_YEARS:]
     gslope = float((gx * (gtail - gtail.mean())).sum() / (gx**2).sum())
+    gtrend_const = float(_slope_pct_per_century(gsm[c_first : c_last + 1, None])[0])
 
     veg = frame.filter(pl.col("vegetated"))
     sy = np.asarray(veg["settle_year"].to_numpy())
     tr = np.asarray(veg["trend_pct_per_century"].to_numpy())
+    trc = np.asarray(veg["trend_pct_per_century_const_co2"].to_numpy())
+    # Smoothed row i spans spin-up years i+1 .. i+NSPINYEAR (1-based), so a window of rows covers
+    # the years from its first row's first year to its last row's last year.
+    const_window = [c_first + 1, c_last + NSPINYEAR]
+    last_window = [smooth.shape[0] - TREND_YEARS + 1, nyear]
 
     summary = {
         "source_seed1": str(path(key1)),
@@ -249,6 +327,19 @@ def main() -> int:  # noqa: PLR0915 -- one flat measurement pass, reported in on
         "trend_pct_per_century_median": float(np.nanmedian(tr)),
         "frac_cells_still_rising_over_1pct_per_century": float(np.nanmean(tr > 1.0)),
         "frac_cells_still_rising_over_5pct_per_century": float(np.nanmean(tr > 5.0)),
+        # --- the same trends inside constant CO2 -----------------------------------------------
+        "co2_file": str(co2_file),
+        "co2_constant_spinup_years": c_years,
+        "co2_constant_through_model_year": first_model_year + c_years - 1,
+        "last200_window_spinup_years": last_window,
+        "last200_window_inside_co2_ramp": ramp,
+        "const_co2_window_spinup_years": const_window,
+        "const_co2_window_note": (
+            "30-year running-mean rows whose whole span lies before the first CO2 change; the "
+            "slope is in % of that window's own mean per century"
+        ),
+        "trend_pct_per_century_median_const_co2": float(np.nanmedian(trc)),
+        "global_trend_pct_per_century_const_co2": gtrend_const,
         "annual_settle_year_median": float(np.median(veg["annual_settle_year"].to_numpy())),
         "note": (
             "The raw annual series almost never settles, and that is interannual noise (fire, "

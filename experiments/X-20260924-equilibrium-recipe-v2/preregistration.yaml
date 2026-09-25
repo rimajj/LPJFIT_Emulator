@@ -1,0 +1,230 @@
+schema_version: 1
+
+exp_id: X-20260924-equilibrium-recipe-v2
+line: X
+
+# DRAFT, written by the T-features stream on 2026-09-23 for the integrator to review and seal.
+# Nothing in here has been run under this id. See `selection` below for exactly what WAS run.
+status: draft
+
+title: "DOES THE RECIPE THE DEV SCREEN CHOSE PREDICT THE SETTLED FOREST AT CELLS THE CHOICE NEVER SAW?"
+question: >
+  `X-20260923-equilibrium-from-climate` showed that the forest the 1000-year spin-up settles into is
+  learnable from the 30-year climate and the soil alone (0.608 mean variance explained, whole
+  15-degree tiles held out). A dev screen (`scripts/screen_equilibrium_map.py`) then compared
+  recipes using ONLY the cells of spatial folds 0-2 and chose one by a rule fixed before it ran:
+  the 86 climate features and 5 soil columns PLUS 120 features computed from the daily forcing
+  (a soil-water bucket under five rooting profiles, VPD-weighted water stress, dry-spell lengths,
+  and the tree types' own bioclimatic limits), a first stage that predicts the seven tree-type
+  shares and the four forest-scale quantities out of fold and hands them to the trait heads, and
+  LightGBM settings tuned on folds 0-2.
+
+  THE FALSIFIABLE CLAIM: on the 74 cells (2,220 spin-ups) of folds 3 and 4 -- each predicted by a
+  model trained on the other four folds, the sealed experiment's own construction restricted to
+  those rows -- that recipe explains more of the variation in the settled forest than the best
+  information-free competitor by more than 0.075 in the mean variance explained over the 19
+  quantities that vary.
+
+estimand:
+  name: skill_equilibrium_heldout_mean
+  definition: >
+    Rows are the 2,220 (cell, climate) spin-ups of pilot-v2-constco2 whose cell lies in fold 3 or
+    fold 4 of vegemu.score.blocked_spatial_folds(lon, lat, k=5, degrees=15, seed=42): 40 + 34 cells
+    x 30 climates. For each of the 22 quantities of SCORED_CONJUNCTIVE the target is the LEVEL in
+    the end-of-spin-up restart, on the sealed scale of `X-20260923-equilibrium-from-climate`
+    (log1p for stems per patch, above-ground biomass, leaf area index and soil carbon; the trait
+    quantiles as they are). A trait quantile is undefined in a treeless run and those rows are not
+    scored for traits.
+
+    Per quantity: 1 - SUM((pred - truth)^2) / SUM((truth - mean(truth))^2) over the scored rows
+    where the truth exists, computed once on the ASSEMBLED predictions of the two folds, the mean
+    taken over those rows' pooled truth. The statistic is the unweighted mean over the 19
+    quantities that vary; fine-root conductivity is excluded because it takes one value in every
+    tree-bearing run (`assert_constant` refuses the run if it varies).
+
+    Each fold-3 row is predicted by models trained on folds 0, 1, 2 and 4; each fold-4 row by models
+    trained on folds 0-3. The two-stage inputs of a training row come from models that never saw
+    that row's cell (inner folds = the training cells' own spatial folds); those of a scored row
+    from a model trained on the training cells only.
+
+    REPORTED BESIDE THE STATISTIC, NEVER DECIDED ON: the sealed recipe's own score on the same rows,
+    and, per quantity and on all 22 at once, the share of tree-bearing rows inside +-10 % of the
+    truth on the raw scale for every arm and for the ceiling. A FLAT 10 % band, stricter than the
+    acceptance rule max(10 %, the model's own two-run spread).
+  reference_basis: >
+    LPJmL-FIT 5.6.004, binary built 2026-08-12, one binary for all 6,000 runs. Pilot corpus
+    v2-constco2: 200 cells x 30 climates x 1 seed, single-cell 1000-year spin-ups, npatch=25, tree
+    PFTs only, base climate window 1970-1999, CO2 constant at 276.59 ppm; state from the uncensored
+    end-of-spin-up restart. SCORED: 74 of those 200 cells (folds 3-4 at 15 degrees), 2,220 runs;
+    TRAINED ON: the other four folds of each. Inputs: the sealed 91 (86 CLIMATE_FEATURES of the run's
+    own perturbed climate, including soil depth, and five soil columns from soil_code_test.soil.bin
+    as transcribed in scripts/screen_d95max.py) plus the 120 V3_FEATURES of
+    vegemu.corpus.features_v3, computed from the run's own daily forcing (table pinned below). 74 of
+    the 54,020 cells the acceptance criterion names. Dimensionless; a ratio of sums of squares.
+  units: dimensionless
+  kind: ratio
+
+data:
+  corpus: /p/tmp/jamirp/vegemu/corpus/pilot-v2-constco2
+  corpus_sha256: "9c117cb6c045fe90692fbee431dc3a33bf6ced1e4d5e7f4fb2350a1bce16903c"
+  plan_sha256: "bad787ade3fc609b25cf8ebc87dfd0978e4a869068d9408c73945ec3dc667f99"
+  version: pilot-v2-constco2
+  n_rows: 2220
+  # The daily-forcing feature table. The run refuses a table that does not hash to this.
+  # Built by scripts/build_features_v3.py --stage pilot, job 2281307 (code 072b73c): its hard check
+  # found the 200 control runs' features from their own forcing EXACTLY equal (all 120 features,
+  # max |diff| 0) to those from the global historical file, and job 2281308 repeated that through a
+  # second reader path.
+  features_v3:
+    path: /p/tmp/jamirp/vegemu/exp/T-features-v3/features_v3_pilot.parquet
+    sha256: "97a502e04801cb3b87b3bd82d8577f0a69b44236a0140aee7e7e58a77c44e29a"
+
+  split:
+    kind: blocked_spatial
+    k: 5
+    seed: 42
+    block_degrees: [15]
+    scored_folds: [3, 4]
+
+  leakage_checks:
+    - "Folds are assigned per CELL by vegemu.score.blocked_spatial_folds (15 degrees, k=5, seed 42): all 30 climates of a scored cell are held out together, and a scored cell is never in any model's training set."
+    - "SELECTION NEVER SAW FOLDS 3-4: the dev screen fitted every compared model on folds 0-2 only (inner CV: each dev fold predicted from the other two), and chose by a rule written in its docstring before it ran. Folds 3-4 entered it only as a quoted number (see `selection`)."
+    - "The feature set is the sealed 91 plus the 120 V3_FEATURES. The screen and the run assert that none of cell, lon, lat, tile, point or the five design axes (dtemp_k, fprec, sprec, frad, fiav) is a feature, and a unit test asserts the same for every recipe's feature list."
+    - "The V3 features are functions of the run's own daily forcing and the soil input only; they never read latitude (the model's daylength is replaced by a fixed daylight fraction for exactly this reason), a restart, a model output or CO2."
+    - "The two-stage inputs of every TRAINING row are out-of-fold predictions from models that never saw that row's cell; a unit test asserts that no stage-1 fit writes a row whose cell it was trained on."
+    - "The analogue null standardises its eight features on the TRAINING rows of each fold only."
+    - "CO2 is never a feature and is constant on this corpus (invariant 8)."
+    - "The model reads corpus.parquet and SELECTS its columns by name through the sealed `load`; it does not use build_features."
+
+# The recipe, read by scripts/exp_equilibrium_recipe_v2.py field by field, so the sealed hash
+# covers it. `params` override the sealed LightGBM settings (exp_model_pilot_response.PARAMS);
+# subsample_freq=1 and verbose=-1 are inherited from them. One fit per head, no random_state (the
+# sealed default), n_jobs=1.
+recipe:
+  name: "F[+v3] T[sealed] +2stage+tuned"
+  v3: true
+  soil: true
+  target: sealed
+  stage2: true
+  bag: 1
+  params:
+    colsample_bytree: 0.25510399478849033
+    learning_rate: 0.012333600806097219
+    min_child_samples: 11
+    n_estimators: 1281
+    num_leaves: 31
+    reg_lambda: 8.684761064447265
+    subsample: 0.5849866601490789
+
+# WHAT WAS ALREADY RUN, so a reader can see exactly what this confirmation can and cannot add.
+selection:
+  script: scripts/screen_equilibrium_map.py
+  job: 2281380 (tag T-fea-screen-std), code 177994e, output screen.json sha256 2bec9f6a88a19a4e...
+  rule: >
+    Greedy on the dev statistic (folds 0-2, inner CV), in a fixed order, a component kept only if
+    it gains more than 0.005: feature set (+v3 kept, +0.056; dropping the soil columns not kept,
+    -0.001), target form (logs -0.022 and median-plus-log-gaps -0.042 against the sealed form: not
+    kept), two stages (+0.012, kept), tuning (40 optuna trials on folds 0-2, +0.026, kept -- the
+    dev number of a tuned recipe is optimistic by construction), five-seed bagging (+0.001, not
+    kept). The dev statistic's seed-to-seed SD was 0.0025.
+  step0: "The screen's engine reproduced every sealed per-quantity value of X-20260923-equilibrium-from-climate exactly (max |difference| 0.0)."
+  held_out_already_quoted: >
+    ⚠ THE SCREEN ALSO PRINTED THE HELD-OUT VALUE OF EVERY CANDIDATE, as its brief required, so the
+    number this experiment will compute is ALREADY KNOWN: 0.657718 for this recipe on folds 3-4,
+    against 0.584931 for the sealed recipe on the same rows. This confirmation is therefore NOT a
+    blind test. What it protects is narrower: that the recipe was chosen on folds 0-2 alone by a
+    rule fixed in advance, so the folds-3-4 value carries no selection bias; sealing it fixes the
+    recipe, the nulls and the bar as a record. A genuinely unseen scored set exists only in new
+    runs -- see power_note.
+
+# Measured by scripts/screen_equilibrium_map.py, job 2281380, 2026-09-23, from the same functions
+# (exp_equilibrium_map.null_predictions on all five folds, scored on folds 3-4 rows). Every null is a
+# deterministic function of the corpus and the folds; the model arm recomputes all four with the
+# same code, so each must reproduce to the stated tolerance.
+nulls:
+  - id: training_mean
+    description: "Every held-out row gets the mean of its fold's training rows: the average forest."
+    expected:
+      statistic: skill_equilibrium_heldout_mean
+      value: -0.018378
+      tolerance: 0.001
+      derivation: "Measured, job 2281380: -0.018378 on folds 3-4 (-0.007223 on folds 0-2; -0.006259 on all five, as sealed)."
+
+  - id: nearest_analogue
+    description: >
+      THE BEST NULL. Copy the forest of the climatically nearest TRAINING row over the sealed
+      eight-feature analogue set, standardised on the training rows; per quantity the nearest row
+      where that quantity exists.
+    expected:
+      statistic: skill_equilibrium_heldout_mean
+      value: 0.044620
+      tolerance: 0.001
+      derivation: >
+        Measured, job 2281380: 0.044620 on folds 3-4 -- weaker there than on all five folds
+        (0.097666, sealed) or on folds 0-2 (0.116209): the two held-out folds are harder for a
+        lookup.
+
+  - id: nearest_geographic
+    description: "Copy the forest of the nearest TRAINING cell under the SAME design climate: the address null."
+    expected:
+      statistic: skill_equilibrium_heldout_mean
+      value: -0.154748
+      tolerance: 0.001
+      derivation: "Measured, job 2281380: -0.154748 on folds 3-4 (-0.130669 on all five, sealed)."
+
+  - id: shuffled
+    description: "The held-out truth permuted across each held-out fold's rows, seed 20260923. The sanity null."
+    expected:
+      statistic: skill_equilibrium_heldout_mean
+      value: -0.944359
+      tolerance: 0.01
+      derivation: "Near -1 by construction. Measured, job 2281380: -0.944359 on folds 3-4."
+
+decision_rule:
+  statistic: skill_equilibrium_heldout_mean
+  comparator: model_minus_best_null
+  pass_if: "> 0.075"
+  arms: [model, training_mean, nearest_analogue, nearest_geographic, shuffled]
+  multiplicity: none
+  power_note: >
+    THE BAR IS RE-DERIVED BY THE SEALED RULE, NOT CHOSEN. Under model_minus_best_null what
+    constrains the bar is the gap between the best null and the runner-up: on folds 3-4
+    nearest_analogue beats training_mean by 0.062998; plus the kill tests' 0.0118 of headroom
+    gives 0.074798, rounded up to the next 0.005: 0.075, which no null satisfies. A pass requires
+    the model to reach 0.119620. Only the 15-degree blocking is scored: at 5 degrees the folds are
+    different cells, some of which the screen's dev folds contained.
+
+    If any null returns something other than its stated value the outcome is `invalid`, not fail.
+    If any null satisfies pass_if the estimand has no power and the outcome MUST be `invalid`.
+
+    ⚠ BECAUSE THE HELD-OUT VALUE IS ALREADY KNOWN (selection.held_out_already_quoted), THIS BAR WILL
+    BE CLEARED BY A WIDE MARGIN AND THE PASS IS NOT NEWS. The informative comparison is the sealed
+    recipe on the same rows, reported beside and never decided on. A blind confirmation needs rows
+    nobody has scored: the pilot's second seed (runs/pilot-v2-constco2-s2, being run by the
+    integrator) scored at folds 3-4 with models trained on seed 1 of folds 0-2 plus the other held
+    fold, or new cells. The integrator may prefer to seal that variant instead of this one.
+
+  ceiling_note: >
+    ⚠ READ AGAINST 0.944405, NEVER AGAINST 1.0. Measured, job 2281380: noise variance from the 20
+    cells x 30 climates with a second run (pilot-v1 and pilot-v1-s2) over the variance of the
+    folds-3-4 truth; per quantity 0.836 (rooting depth p10) to 1.000 (soil carbon). ⚠ Those two
+    runs used the TRANSIENT CO2 path; no second run of v2 exists yet. One real run predicting
+    another lands inside +-10 % on all 22 at once in 4.9 % of 555 tree-bearing rows.
+
+  outcomes_note: >
+    (a) margin > 0.075: the chosen recipe is confirmed on the folds it was not chosen on -- which,
+    given the quoted 0.658, is expected. Quote it against the 0.944 ceiling, per quantity, with the
+    flat-10 % band rates and the sealed recipe's 0.585 beside it. (b) margin <= 0.075: the recipe
+    does not beat a lookup on these folds, contradicting the screen's own quote; that would mean
+    the confirmation apparatus differs from the screen's and must be found before anything else.
+    NONE is a fidelity claim: 74 of 54,020 cells, one seed, no scenario leg.
+
+compute:
+  launcher: scripts/sbatch_py.sh
+  tag: X-equilibrium-v2-model
+  partition: priority
+  est_core_hours: 1
+
+outputs:
+  - path: /p/tmp/jamirp/vegemu/exp/X-20260924-equilibrium-recipe-v2/metrics.json
+    kind: metrics
