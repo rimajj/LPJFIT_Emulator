@@ -1,0 +1,235 @@
+schema_version: 1
+
+exp_id: X-20260924-centred-composition-response
+line: X
+
+status: sealed
+
+title: "THE SPECIES-MIX KILL TEST WITH BLINDNESS AS THE COMPETITOR: does the model predict how the mix's response DIFFERS between climate changes, at one place?"
+question: >
+  The species-mix kill test (`X-20260921-pilot-composition-response-constco2-resealed`) passed at
+  0.445852 against a bar of 0.300203. Its blind arm (`X-20260923-pilot-composition-blind-arm`) --
+  the same model with the eleven forcing columns removed, so it knows the starting forest and not
+  the climate change -- scored 0.307940, 69 % of the headline, and CLEARED THE BAR BY ITSELF. So
+  that pass is not evidence that the mix's response to CLIMATE is learnable; only the
+  forcing-attributable part (about +0.138) is, and it was quoted as a difference of two scores
+  rather than tested.
+
+  THE FALSIFIABLE CLAIM: scored on the WITHIN-CELL CENTRED share change -- each cell's change
+  minus that cell's own mean change over its perturbations, so that the blind model scores exactly
+  0 by construction -- the same model, unchanged, beats the best competitor that remains by more
+  than 0.040. That is: it predicts how the shift in the mix DIFFERS between climate changes at one
+  place, which no knowledge of the starting forest alone can buy.
+
+estimand:
+  name: skill_composition_centred_mean
+  definition: >
+    The seven stem shares, the paired contrast and the treeless masking of the parent, UNCHANGED:
+    share of STEMS (not biomass) of each of the seven tree types; dtrue = share(cell, perturbed
+    point) - share(cell, control); `score.blank_treeless_composition` masks a treeless arm or
+    control, so 5,258 of 5,800 pairs are scored.
+
+    THE ONE CHANGE IS THE CENTRING (`vegemu.centred`). For each cell and type, over the design
+    points where dtrue exists: dtrue~ = dtrue - mean(dtrue), dpred~ = dpred - mean(dpred) over the
+    SAME points. Per type 1 - SUM(dpred~ - dtrue~)^2 / SUM(dtrue~^2) pooled over all scored pairs;
+    the statistic is the unweighted mean of the seven.
+
+    Any prediction constant within a cell scores EXACTLY 0.0: no change, the perfect per-cell
+    average change, and the blind model. Pinned bit for bit in tests/test_centred.py, including on a
+    real LightGBM fit, and asserted on the blind model's actual predictions in the job.
+
+    ⚠ THE DISCLOSURE THAT MUST TRAVEL WITH EVERY NUMBER FROM THIS ESTIMAND. By construction the
+    centring DISCARDS the response to the design-average perturbation: a model that got every
+    cell's average shift exactly right and nothing else scores 0. So this number is quoted BESIDE
+    the parent's uncentred 0.445852 and the blind arm's 0.307940, never instead of them.
+    The parent's three caveats also travel: stems not biomass; seven shares summing to 1, so six
+    free; scored only where a forest existed at both ends.
+
+    ONE SCORING RULE DIFFERS FROM THE PARENT: a missing prediction is filled with the cell's own
+    mean prediction (the neutral value under centring, contributing exactly 0) instead of with no
+    change (the neutral value of the uncentred score). The model never leaves a pair unpredicted;
+    the fills are in the donor nulls, measured at 15 deg: nearest_cell_response 328,
+    nearest_analogue_response 179, shuffled_cells 480 per type.
+
+    The per-level table (29 rows) is part of the result: a pooled pass with a fail at more than
+    half the levels must be reported as such.
+  reference_basis: >
+    LPJmL-FIT 5.6.004, binary built 2026-08-12, one binary for all 6,000 runs. Pilot corpus
+    v2-constco2: 200 cells x 30 climates x 1 seed, single-cell 1000-year spin-ups, npatch=25, tree
+    PFTs only, base climate window 1970-1999, CO2 constant at 276.59 ppm. Shares from the
+    end-of-spin-up restart (uncensored). 200 of the 56,986 eligible cells, not the acceptance
+    criterion's 54,020. 5,258 scored (cell, perturbed point) pairs. Dimensionless ratio of sums of
+    squares of CENTRED changes -- a ratio, not a level. The emulator never sees CO2 (invariant 8).
+  units: dimensionless
+  kind: ratio
+
+data:
+  corpus: /p/tmp/jamirp/vegemu/corpus/pilot-v2-constco2
+  corpus_sha256: "9c117cb6c045fe90692fbee431dc3a33bf6ced1e4d5e7f4fb2350a1bce16903c"
+  plan_sha256: "bad787ade3fc609b25cf8ebc87dfd0978e4a869068d9408c73945ec3dc667f99"
+  n_rows: 5258
+
+  split:
+    kind: blocked_spatial
+    k: 5
+    seed: 42
+    block_degrees: [15, 5]
+
+  leakage_checks:
+    - "Folds per CELL via vegemu.score.blocked_spatial_folds (15-degree primary, 5-degree sensitivity, k=5, seed 42), the parent's function and seed: a held-out cell's perturbed pairs are held out together. 164 populated 15-degree tiles, 194 at 5 degrees."
+    - "The model arm is the parent's model UNCHANGED -- scripts/exp_model_pilot_composition.py, same 96 features, parameters, folds and seed -- re-read by the centred statistic. APPARATUS CHECK IN THE SAME JOB: its uncentred score (the parent's no-change imputation) must reproduce the parent's 0.445852 to within 0.001; if it does not, the verdict must say so."
+    - "The held-out cell's CONTROL composition is an input, as in the parent and disclosed there. Under centring the control's realisation noise cancels exactly (it is common to all of a cell's pairs)."
+    - "Feature set excludes lon, lat and cell id (asserted before fitting); CO2 is never a feature and is constant on this corpus (invariant 8)."
+    - "The blind model's features contain none of the eleven forcing columns (forcing_index raises rather than no-ops if any is absent) and its predictions are ASSERTED constant within every cell before scoring."
+    - "cell_mean_oracle reads the held-out cell's own truth BY DESIGN: a demonstration that the best within-cell-constant prediction scores exactly 0, never seen by the model."
+    - "Cache is the 78-column /p/tmp/jamirp/vegemu/exp/X-pilot-decode-v2corpus/state_pilot-v2-constco2.parquet the parent's model read -- NOT the 181-column corpus.parquet. The job's metrics.json records the cache path."
+    - "Null values were derived before this file was written: the information-free nulls and the oracle by scripts/exp_derive_nulls_composition.py --centred (job 2281315), whose uncentred re-scoring of the same seven predictions reproduced the parent's sealed values; the two learned placebos by exp_model_pilot_composition.py --centred --placebos-only (job 2281318), which does NOT fit the model. Both were submitted under the parent's --exp because this worktree's path contains a word the submission guard keys on; neither appended anything to the parent."
+
+# Every value below was measured on the cache named above, at 15 deg (primary) with the 5-deg
+# value quoted, before this file was written. The model job recomputes every one with the same
+# code, folds and thread count (8), so each must reproduce.
+nulls:
+  - id: no_response
+    description: "Predict no shift anywhere. Constant within every cell, so exactly 0 under centring."
+    expected:
+      statistic: skill_composition_centred_mean
+      value: 0.0
+      tolerance: 0.000001
+      derivation: "ANALYTIC: a within-cell-constant prediction centres to exactly zero. Measured 0.0 at both radii, job 2281315."
+
+  - id: cell_mean_oracle
+    description: "Every pair gets the cell's TRUE mean share change: the perfect per-cell average. Reads the held-out truth by design."
+    expected:
+      statistic: skill_composition_centred_mean
+      value: 0.0
+      tolerance: 0.000001
+      derivation: "ANALYTIC, as for no_response. Measured 0.0 at both radii, job 2281315."
+
+  - id: blind_model
+    description: >
+      THE COMPETITOR THIS EXPERIMENT EXISTS TO BEAT: the parent's model with the eleven forcing
+      columns removed. Uncentred it cleared the parent's bar by itself (0.307940).
+    expected:
+      statistic: skill_composition_centred_mean
+      value: 0.0
+      tolerance: 0.000001
+      derivation: >
+        ANALYTIC: identical features across a cell's rows, so a constant prediction within the cell
+        (asserted in the job). Measured 0.0 at both radii, job 2281318; its uncentred score there
+        is 0.30792823 against the blind-arm experiment's 0.30794009 (job 2280432) -- a 1.2e-5
+        difference, the learner's thread noise (8 threads here, 1 there).
+
+  - id: proportional_median_response
+    description: >
+      The training cells' MEDIAN fractional share change at that point, applied to the cell's own
+      control shares. Varies by point and scales with the cell: a real competitor under centring.
+    expected:
+      statistic: skill_composition_centred_mean
+      value: 0.041775
+      tolerance: 0.01
+      derivation: "Measured out of fold, job 2281315: 0.041775 at 15 deg, 0.048760 at 5 deg. THE BEST NULL (uncentred 0.160203)."
+
+  - id: level_mean_response
+    description: "Every held-out cell gets the training cells' MEAN share change at that design point: the design's average shift, the same everywhere."
+    expected:
+      statistic: skill_composition_centred_mean
+      value: 0.020080
+      tolerance: 0.01
+      derivation: "Measured, job 2281315: 0.020080 at 15 deg, 0.025553 at 5 deg. The runner-up (uncentred 0.032731)."
+
+  - id: proportional_mean_response
+    description: "The same with the donor fractions aggregated by MEAN; unusable, kept on the record."
+    expected:
+      statistic: skill_composition_centred_mean
+      value: -16.157710
+      tolerance: 1.0
+      derivation: "Measured, job 2281315: -16.157710 at 15 deg, -15.521817 at 5 deg (uncentred -18.041954)."
+
+  - id: nearest_cell_response
+    description: "Copy the share change of the geographically nearest TRAINING cell at the same point."
+    expected:
+      statistic: skill_composition_centred_mean
+      value: -0.364471
+      tolerance: 0.01
+      derivation: "Measured, job 2281315: -0.364471 at 15 deg, -0.352508 at 5 deg; 328 fills per type."
+
+  - id: nearest_analogue_response
+    description: "Copy the share change of the climatically nearest TRAINING cell at the same point."
+    expected:
+      statistic: skill_composition_centred_mean
+      value: -0.347345
+      tolerance: 0.01
+      derivation: "Measured, job 2281315: -0.347345 at 15 deg, -0.298971 at 5 deg; 179 fills per type."
+
+  - id: shuffled_cells
+    description: "The true share change permuted across cells within each design point. The sanity null."
+    expected:
+      statistic: skill_composition_centred_mean
+      value: -1.771515
+      tolerance: 0.05
+      derivation: "Measured, job 2281315, identical at both radii (the permutation does not use the folds). Below -1 because other cells' shifts spread more within a cell than its own; 480 fills per type."
+
+  - id: scrambled_forcing
+    description: >
+      THE PLACEBO: the parent's model with the forcing columns re-paired by an independent
+      permutation per cell (seed 20260914, as in the blind-arm experiment's diagnostic).
+    expected:
+      statistic: skill_composition_centred_mean
+      value: -0.074207
+      tolerance: 0.01
+      derivation: >
+        Measured, job 2281318 (8 threads, as the model job): -0.074207 at 15 deg, -0.082287 at
+        5 deg; uncentred 0.28122473 against the blind-arm experiment's diagnostic 0.281223. 0.01
+        rather than 1e-6 because a learned arm carries float-level thread noise (measured 1.5e-6
+        and 1.2e-5 on this learner), which a 1e-6 tolerance would mistake for a broken apparatus.
+
+decision_rule:
+  statistic: skill_composition_centred_mean
+  comparator: model_minus_best_null
+  pass_if: "> 0.040"
+  arms: [model, no_response, cell_mean_oracle, blind_model, proportional_median_response, level_mean_response, proportional_mean_response, nearest_cell_response, nearest_analogue_response, shuffled_cells, scrambled_forcing]
+  multiplicity: none
+  power_note: >
+    THE THRESHOLD FOLLOWS THE PARENT'S CONSTRUCTION. proportional_median_response beats
+    level_mean_response by 0.021695 at 15 deg and by 0.023207 at 5 deg; the parent added 0.011802
+    of headroom to its larger gap, and the same here gives 0.035009, rounded up to 0.040, which no
+    null satisfies at either radius. A pass requires the model to reach 0.081775 at 15 deg.
+
+    ⚠ BLINDNESS IS A DECLARED NULL AT EXACTLY 0, so it costs the bar nothing and a pass beats it by
+    construction. ⚠ THE BAR IS LOW IN ABSOLUTE TERMS BECAUSE CENTRING GUTS EVERY INFORMATION-FREE
+    NULL (the parent's best, 0.160203, falls to 0.041775), not because the test is easy: read any
+    pass against the ceiling, not against the bar.
+
+    If any null returns something other than its stated value the outcome is `invalid`, not fail.
+    If any null satisfies pass_if the estimand has no power and the outcome MUST be `invalid`.
+
+  ceiling_note: >
+    ⚠ READ AGAINST 0.851752, NEVER AGAINST 1.0. Centring removes the control's realisation noise
+    exactly, leaving each arm's own noise minus the cell mean (vegemu.centred.centred_ceiling).
+    Measured, job 2281315, from the two ground-truth seeds masked exactly as the parent's ceiling:
+    0.851752 at rho = 0 (the conservative lower bound), 0.925876 at rho = 0.5; the same job
+    reproduced the parent's uncentred 0.862853. Per type at rho = 0: 0.9824 / 0.6465 / 0.9186 /
+    0.9830 / 0.9678 / 0.8012 / 0.6627. ⚠ Those seeds used the TRANSIENT CO2 path, as the parent's.
+
+  outcomes_note: >
+    THREE DISTINGUISHABLE RESULTS, ALL PRE-NAMED BEFORE THE RUN. Let M be the model's centred score.
+    (a) M > 0.081775 -- the model predicts how the shift in the mix DIFFERS between climate changes
+    at one place beyond the best information-free competitor; the blind competitor scores 0 by
+    construction. This is the first TESTED (not subtracted) evidence that the species-mix response
+    to climate is learnable, and it is the number that justifies line T's composition head.
+    (b) 0.041775 < M <= 0.081775 -- a real but small within-cell signal; the composition head is
+    then justified mainly by the average shift, which a blind re-weighting already buys.
+    (c) M <= 0.041775 -- the model does no better at the within-cell differences than "every type
+    changes by the same fraction of its share"; the parent's forcing-attributable +0.138 would be
+    mostly the design-average shift. Line T must be told in the same session.
+    ⚠ None is a fidelity claim (200 of 54,020 cells) and none licenses a claim about a scenario leg.
+
+compute:
+  launcher: scripts/sbatch_py.sh
+  tag: X-sc2-centred-comp-model
+  partition: priority
+  est_core_hours: 1
+
+outputs:
+  - path: /p/tmp/jamirp/vegemu/exp/X-20260924-centred-composition-response/metrics.json
+    kind: metrics

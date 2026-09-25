@@ -46,6 +46,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
@@ -54,9 +55,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import numpy as np
 import numpy.typing as npt
 import polars as pl
+from lightgbm import LGBMRegressor
 from scipy.spatial import cKDTree
 
-from exp_model_pilot_response import fit_predict_oof
+from exp_model_pilot_response import PARAMS, fit_predict_oof
 from screen_d95max import soil_columns
 from vegemu.corpus.climate import CLIMATE_FEATURES
 from vegemu.nulls import ANALOGUE_FEATURES
@@ -281,6 +283,111 @@ def score_arm(pred: Array, y: Array, raw: Array, points: list[str]) -> dict[str,
     }
 
 
+# ------------------------------------------------------------------------------------------------
+# RECIPE VARIANTS for the two owed follow-ups -- does soil texture add skill, and is skill still
+# rising with more training cells. ⚠ ADDITIONS ONLY: at their defaults `model_predictions` calls
+# `fit_predict_oof(x, y, folds, QUANTITIES)` on the untouched feature array, which is exactly what
+# the sealed run did, and a test pins that. `scripts/exp_equilibrium_ablations.py` drives them.
+# ------------------------------------------------------------------------------------------------
+@dataclass(frozen=True)
+class Recipe:
+    """One variant of the sealed recipe. The default instance IS the sealed recipe.
+
+    drop_soil          remove the five soil-TEXTURE columns (SOIL_FEATURES). Soil DEPTH stays: it is
+                       one of CLIMATE_FEATURES, and the question asked is about texture.
+    permute_soil_seed  keep the five columns but hand every cell another cell's soil, one whole
+                       coherent 5-vector per cell (a PLACEBO: the same columns, the same marginal
+                       distribution, no information about the cell's own soil)
+    train_cell_frac    fit on this fraction of each fold's TRAINING cells (whole cells, all 30 of
+                       their climates); the held-out cells scored are unchanged, so every fraction
+                       is scored on identical rows
+    subsample_seed     which subsample. Nested by construction: for one seed, the 25 % cells are
+                       inside the 50 %, which are inside the 75 %
+    """
+
+    drop_soil: bool = False
+    permute_soil_seed: int | None = None
+    train_cell_frac: float = 1.0
+    subsample_seed: int = 0
+
+    @property
+    def is_sealed(self) -> bool:
+        return self == Recipe()
+
+
+SOIL_INDEX: tuple[int, ...] = tuple(FEATURES.index(f) for f in SOIL_FEATURES)
+
+
+def model_features(x: Array, recipe: Recipe) -> Array:
+    """The model's feature array under `recipe`; the input array itself when nothing changes."""
+    if recipe.drop_soil and recipe.permute_soil_seed is not None:
+        raise ValueError("drop_soil and permute_soil_seed are two different arms, not one")
+    if recipe.permute_soil_seed is not None:
+        perm = np.random.default_rng(recipe.permute_soil_seed).permutation(x.shape[0])
+        out = x.copy()
+        out[:, :, list(SOIL_INDEX)] = x[perm][:, :, list(SOIL_INDEX)]
+        return out
+    if recipe.drop_soil:
+        keep = [i for i in range(x.shape[2]) if i not in SOIL_INDEX]
+        return x[:, :, keep]
+    return x
+
+
+def training_cells(
+    folds: npt.NDArray[np.int64], fold: int, frac: float, seed: int
+) -> npt.NDArray[np.bool_]:
+    """A boolean mask over cells: the subsample of `fold`'s training cells that is fitted on.
+
+    One permutation per (seed, fold), truncated, so smaller fractions are nested in larger ones.
+    """
+    pool = np.flatnonzero(folds != fold)
+    order = np.random.default_rng([seed, int(fold)]).permutation(pool)
+    keep = np.zeros(folds.shape[0], dtype=bool)
+    keep[order[: max(1, round(frac * pool.size))]] = True
+    return keep
+
+
+def fit_predict_subsampled(
+    x: Array, y: Array, folds: npt.NDArray[np.int64], *, frac: float, seed: int
+) -> Array:
+    """`fit_predict_oof` with each fold's training cells subsampled; otherwise the same loop.
+
+    Mirrors it line for line -- same learner, same parameters, same per-quantity drop of rows
+    whose target is undefined, same fallback -- so at `frac=1.0` it returns the same array, which a
+    test pins bit for bit.
+    """
+    n_cells, n_points, n_q = y.shape
+    flat_x = x.reshape(n_cells * n_points, x.shape[2])
+    flat_y = y.reshape(n_cells * n_points, n_q)
+    pred = np.full_like(y, np.nan)
+    for fold in np.unique(folds):
+        test = np.repeat(folds == fold, n_points)
+        train = np.repeat(training_cells(folds, int(fold), frac, seed), n_points)
+        for q in range(n_q):
+            usable = train & np.isfinite(flat_y[:, q])
+            if usable.sum() < 50 or not np.isfinite(flat_y[test, q]).any():
+                pred.reshape(-1, n_q)[test, q] = 0.0
+                continue
+            model = LGBMRegressor(**PARAMS)
+            model.fit(flat_x[usable], flat_y[usable, q])
+            pred.reshape(-1, n_q)[test, q] = model.predict(flat_x[test])
+        print(f"  fold {fold}: {int(test.sum())} rows predicted, frac {frac:g}", flush=True)
+    return pred
+
+
+def model_predictions(
+    x: Array, y: Array, folds: npt.NDArray[np.int64], recipe: Recipe | None = None
+) -> Array:
+    """The model arm's out-of-fold prediction under `recipe` (default: the sealed recipe)."""
+    recipe = recipe or Recipe()
+    xm = model_features(x, recipe)
+    if recipe.train_cell_frac >= 1.0:
+        return fit_predict_oof(xm, y, folds, QUANTITIES)
+    return fit_predict_subsampled(
+        xm, y, folds, frac=recipe.train_cell_frac, seed=recipe.subsample_seed
+    )
+
+
 def _parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--arm", choices=("nulls", "model"), required=True)
@@ -293,9 +400,27 @@ def _parse_args() -> argparse.Namespace:
     ap.add_argument("--exp-id", default="")
     ap.add_argument("--ceiling-base", default="pilot-v1")
     ap.add_argument("--ceiling-replicate", default="pilot-v1-s2")
+    # Recipe variants (model arm only). Any of them makes the run a DEV DIAGNOSTIC: it writes
+    # recipe.json and no result block, so it can never be appended to the sealed experiment.
+    ap.add_argument("--drop-soil", action="store_true", help="remove the 5 soil-texture columns")
+    ap.add_argument(
+        "--permute-soil", type=int, default=None, help="placebo: seed of a cell shuffle"
+    )
+    ap.add_argument("--train-cell-frac", type=float, default=1.0, help="fraction of training cells")
+    ap.add_argument("--subsample-seed", type=int, default=0, help="which training-cell subsample")
     args = ap.parse_args()
     if args.arm == "model" and args.threshold is None:
         ap.error("--threshold is required for the model arm: it must match the sealed rule")
+    if not 0.0 < args.train_cell_frac <= 1.0:
+        ap.error("--train-cell-frac must be in (0, 1]")
+    args.recipe = Recipe(
+        drop_soil=args.drop_soil,
+        permute_soil_seed=args.permute_soil,
+        train_cell_frac=args.train_cell_frac,
+        subsample_seed=args.subsample_seed,
+    )
+    if args.arm == "nulls" and not args.recipe.is_sealed:
+        ap.error("the recipe options change the MODEL; the nulls arm does not fit one")
     return args
 
 
@@ -325,6 +450,8 @@ def main() -> int:
         },
         "by_blocking": {},
     }
+    if not args.recipe.is_sealed:
+        report["recipe"] = asdict(args.recipe)
     for degrees in (args.degrees, args.also_degrees):
         folds = blocked_spatial_folds(lon, lat, k=args.k, degrees=degrees, seed=42)
         print(f"\n=== blocking {degrees:g} deg ===", flush=True)
@@ -333,7 +460,8 @@ def main() -> int:
             for n, p in null_predictions(x, y, folds, lon, lat).items()
         }
         if args.arm == "model":
-            arms["model"] = score_arm(fit_predict_oof(x, y, folds, QUANTITIES), y, raw, points)
+            pred = model_predictions(x, y, folds, args.recipe)
+            arms["model"] = score_arm(pred, y, raw, points)
         for n, a in arms.items():
             print(f"  {n:20s} {a['pooled']:+.6f}   band conj {a['band']['conjunctive']:.4f}")  # type: ignore[index]
         report["by_blocking"][f"{degrees:g}deg"] = arms  # type: ignore[index]
@@ -356,14 +484,16 @@ def main() -> int:
             "threshold": args.threshold,
             "verdict": "pass" if margin > args.threshold else "fail",
         }
-        report.update(
-            append_result_block(
-                statistic=STATISTIC,
-                arms={n: float(primary[n]["pooled"]) for n in ("model", *NULLS)},
-                n=int(report["n_rows"]),  # type: ignore[arg-type]
+        if args.recipe.is_sealed:  # a variant recipe is a dev diagnostic: no result block
+            report.update(
+                append_result_block(
+                    statistic=STATISTIC,
+                    arms={n: float(primary[n]["pooled"]) for n in ("model", *NULLS)},
+                    n=int(report["n_rows"]),  # type: ignore[arg-type]
+                )
             )
-        )
-    name = "metrics.json" if args.arm == "model" else "nulls.json"
+    name = "nulls.json" if args.arm == "nulls" else "metrics.json"
+    name = name if args.recipe.is_sealed else "recipe.json"
     (out / name).write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(f"\nwrote {out / name}")
     return 0

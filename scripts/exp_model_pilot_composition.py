@@ -247,7 +247,80 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="check the plumbing and STOP before fitting. Safe to run before the seal.",
     )
-    return ap.parse_args()
+    # Additions only: without these two the script is exactly the arm its sealed experiments ran.
+    ap.add_argument(
+        "--centred",
+        action="store_true",
+        help=(
+            "score the WITHIN-CELL CENTRED share change (vegemu.centred), with the blind and "
+            "scrambled models as declared nulls -- see scripts/centred_arms.py"
+        ),
+    )
+    ap.add_argument(
+        "--placebos-only",
+        action="store_true",
+        help="with --centred: fit only the nulls and the two learned placebos, NOT the model",
+    )
+    args = ap.parse_args()
+    if (args.placebos_only and not args.centred) or (args.centred and args.blind):
+        ap.error("--placebos-only needs --centred, and --centred fits the blind arm itself")
+    return args
+
+
+def _uncentred(
+    pred: np.ndarray, dtrue: np.ndarray, points: list[str], q: tuple[str, ...]
+) -> dict[str, object]:
+    """The sealed kill test's scoring, unchanged: no-change imputation, then the uncentred ratio."""
+    return _per_level_and_pooled(impute_no_change(pred, dtrue)[0], dtrue, points, q)
+
+
+def main_centred(
+    args: argparse.Namespace,
+    report: dict[str, object],
+    *,
+    x: np.ndarray,
+    names: list[str],
+    dtrue: np.ndarray,
+    control: np.ndarray,
+    scored_cells: pl.DataFrame,
+    points: list[str],
+) -> int:
+    """The `--centred` arm: the sealed kill test's model, re-read by the centred statistic.
+
+    ⚠ THE IMPUTATION RULE CHANGES WITH THE STATISTIC, AND ONLY THERE. The uncentred score fills a
+    missing prediction with no change, the neutral value for that statistic; under centring the
+    neutral value is the cell's own mean prediction, which `vegemu.centred` applies itself. The
+    uncentred diagnostic keeps the sealed rule, so it must reproduce 0.445852 (full), and the
+    0.307940 and 0.281223 of the blind-arm experiment to within the learner's thread noise.
+    """
+    # centred_arms imports this module, so a top-level import would be circular.
+    from centred_arms import Problem, run_all_radii  # noqa: PLC0415
+
+    report["cache"] = str(args.cache)
+    report["basis"] = (
+        "Tree-type stem shares (share of INDIVIDUALS, not biomass-weighted) from the "
+        f"end-of-spin-up restart of pilot corpus {args.version}: 200 cells x 30 climates x 1 "
+        "seed, npatch=25. "
+        "Within-cell paired contrast against the cell's own control climate, then CENTRED on the "
+        "cell's own mean change over its scored design points. Dimensionless ratio, not a level."
+    )
+    problem = Problem(x, names, dtrue, control, scored_cells, points, COMPOSITION_QUANTITIES)
+    report.update(
+        run_all_radii(
+            problem,
+            k=args.k,
+            radii=(args.degrees, args.also_degrees),
+            threshold=args.threshold,
+            statistic="skill_composition_centred_mean",
+            uncentred=_uncentred,
+            placebos_only=args.placebos_only,
+        )
+    )
+    report["arm"] = "placebos" if args.placebos_only else "model"
+    name = "placebos.json" if args.placebos_only else "metrics.json"
+    (Path(args.out) / name).write_text(json.dumps(report, indent=2), encoding="utf-8")
+    print(f"\nwrote {Path(args.out) / name}")
+    return 0
 
 
 def main() -> int:
@@ -298,6 +371,18 @@ def main() -> int:
         ),
         "by_blocking": {},
     }
+
+    if args.centred and not args.dry_run:
+        return main_centred(
+            args,
+            report,
+            x=x,
+            names=names,
+            dtrue=dtrue,
+            control=control,
+            scored_cells=scored_cells,
+            points=points,
+        )
 
     if args.dry_run:
         return dry_run(

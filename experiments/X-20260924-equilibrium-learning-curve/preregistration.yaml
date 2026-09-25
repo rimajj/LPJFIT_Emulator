@@ -1,0 +1,130 @@
+schema_version: 1
+
+exp_id: X-20260924-equilibrium-learning-curve
+line: X
+
+status: sealed
+
+title: "IS THE CLIMATE-ONLY EQUILIBRIUM MAP STILL IMPROVING WITH MORE TRAINING PLACES?"
+question: >
+  `X-20260923-equilibrium-from-climate` passed at 0.607582 with about 160 training cells per fold,
+  against an attainable 0.950. Whether the next corpus should be bigger -- the "mid corpus" -- turns
+  on whether that number is still rising with the number of training places, or has flattened.
+
+  A DESCRIPTIVE CURVE with one pre-registered question. The curve: the held-out skill when each
+  training fold keeps 25, 50, 75 or 100 % of its cells (about 40, 80, 120, 160), five fixed
+  subsamples per fraction, the held-out cells unchanged. THE FALSIFIABLE CLAIM: the last step of
+  the curve -- from 75 % to 100 % -- still adds more than 0.020 of variance explained.
+
+estimand:
+  name: skill_gain_last_quarter
+  definition: >
+    gain = S(100 %) - mean over subsample seeds 1-5 of S(75 %), where S is `skill_equilibrium_mean`
+    exactly as sealed (per quantity 1 - SSE / SS about the pooled truth mean over every row where
+    the truth exists, the four forest-scale quantities on log1p, mean over the 19 that vary), all
+    arms fitted by the sealed recipe in one job and scored on the IDENTICAL held-out rows. S(100 %)
+    IS the sealed recipe.
+
+    SUBSAMPLING. Within each training fold, a fraction f of its CELLS is kept, whole (all 30 of a
+    cell's climates together), by one permutation per (seed, fold) truncated to round(f x n); so
+    for one seed the 25 % cells sit inside the 50 %, which sit inside the 75 %. The held-out fold is
+    never subsampled, so every arm is scored on the same 6,000 rows and every difference is paired.
+
+    REPORTED BESIDE IT, NEVER DECIDED ON: the whole curve (per fraction the five seeds, their mean
+    and spread, per quantity), and the gain per doubling of training cells (25 -> 50 % and
+    50 -> 100 %). ⚠ No extrapolation of the curve beyond 160 cells is licensed by this experiment.
+  reference_basis: >
+    LPJmL-FIT 5.6.004, binary built 2026-08-12, one binary for all 6,000 runs. Pilot corpus
+    v2-constco2: 200 cells x 30 climates x 1 seed, single-cell 1000-year spin-ups, npatch=25, tree
+    PFTs only, base climate window 1970-1999, CO2 constant at 276.59 ppm. State from the
+    end-of-spin-up restart (uncensored). Inputs as the sealed map: the 86 climate features
+    (including soil depth) and five soil-texture columns. Training cells per fold at 100 %: 159,
+    159, 156, 160, 166 at 15 deg. 200 of the 56,986 eligible cells, not the acceptance criterion's
+    54,020. Dimensionless; a DIFFERENCE of two ratios of sums of squares -- a ratio, not a level.
+  units: dimensionless
+  kind: ratio
+
+data:
+  corpus: /p/tmp/jamirp/vegemu/corpus/pilot-v2-constco2
+  corpus_sha256: "9c117cb6c045fe90692fbee431dc3a33bf6ced1e4d5e7f4fb2350a1bce16903c"
+  plan_sha256: "bad787ade3fc609b25cf8ebc87dfd0978e4a869068d9408c73945ec3dc667f99"
+  n_rows: 6000
+
+  split:
+    kind: blocked_spatial
+    k: 5
+    seed: 42
+    block_degrees: [15, 5]
+
+  leakage_checks:
+    - "Folds per CELL by vegemu.score.blocked_spatial_folds (15-degree primary, 5-degree sensitivity, k=5, seed 42), the sealed map's. The subsample is drawn from the TRAINING cells of each fold only (a unit test asserts it never touches the held-out fold), so no fraction sees any held-out place."
+    - "Every arm is the sealed recipe (scripts/exp_equilibrium_map.py) with ONE change, the training-cell fraction, set through exp_equilibrium_map.Recipe; at 100 % the subsampling path returns the sealed fit bit for bit (unit test)."
+    - "APPARATUS CHECK IN THE SAME JOB: S(100 %) must be 0.6075822354370696 at 15 deg to within 1e-9 -- each fit runs pinned to one CPU as the sealed run did (single-thread fits measured bit-identical across both partitions, jobs 2281430, 2281431), and the output records the CPU count every fit saw."
+    - "No feature names the cell, its location or the design point (asserted in load); CO2 is never a feature and is constant on this corpus (invariant 8)."
+    - "The noise null was derived BEFORE this file was written by scripts/exp_equilibrium_ablations.py --study curve --stage placebo (job 2281438, output sha256 0179f9afda8341cb...), which fits the 75 % arm under ten seeds and writes ONLY the gap between two five-seed means and the ten seeds' spread -- never a level, since the 75 % level beside the known 0.607582 would be the answer. Submitted under the parent's --exp because this worktree's path contains a word the submission guard keys on; nothing was appended to the parent."
+
+nulls:
+  - id: no_further_gain
+    description: "\"The curve has flattened\": the 100 % recipe compared with itself. Computed in the job as S(100 %) - S(100 %)."
+    expected:
+      statistic: skill_gain_last_quarter
+      value: 0.0
+      tolerance: 0.000001
+      derivation: "ANALYTIC: a quantity minus itself."
+
+  - id: subsample_noise
+    description: >
+      |mean S(75 %) over seeds 1-5 - mean S(75 %) over seeds 6-10|: how far apart two estimates of
+      the SAME quantity land by the luck of the subsample alone. It has sqrt(2) times the noise of
+      the estimand's own 75 % term, so it is the conservative yardstick.
+    expected:
+      statistic: skill_gain_last_quarter
+      value: 0.004413
+      tolerance: 0.001
+      derivation: >
+        Measured, job 2281438 (every fit on one CPU): 0.004413 at 15 deg, 0.002699 at 5 deg; the
+        ten 75 % seeds spread with sd 0.007967 (15 deg) and 0.005501 (5 deg). The model job refits
+        all ten; the fits are deterministic, so 0.001 is a margin, not noise.
+
+decision_rule:
+  statistic: skill_gain_last_quarter
+  comparator: model_absolute
+  pass_if: "> 0.020"
+  arms: [model, no_further_gain, subsample_noise]
+  multiplicity: none
+  power_note: >
+    THE THRESHOLD FOLLOWS THE PARENT'S CONSTRUCTION. Under model_absolute each null is judged on
+    its own value, so the threshold must clear the largest null at either radius: subsample_noise
+    at 15 deg, 0.004413. The parent's 0.0118 of headroom gives 0.016213, rounded up to 0.020 on the
+    parent's 0.005 grid; no null satisfies it. In words: the last 40 or so training places must add
+    two percentage points of variance explained -- about 5.6 times the standard error of the
+    five-seed 75 % mean (0.007967 / sqrt 5 = 0.0036).
+
+    If any null returns something other than its stated value the outcome is `invalid`, not fail.
+    If any null satisfies pass_if the estimand has no power and the outcome MUST be `invalid`.
+
+  ceiling_note: >
+    For scale only: the sealed map is read against 0.950 (rho = 0), so the gap a bigger corpus
+    could close is at most 0.950 - 0.608 = 0.342. The curve says how much of that more of the SAME
+    kind of place buys; it cannot say what a corpus covering new climates would buy.
+
+  outcomes_note: >
+    THREE DISTINGUISHABLE RESULTS, ALL PRE-NAMED BEFORE THE RUN. Let G be the last-quarter gain.
+    (a) G > 0.020 -- skill is still clearly rising at 160 training places, so more places of this
+    design should raise it: evidence FOR the mid corpus on data volume alone.
+    (b) 0.004413 < G <= 0.020 -- still rising, by less than the bar; more places help a little, and
+    the mid corpus's case must rest mainly on covering more of the 54,020 cells' climates, which
+    this curve cannot measure.
+    (c) G <= 0.004413 -- flat within the subsampling noise: more places of the same design are not
+    the lever for the remaining gap to 0.950; features, learner or target are.
+    ⚠ None is a fidelity claim (200 of 54,020 cells) and none says anything about a scenario leg.
+
+compute:
+  launcher: scripts/sbatch_py.sh
+  tag: X-sc2-eq-curve-model
+  partition: priority
+  est_core_hours: 3
+
+outputs:
+  - path: /p/tmp/jamirp/vegemu/exp/X-20260924-equilibrium-learning-curve/metrics.json
+    kind: metrics

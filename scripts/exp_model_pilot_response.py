@@ -281,7 +281,67 @@ def _parser() -> argparse.ArgumentParser:
         default="X-20260909-pilot-warming-response",
         help="stamped into the output for append_result.py",
     )
+    # ⚠ THE THREE OPTIONS BELOW ARE ADDITIONS ONLY. Without them this script is exactly the arm
+    # three sealed experiments ran, and `decide` keeps its historical 0.080 default.
+    ap.add_argument(
+        "--threshold",
+        type=float,
+        default=0.080,
+        help="the pre-registered pass margin printed in metrics.json; MUST match the sealed rule",
+    )
+    ap.add_argument(
+        "--centred",
+        action="store_true",
+        help=(
+            "score the WITHIN-CELL CENTRED response (vegemu.centred), with the blind and scrambled "
+            "models as declared nulls -- see scripts/centred_arms.py"
+        ),
+    )
+    ap.add_argument(
+        "--placebos-only",
+        action="store_true",
+        help="with --centred: fit only the nulls and the two learned placebos, NOT the model",
+    )
     return ap
+
+
+def main_centred(
+    args: argparse.Namespace,
+    report: dict[str, object],
+    *,
+    x: npt.NDArray[np.float64],
+    names: list[str],
+    dtrue: npt.NDArray[np.float64],
+    control: npt.NDArray[np.float64],
+    scored_cells: pl.DataFrame,
+    points: list[str],
+) -> int:
+    """The `--centred` arm: the same model, re-read by the within-cell centred statistic.
+
+    The uncentred scorer handed to the shared driver is `_per_level_and_pooled` unchanged, so the
+    full model's uncentred diagnostic must reproduce the sealed kill test's 0.558968, and the blind
+    and scrambled ones the 0.362322 and 0.331019 of the earlier blind-arm diagnostic.
+    """
+    # centred_arms imports this module, so a top-level import would be circular.
+    from centred_arms import Problem, run_all_radii  # noqa: PLC0415
+
+    problem = Problem(x, names, dtrue, control, scored_cells, points, RESPONSE_QUANTITIES)
+    report.update(
+        run_all_radii(
+            problem,
+            k=args.k,
+            radii=(args.degrees, args.also_degrees),
+            threshold=args.threshold,
+            statistic="skill_response_centred_mean",
+            uncentred=_per_level_and_pooled,
+            placebos_only=args.placebos_only,
+        )
+    )
+    report["arm"] = "placebos" if args.placebos_only else "model"
+    name = "placebos.json" if args.placebos_only else "metrics.json"
+    (Path(args.out) / name).write_text(json.dumps(report, indent=2), encoding="utf-8")
+    print(f"\nwrote {Path(args.out) / name}")
+    return 0
 
 
 def main() -> int:
@@ -327,6 +387,20 @@ def main() -> int:
         "model": {"kind": "LGBMRegressor", "one_per_quantity": True, "params": PARAMS},
         "by_blocking": {},
     }
+    if args.placebos_only and not args.centred:
+        raise SystemExit("--placebos-only has a meaning only with --centred")
+    if args.centred:
+        report["cache"] = str(cache)
+        return main_centred(
+            args,
+            report,
+            x=x,
+            names=names,
+            dtrue=dtrue,
+            control=control,
+            scored_cells=scored_cells,
+            points=points,
+        )
 
     for degrees in (args.degrees, args.also_degrees):
         folds = blocked_spatial_folds(lon, lat, k=args.k, degrees=degrees, seed=42)
@@ -344,7 +418,7 @@ def main() -> int:
             k=args.k,
             degrees=degrees,
         )
-        decision = decide(model_score, nulls)
+        decision = decide(model_score, nulls, threshold=args.threshold)
         report["by_blocking"][f"{degrees:g}deg"] = {  # type: ignore[index]
             "blocking_degrees": degrees,
             "k_folds": args.k,

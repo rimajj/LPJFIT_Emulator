@@ -1,0 +1,258 @@
+schema_version: 1
+
+exp_id: X-20260924-centred-warming-response
+line: X
+
+status: sealed
+
+title: "THE WARMING KILL TEST WITH BLINDNESS AS THE COMPETITOR: does the model predict how a forest's response DIFFERS between climate changes, at one place?"
+question: >
+  The warming kill test (`X-20260921-pilot-warming-response-constco2-resealed`) passed at 0.558968
+  against a bar of 0.257725. But a model that sees the cell's starting forest and its baseline
+  climate and CANNOT see which of the 29 climate changes it is asked about scores 0.362322 -- 64.8 %
+  of the headline -- because knowing what kind of forest this is lets you guess its typical change.
+  None of the seven information-free nulls knows the starting forest, so none of them is that
+  competitor, and the uncentred statistic cannot make it one without a bar near the blind arm
+  (the power note of the parent explains why).
+
+  THE FALSIFIABLE CLAIM: scored on the WITHIN-CELL CENTRED change -- each cell's change minus that
+  cell's own mean change over its 29 perturbations, so that the blind model scores exactly 0 by
+  construction -- the same model, unchanged, beats the best competitor that remains by more than
+  0.045. That is: it predicts how the response DIFFERS between climate changes at one place, which
+  no knowledge of the starting forest alone can buy.
+
+estimand:
+  name: skill_response_centred_mean
+  definition: >
+    The seven quantities, the paired contrast and the treeless rule of the parent, UNCHANGED: stems
+    per patch, above-ground biomass, leaf area index, soil carbon, and the medians of stem height,
+    wood density and specific leaf area; dtrue = state(cell, perturbed point) - state(cell,
+    control); trait medians undefined in a treeless arm and not scored there.
+
+    THE ONE CHANGE IS THE CENTRING (`vegemu.centred`). For each cell and quantity, over the design
+    points where dtrue exists (at most 29): dtrue~ = dtrue - mean(dtrue), dpred~ = dpred -
+    mean(dpred) over the SAME points. Per quantity 1 - SUM(dpred~ - dtrue~)^2 / SUM(dtrue~^2)
+    pooled over all scored pairs; the statistic is the unweighted mean of the seven.
+
+    Any prediction constant within a cell scores EXACTLY 0.0: no change, the perfect per-cell
+    average change, and the blind model (its 29 rows per cell have identical features, so identical
+    predictions). Pinned bit for bit in tests/test_centred.py, including on a real LightGBM fit, and
+    asserted on the blind model's actual predictions in the job.
+
+    ⚠ THE DISCLOSURE THAT MUST TRAVEL WITH EVERY NUMBER FROM THIS ESTIMAND. By construction the
+    centring DISCARDS the response to the design-average perturbation: a model that got every
+    cell's average change exactly right and nothing else scores 0, and one that got that average
+    badly wrong but the differences right scores 1. So this number is quoted BESIDE the parent's
+    uncentred 0.558968, never instead of it. Together they say how much of the response is read
+    from the forcing; neither alone does.
+
+    ONE SCORING RULE DIFFERS FROM THE PARENT, AND IT TOUCHES ONLY THE NULLS. The parent dropped a
+    pair whose PREDICTION was missing; here every arm is scored on the identical pairs (where the
+    truth exists) and a missing prediction is filled with the cell's own mean prediction -- the
+    neutral value under centring, contributing exactly 0. The model never leaves a pair
+    unpredicted; the fills are all in the donor nulls' trait medians, measured at 15 deg:
+    nearest_cell_response 328, nearest_analogue_response 179, shuffled_cells 480 per trait median.
+
+    The per-level table (29 rows) is part of the result, as in the parent: a pooled pass with a fail
+    at more than half the levels must be reported as such.
+  reference_basis: >
+    LPJmL-FIT 5.6.004, binary built 2026-08-12, one binary for all 6,000 runs. Pilot corpus
+    v2-constco2: 200 cells x 30 climates x 1 seed, single-cell 1000-year spin-ups, npatch=25, tree
+    PFTs only, base climate window 1970-1999, CO2 constant at 276.59 ppm. State from the
+    end-of-spin-up restart (uncensored). 200 of the 56,986 eligible cells (stems_total > 0 in the
+    historical seed-1 end-of-spin-up restart), not the acceptance criterion's 54,020. 5,800
+    (cell, perturbed point) pairs, of which 5,258 score the trait medians (a treeless control or
+    arm has no median). Dimensionless ratio of sums of squares of CENTRED changes -- a ratio, not a
+    level. The emulator never sees CO2 (invariant 8).
+  units: dimensionless
+  kind: ratio
+
+data:
+  corpus: /p/tmp/jamirp/vegemu/corpus/pilot-v2-constco2
+  corpus_sha256: "9c117cb6c045fe90692fbee431dc3a33bf6ced1e4d5e7f4fb2350a1bce16903c"
+  plan_sha256: "bad787ade3fc609b25cf8ebc87dfd0978e4a869068d9408c73945ec3dc667f99"
+  n_rows: 5800
+
+  split:
+    kind: blocked_spatial
+    k: 5
+    seed: 42
+    block_degrees: [15, 5]
+
+  leakage_checks:
+    - "Folds per CELL via vegemu.score.blocked_spatial_folds (15-degree primary, 5-degree sensitivity, k=5, seed 42), the parent's function and seed: a held-out cell's 29 perturbed pairs are held out together. 164 populated 15-degree tiles, 194 at 5 degrees."
+    - "The model arm is the parent's model UNCHANGED -- scripts/exp_model_pilot_response.py, same 96 features, parameters, folds and seed -- re-read by the centred statistic. APPARATUS CHECK IN THE SAME JOB: its uncentred score must reproduce the parent's 0.558968 to within 0.001; if it does not, the verdict must say so."
+    - "The held-out cell's CONTROL state is an input, as in the parent and disclosed there: in production a real present-day restart always exists. Under centring the control's own realisation noise cancels exactly (it is common to all 29 of a cell's pairs), so it cannot be what the model is scored on."
+    - "Feature set excludes lon, lat and cell id (asserted before fitting); CO2 is never a feature and is constant on this corpus (invariant 8)."
+    - "The blind model's features contain none of the eleven forcing columns (forcing_index raises rather than no-ops if any is absent) and its predictions are ASSERTED constant within every cell before scoring, which is what makes its exactly-0 a measurement."
+    - "cell_mean_oracle reads the held-out cell's own truth BY DESIGN: it is a demonstration that the best within-cell-constant prediction scores exactly 0, not a competitor that could leak into the model, which never sees it."
+    - "Cache is the 78-column /p/tmp/jamirp/vegemu/exp/X-pilot-decode-v2corpus/state_pilot-v2-constco2.parquet the parent's model read -- NOT the 181-column corpus.parquet, which build_features would absorb into the feature set. The job's metrics.json records the cache path."
+    - "Null values were derived before this file was written: the information-free nulls and the oracle by scripts/exp_derive_nulls_pilot.py --centred (job 2281314), whose uncentred re-scoring of the same seven predictions reproduced all seven of the parent's sealed values exactly; the two learned placebos by exp_model_pilot_response.py --centred --placebos-only (job 2281317), which does NOT fit the model, so the answer was not in the room. That job was submitted under the parent's --exp because this worktree's path contains a word the submission guard keys on; it appended nothing to the parent."
+
+# Every value below was measured on the cache named above, at 15 deg (primary) with the 5-deg
+# value quoted, before this file was written. The model job recomputes every one of them with the
+# same code, the same folds and the same thread count (8), so each must reproduce.
+nulls:
+  - id: no_response
+    description: "Predict no change anywhere. Constant within every cell, so exactly 0 under centring."
+    expected:
+      statistic: skill_response_centred_mean
+      value: 0.0
+      tolerance: 0.000001
+      derivation: "ANALYTIC: a within-cell-constant prediction centres to exactly zero. Measured 0.0 at both radii, job 2281314."
+
+  - id: cell_mean_oracle
+    description: >
+      Every pair gets the cell's TRUE mean change over its scored points -- the perfect per-cell
+      average, and the best any within-cell-constant prediction can do. Reads the held-out truth by
+      design; declared so that "even a perfect per-cell average buys nothing" is a row of the table.
+    expected:
+      statistic: skill_response_centred_mean
+      value: 0.0
+      tolerance: 0.000001
+      derivation: "ANALYTIC, as for no_response. Measured 0.0 at both radii, job 2281314."
+
+  - id: blind_model
+    description: >
+      THE COMPETITOR THIS EXPERIMENT EXISTS TO BEAT. The parent's model with the eleven forcing
+      columns removed (the five design axes and six derived forcing deltas): it knows the starting
+      forest and the baseline climate, not the perturbation. Uncentred it scores 0.362322.
+    expected:
+      statistic: skill_response_centred_mean
+      value: 0.0
+      tolerance: 0.000001
+      derivation: >
+        ANALYTIC: its features are identical across a cell's 29 rows, so its prediction is constant
+        within the cell (asserted in the job). Measured 0.0 at both radii, job 2281317, whose
+        uncentred score 0.36232209 reproduces the parent's blind diagnostic (0.362322, job 2262406).
+
+  - id: level_mean_response
+    description: >
+      Every held-out cell gets the training cells' MEAN change at that design point. It varies by
+      point, so it survives centring: it is "the design's average response SHAPE", the same at
+      every place.
+    expected:
+      statistic: skill_response_centred_mean
+      value: 0.088493
+      tolerance: 0.01
+      derivation: "Measured out of fold, job 2281314: 0.088493 at 15 deg, 0.092008 at 5 deg. THE BEST NULL under centring (uncentred it was second, 0.098170)."
+
+  - id: proportional_median_response
+    description: >
+      The training cells' MEDIAN fractional change at that point, applied to the cell's own control
+      level. It varies by point and scales with the cell, so it is a real competitor under centring.
+    expected:
+      statistic: skill_response_centred_mean
+      value: 0.077213
+      tolerance: 0.01
+      derivation: "Measured, job 2281314: 0.077213 at 15 deg, 0.079112 at 5 deg. The runner-up (the parent's best null, 0.162725 uncentred)."
+
+  - id: proportional_mean_response
+    description: "The same with the donor fractions aggregated by MEAN; unusable, kept on the record."
+    expected:
+      statistic: skill_response_centred_mean
+      value: -14.951386
+      tolerance: 1.0
+      derivation: "Measured, job 2281314: -14.951386 at 15 deg, -14.910671 at 5 deg (uncentred -15.027258)."
+
+  - id: nearest_cell_response
+    description: "Copy the change of the geographically nearest TRAINING cell at the same point."
+    expected:
+      statistic: skill_response_centred_mean
+      value: -0.294013
+      tolerance: 0.01
+      derivation: "Measured, job 2281314: -0.294013 at 15 deg, -0.332673 at 5 deg. 328 missing trait-median predictions per trait filled neutrally."
+
+  - id: nearest_analogue_response
+    description: "Copy the change of the climatically nearest TRAINING cell at the same point."
+    expected:
+      statistic: skill_response_centred_mean
+      value: -0.173875
+      tolerance: 0.01
+      derivation: "Measured, job 2281314: -0.173875 at 15 deg, -0.154087 at 5 deg. 179 fills per trait median."
+
+  - id: shuffled_cells
+    description: "The true change permuted across cells within each design point (the parent's permutation). The sanity null."
+    expected:
+      statistic: skill_response_centred_mean
+      value: -1.622868
+      tolerance: 0.05
+      derivation: >
+        Measured, job 2281314, identical at both radii (the permutation does not use the folds).
+        Below -1 because each cell receives OTHER cells' changes point by point, whose within-cell
+        spread is on average larger than the cell's own; 480 fills per trait median.
+
+  - id: scrambled_forcing
+    description: >
+      THE PLACEBO. The parent's model with the forcing columns re-paired by an independent
+      permutation per cell (seed 20260914, the construction of the parent's diagnostic): it sees
+      forcing that varies across a cell's rows, paired with the wrong response.
+    expected:
+      statistic: skill_response_centred_mean
+      value: -0.084813
+      tolerance: 0.01
+      derivation: >
+        Measured, job 2281317 (8 threads, as the model job): -0.084813 at 15 deg, -0.093502 at
+        5 deg. Its uncentred score 0.33101930 reproduces the parent's diagnostic (0.331019). The
+        tolerance is 0.01, not 1e-6: a learned arm's float-level thread noise was measured at 1.5e-6
+        on the species-mix blind arm, so a 1e-6 tolerance would test the arithmetic of the learner,
+        not the apparatus.
+
+decision_rule:
+  statistic: skill_response_centred_mean
+  comparator: model_minus_best_null
+  pass_if: "> 0.045"
+  arms: [model, no_response, cell_mean_oracle, blind_model, level_mean_response, proportional_median_response, proportional_mean_response, nearest_cell_response, nearest_analogue_response, shuffled_cells, scrambled_forcing]
+  multiplicity: none
+  power_note: >
+    THE THRESHOLD FOLLOWS THE PARENT'S CONSTRUCTION, SO IT IS NOT CHOSEN BY EYE. Under
+    model_minus_best_null each null is judged on the model's own comparator, so what constrains the
+    threshold is the gap between the best null and the runner-up: level_mean_response beats
+    proportional_median_response by 0.011280 at 15 deg and 0.012896 at 5 deg. The parent added
+    0.029920 of headroom to its larger gap; the same here gives 0.042816, rounded up to 0.045,
+    which no null satisfies at either radius. A pass requires the model to reach 0.133493 at 15 deg.
+
+    ⚠ BLINDNESS IS NOW A DECLARED NULL AND COSTS THE BAR NOTHING, WHICH IS THE POINT. In the parent,
+    declaring the blind arm (0.362322) would have forced the threshold above ~0.20; under centring
+    it sits at exactly 0, so it cannot pass anything, and a pass here means the model beats the
+    blind competitor by construction AND the best competitor that survives centring by 0.045.
+
+    ⚠ THE BAR IS LOW IN ABSOLUTE TERMS BECAUSE THE BEST NULL IS WEAK, NOT BECAUSE THE TEST IS EASY.
+    Centring removes most of every information-free null's skill (the parent's best, 0.162725, falls
+    to 0.077213). Read any pass against the ceiling below, not against the bar.
+
+    If any null returns something other than its stated value the outcome is `invalid`, not fail.
+    If any null satisfies pass_if the estimand has no power and the outcome MUST be `invalid`.
+
+  ceiling_note: >
+    ⚠ READ AGAINST 0.853588, NEVER AGAINST 1.0. Centring removes the CONTROL's realisation noise
+    exactly (it is common to a cell's 29 pairs), leaving each arm's own noise minus the cell mean:
+    expected sum of squares sigma^2 (1 - rho)(n - 1) per cell (vegemu.centred.centred_ceiling).
+    Measured, job 2281314, from the two ground-truth end-of-spin-up seeds exactly as the parent's
+    ceiling: 0.853588 at rho = 0 (the conservative lower bound), 0.926794 at rho = 0.5; the same job
+    reproduced the parent's uncentred 0.848545. Per quantity at rho = 0: stems 0.7646, agb 0.8114,
+    lai 0.9467, soilc 0.9666, height 0.6763, wooddens 0.9017, sla 0.9078. ⚠ Those two seeds were
+    spun up under the TRANSIENT CO2 path, the parent's caveat, unchanged.
+
+  outcomes_note: >
+    THREE DISTINGUISHABLE RESULTS, ALL PRE-NAMED BEFORE THE RUN. Let M be the model's centred score.
+    (a) M > 0.133493 -- the model predicts how a forest's response DIFFERS between climate changes
+    at one place, well beyond the design's average response shape; the blind competitor scores 0 by
+    construction, so this part of the skill is read from the forcing. Quote M beside the parent's
+    0.558968 and against the 0.854 ceiling.
+    (b) 0.088493 < M <= 0.133493 -- a real but small within-cell signal; the parent's pass then
+    rests mostly on the cell-average response, which a blind model already gets.
+    (c) M <= 0.088493 -- the model does no better at the within-cell differences than the
+    design-average shape; the parent's forcing-attributable +0.196646 would then be mostly the
+    design-average perturbation, not a place-specific response to each climate change.
+    ⚠ None is a fidelity claim (200 of 54,020 cells) and none licenses a claim about a scenario leg.
+
+compute:
+  launcher: scripts/sbatch_py.sh
+  tag: X-sc2-centred-warm-model
+  partition: priority
+  est_core_hours: 1
+
+outputs:
+  - path: /p/tmp/jamirp/vegemu/exp/X-20260924-centred-warming-response/metrics.json
+    kind: metrics

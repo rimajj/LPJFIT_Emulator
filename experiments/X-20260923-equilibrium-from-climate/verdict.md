@@ -29,11 +29,12 @@ medians (0.42–0.60) are the gap. Fine-root conductivity is one constant value 
 ⚠ **It rarely lands within 10 %, and the flat band must travel with the headline.** Inside +-10 %
 on all 22 at once: **0.0 %** of 5,620 tree-bearing runs (one real run predicting another: 4.9 %).
 Per quantity 0.15 (biomass) to 0.71 over the 19 that vary, against the ceiling's 0.49–0.96; mean
-over all 22 (fine-root conductivity passes free) 0.49, ceiling 0.80. On two
-quantities (height_p10, longevity_p90) it lands inside the band LESS often than the analogue
-lookup, although it explains more variance: a regression predicts the conditional mean, which
-minimises squared error and is rarely within 10 % of a single noisy run. The flat band is stricter
-than the acceptance rule, which widens it to the model's own two-run spread.
+over all 22 (fine-root conductivity passes free) 0.49, ceiling 0.80. On THREE quantities it lands
+inside the band LESS often than the analogue lookup -- height_p10 0.437 vs 0.607, longevity_p90
+0.183 vs 0.258, and rooting depth p10 0.222 vs 0.225 (corrected 2026-09-23 from "two"; the metrics
+file shows three) -- although it explains more variance: a regression predicts the conditional
+mean, which minimises squared error and is rarely within 10 % of a single noisy run. The flat band
+is stricter than the acceptance rule, which widens it to the model's own two-run spread.
 
 **Not measured here:** how much the soil texture adds (no ablation was pre-registered), any
 scenario leg, and any cell outside these 200. 200 of 54,020; the acceptance criterion is untouched.

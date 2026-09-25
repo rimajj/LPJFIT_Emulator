@@ -42,10 +42,12 @@ import csv
 import json
 import sys
 import warnings
+from collections.abc import Callable
 from itertools import pairwise
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import multiprocessing as mp
 
@@ -53,7 +55,9 @@ import numpy as np
 import numpy.typing as npt
 import polars as pl
 
+from exp_derive_ceiling_pilot import ceiling, ground_truth_pair
 from vegemu.binfmt.restart import RestartReader
+from vegemu.centred import cell_mean_oracle, centred_ceiling, centred_per_level_and_pooled
 from vegemu.corpus.state import summarise_cell
 from vegemu.nulls import nearest_analogue, nearest_geographic
 from vegemu.paths import paths
@@ -412,6 +416,107 @@ def separation(nulls: dict[str, dict[str, object]]) -> dict[str, object]:
     }
 
 
+UncentredScorer = Callable[
+    [npt.NDArray[np.float64], npt.NDArray[np.float64], list[str], tuple[str, ...]],
+    dict[str, object],
+]
+
+
+def centred_nulls(
+    dtrue: npt.NDArray[np.float64],
+    control: npt.NDArray[np.float64],
+    cells: pl.DataFrame,
+    points: list[str],
+    *,
+    quantities: tuple[str, ...],
+    k: int,
+    radii: tuple[float, ...],
+    uncentred: UncentredScorer,
+) -> dict[str, object]:
+    """The seven null predictions plus the per-cell-mean oracle, scored CENTRED at every radius.
+
+    NO learner: this is what `--centred` derives before anything is sealed, for both kill tests
+    (`exp_derive_nulls_composition.py --centred` calls it too). The uncentred scores of the same
+    seven predictions are carried beside them and must reproduce the sealed kill tests' null
+    values exactly, which proves these are the very same predictions, re-read.
+    """
+    by: dict[str, object] = {}
+    for d in radii:
+        print(f"\n=== centred nulls, blocking {d:g} deg ===", flush=True)
+        preds = build_null_predictions(dtrue, control, cells, points, k=k, degrees=d)
+        plain = {n: uncentred(p, dtrue, points, quantities)["pooled"] for n, p in preds.items()}
+        preds["cell_mean_oracle"] = cell_mean_oracle(dtrue)
+        nulls = {
+            n: centred_per_level_and_pooled(p, dtrue, points, quantities) for n, p in preds.items()
+        }
+        sep = separation(nulls)
+        by[f"{d:g}deg"] = {
+            "blocking_degrees": d,
+            "k_folds": k,
+            "nulls": nulls,
+            "separation": sep,
+            "uncentred_reproduction": plain,
+        }
+        ranked: dict[str, float] = sep["ranked"]  # type: ignore[assignment]
+        for n, v in ranked.items():
+            print(f"  {n:32s} {v:+.6f}   (uncentred {plain.get(n, float('nan'))})")
+    return by
+
+
+def main_centred(
+    args: argparse.Namespace,
+    dtrue: npt.NDArray[np.float64],
+    control: npt.NDArray[np.float64],
+    *,
+    cell_ids: list[int],
+    points: list[str],
+    scored_cells: pl.DataFrame,
+) -> int:
+    """`--centred`: the same seven null predictions plus the per-cell-mean oracle, scored by the
+    within-cell centred statistic, and the centred noise ceiling. Nothing is fitted.
+
+    The ceiling reuses `exp_derive_ceiling_pilot`'s ground-truth read and noise estimate unchanged
+    and swaps only the arithmetic (`vegemu.centred.centred_ceiling`); its uncentred ceiling is
+    recomputed beside it and must reproduce the sealed kill test's 0.848545.
+    """
+    quantities = RESPONSE_QUANTITIES
+    radii = (args.degrees,) if args.also_degrees is None else (args.degrees, args.also_degrees)
+    report: dict[str, object] = {
+        "statistic": "skill_response_centred_mean",
+        "version": args.version,
+        "cache": str(args.cache),
+        "quantities": list(quantities),
+        "n_cells": len(cell_ids),
+        "n_points": len(points),
+        "n_pairs": int(dtrue.shape[0] * dtrue.shape[1]),
+        "by_blocking": centred_nulls(
+            dtrue,
+            control,
+            scored_cells,
+            points,
+            quantities=quantities,
+            k=args.k,
+            radii=radii,
+            uncentred=_per_level_and_pooled,
+        ),
+    }
+    if not args.skip_ceiling:
+        print("\nreading both ground-truth seeds by seek for the ceiling...", flush=True)
+        f1, f2 = ground_truth_pair(cell_ids, max(2, args.nproc))
+        if f1["cell"].to_list() != cell_ids:
+            raise ValueError("ground truth returned a different cell set than the pilot")
+        sigma_sq = (matrix(f1, quantities) - matrix(f2, quantities)) ** 2 / 2.0
+        report["ceiling_centred"] = centred_ceiling(dtrue, sigma_sq, quantities)
+        report["ceiling_uncentred_reproduction"] = ceiling(dtrue, sigma_sq, quantities)
+        c0 = report["ceiling_centred"]["rho0_independent"]  # type: ignore[index]
+        print(f"\nCENTRED CEILING, rho=0 (conservative lower bound): {c0['mean']:+.6f}")
+    (Path(args.out) / "nulls_pilot_centred.json").write_text(
+        json.dumps(report, indent=2), encoding="utf-8"
+    )
+    print(f"wrote {Path(args.out) / 'nulls_pilot_centred.json'}")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--version", default="pilot-v1")
@@ -421,6 +526,16 @@ def main() -> int:
     ap.add_argument("--degrees", type=float, default=15.0)
     ap.add_argument("--limit", type=int, default=None, help="decode only the first N runs (smoke)")
     ap.add_argument("--cache", default=None, help="reuse/write a decoded state parquet")
+    # Additions only; without them this is exactly the derivation the sealed experiments cite.
+    ap.add_argument(
+        "--centred",
+        action="store_true",
+        help="derive the nulls of the WITHIN-CELL CENTRED statistic instead (vegemu.centred)",
+    )
+    ap.add_argument(
+        "--also-degrees", type=float, default=None, help="with --centred: a second radius"
+    )
+    ap.add_argument("--skip-ceiling", action="store_true", help="with --centred: smoke runs only")
     args = ap.parse_args()
 
     out = Path(args.out)
@@ -441,6 +556,10 @@ def main() -> int:
 
     dtrue, control, cell_ids, points = build_deltas(state, cells, quantities)
     scored_cells = cells.filter(pl.col("cell").is_in(cell_ids)).sort("cell")
+    if args.centred:
+        return main_centred(
+            args, dtrue, control, cell_ids=cell_ids, points=points, scored_cells=scored_cells
+        )
 
     nulls = derive_nulls(
         dtrue, control, scored_cells, points, quantities=quantities, k=args.k, degrees=args.degrees
