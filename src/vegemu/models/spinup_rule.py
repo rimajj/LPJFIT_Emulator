@@ -53,7 +53,7 @@ import numpy as np
 import numpy.typing as npt
 
 from vegemu.binfmt.clm import ClmReader, read_grid
-from vegemu.binfmt.restart import Layout, RestartReader, trees_of
+from vegemu.binfmt.restart import TREE_DTYPE, Layout, RestartReader, trees_of
 from vegemu.corpus.state import summarise_cell
 from vegemu.corpus.vegc import cell_vegc
 from vegemu.models import climbuf as cb
@@ -253,6 +253,7 @@ class SpinupReport(SynthReport):
     vegc_passes: int = 0
     vegc_stems_factor: float = math.nan
     vegc_why: str = ""
+    counters_reset: int = 0
 
 
 @dataclass
@@ -331,6 +332,36 @@ def match_vegc(
     return rec, rep, m
 
 
+_COUNTER_BYTE = int(TREE_DTYPE.fields["bm_inc_counter"][1])  # type: ignore[index]
+
+
+def reset_counters(rec: dict[str, Any]) -> int:
+    """Zero every tree's consecutive-bad-growth-years counter in place; returns how many were not 0.
+
+    WHY. A placed stem is a real stem of ANOTHER cell's equilibrium, and it arrives with that
+    stand's count of consecutive years of negative biomass increment. The model kills a tree
+    outright at 5 (`tree/mortality_tree_ind.c`, BM_INC_COUNTER_MAX), and scales its water- and
+    growth-stress mortality by (1 + counter). A history of shading in its donor stand says nothing
+    about its new one: 20 % of the carbon of the carbon-matched file sat on stems with a count of
+    1 or more at year 0, against 2.5 % in restart_1999 (dev, 342 cells, journal 2026-09-25).
+    """
+    n = 0
+    for stand in rec["stands"]:
+        for patch in stand["patches"]:
+            pft = patch["pftlist"]
+            offs = np.asarray(pft["tree_offsets"], dtype=np.int64)
+            if not offs.size:
+                continue
+            raw = bytearray(pft["raw"])
+            for off in offs:
+                at = int(off) + _COUNTER_BYTE
+                if raw[at : at + 4] != b"\0\0\0\0":
+                    n += 1
+                    raw[at : at + 4] = b"\0\0\0\0"
+            patch["pftlist"] = {**pft, "raw": bytes(raw)}
+    return n
+
+
 def _extend(rep: SynthReport, **extra: Any) -> SpinupReport:
     base = {f.name: getattr(rep, f.name) for f in fields(SynthReport)}
     return SpinupReport(**base, **extra)
@@ -345,6 +376,7 @@ class SpinupRule:
       min_establish_frac, max_mort_temp   the admission thresholds (the pilot's)
       match_vegc          pin each cell's VegC to `pred_vegc_target` (off; `match_vegc`), with
                           vegc_passes (3), vegc_tol (0.02) and vegc_max_factor (4.0)
+      reset_counters      zero every placed tree's bad-growth-years counter (off; `reset_counters`)
     Anything else in `--synth-kwargs` is passed to `synthesise_cell`, which must accept it.
     """
 
@@ -361,6 +393,7 @@ class SpinupRule:
         min_establish_frac: float = ADMIT_MIN_ESTABLISH_FRAC,
         max_mort_temp: float = ADMIT_MAX_MORT_TEMP,
         match_vegc: bool = False,
+        reset_counters: bool = False,
         vegc_passes: int = 3,
         vegc_tol: float = 0.02,
         vegc_max_factor: float = 4.0,
@@ -386,6 +419,7 @@ class SpinupRule:
                 f"{vegc_passes}, {vegc_tol}, {vegc_max_factor}"
             )
         self.match_vegc = bool(match_vegc)
+        self.reset_counters = bool(reset_counters)
         self.vegc_passes = int(vegc_passes)
         self.vegc_tol = float(vegc_tol)
         self.vegc_max_factor = float(vegc_max_factor)
@@ -477,6 +511,7 @@ class SpinupRule:
             )
         else:
             (rec, rep), vm = synth(pred), VegcMatch()
+        n_reset = reset_counters(rec) if self.reset_counters else 0
         ids = np.concatenate(
             [np.asarray(trees_of(p["pftlist"])["id"]) for p in template["stands"][0]["patches"]]
         ).astype(np.int64)
@@ -494,6 +529,7 @@ class SpinupRule:
             albedo_mean=float(np.mean(clim.albedo)),
             climbuf_seed_after=",".join(map(str, clim.seed_after)),
             **{f"vegc_{f.name}": getattr(vm, f.name) for f in fields(VegcMatch)},
+            counters_reset=n_reset,
         )
 
     def describe(self) -> dict[str, Any]:
@@ -520,6 +556,7 @@ class SpinupRule:
                 if self.match_vegc
                 else {}
             ),
+            **({"reset_counters": True} if self.reset_counters else {}),
             "synth_kwargs": self.synth_kwargs,
         }
 

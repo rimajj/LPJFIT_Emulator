@@ -29,6 +29,7 @@ from vegemu.binfmt.restart import (
     RestartHeader,
     RestartReader,
     RestartWriter,
+    trees_of,
     write_cell,
 )
 from vegemu.corpus.state import summarise_cell
@@ -265,3 +266,20 @@ def test_match_vegc_edges(template: Path) -> None:
     assert rep.vegc_why == "treeless-prediction" and rep.vegc_passes == 0
     with pytest.raises(ValueError, match="match_vegc needs"):
         sr.SpinupRule(template, 0, NCELL, donors=None, forcing=_block(), vegc_passes=0)
+
+
+def test_reset_counters_zeroes_the_counter_and_nothing_else(template: Path) -> None:
+    (rec, _rep), _ = _run(template, 1, _prediction())
+    lay = RestartReader(template).layout
+    before = write_cell(rec, lay)
+    at = sr._COUNTER_BYTE
+    patch = rec["stands"][0]["patches"][0]
+    raw = bytearray(patch["pftlist"]["raw"])
+    for off in patch["pftlist"]["tree_offsets"][:2]:
+        raw[int(off) + at : int(off) + at + 4] = (3).to_bytes(4, "little")
+    patch["pftlist"] = {**patch["pftlist"], "raw": bytes(raw)}
+    assert trees_of(patch["pftlist"])["bm_inc_counter"][:2].tolist() == [3, 3]
+    assert sr.reset_counters(rec) == 2
+    assert write_cell(rec, lay) == before
+    rule = sr.SpinupRule(template, 0, NCELL, donors=None, forcing=_block(), reset_counters=True)
+    assert rule.describe()["reset_counters"] is True
