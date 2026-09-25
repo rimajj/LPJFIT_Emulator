@@ -246,11 +246,11 @@ def stage_build(args: argparse.Namespace) -> int:
     want_seed = cb.STORED_SPINUP.schedule()[1]
     if tuple(head.restart.seed) != tuple(want_seed):
         raise ValueError(f"{restart}: header RNG state {head.restart.seed}, not {want_seed}")
-    co2 = root / f"co2_const_{CO2_PREINDUSTRIAL_PPM:.2f}.txt"
+    co2 = root / f"co2_const_{args.co2_ppm:.2f}.txt"
     if not co2.exists():
-        write_constant_co2(co2)
+        write_constant_co2(co2, ppm=args.co2_ppm)
     seen = co2_seen_by_model(co2, range(FIRST_YEAR, FIRST_YEAR + NYEAR))
-    assert set(seen.values()) == {CO2_PREINDUSTRIAL_PPM}, seen
+    assert set(seen.values()) == {args.co2_ppm}, seen
     saved_input = path("ground_truth.historical_seed1") / SAVED_INPUT
     input_js = root / "input_continuation.js"
     text = patch(
@@ -271,7 +271,12 @@ def stage_build(args: argparse.Namespace) -> int:
         cfg = rdir / f"lpjml_{args.arm}_{m['name']}.js"
         cfg.write_text(member_config(base, m["first"], m["last"]), encoding="utf-8")
         rows[m["k"]] = f"{args.arm}-{m['name']}\t{cfg}\t{rdir}\n"
-    for piece, ks in plan["pieces"].items():
+    # A diagnostic sample (`--every N`): one manifest of every N-th member -- the full arm's own
+    # cell ranges, so each sampled member compares one-to-one with the same member of a full run.
+    pieces = plan["pieces"]
+    if args.every > 1:
+        pieces = {"sample": [m["k"] for m in plan["members"] if m["k"] % args.every == 0]}
+    for piece, ks in pieces.items():
         # Most expensive first, so the farm's tail is its cheapest members.
         order = sorted(ks, key=lambda k: -plan["members"][k]["cost_s_per_year"])
         (arm_dir / "manifests" / f"manifest_{piece}.tsv").write_text(
@@ -284,13 +289,14 @@ def stage_build(args: argparse.Namespace) -> int:
         "restart": str(restart),
         "restart_bytes": restart.stat().st_size,
         "restart_header_seed": list(head.restart.seed),
+        "co2_ppm": args.co2_ppm,
         "co2_file": str(co2),
         "co2_sha256": _sha(co2),
         "input_js_sha256": _sha(input_js),
         "base_config_sha256": hashlib.sha256(base.encode()).hexdigest(),
         "model_years": [FIRST_YEAR, FIRST_YEAR + NYEAR - 1],
         "members": len(plan["members"]),
-        "pieces": {p: len(ks) for p, ks in plan["pieces"].items()},
+        "pieces": {p: len(ks) for p, ks in pieces.items()},
     }
     (arm_dir / "build.json").write_text(json.dumps(meta, indent=1))
     (arm_dir / "base_config.js").write_text(base, encoding="utf-8")
@@ -508,6 +514,13 @@ def main() -> int:
     p.add_argument("--root", required=True)
     p.add_argument("--arm", required=True, choices=("null", "emulated"))
     p.add_argument("--restart", required=True)
+    p.add_argument(
+        "--co2-ppm",
+        type=float,
+        default=CO2_PREINDUSTRIAL_PPM,
+        help="the continuation's constant CO2; any level but 276.59 is a diagnostic, never scored",
+    )
+    p.add_argument("--every", type=int, default=1, help="build only every N-th member (a sample)")
     for name in ("harvest", "asgood"):
         p = sub.add_parser(name)
         p.add_argument("--root", required=True)
