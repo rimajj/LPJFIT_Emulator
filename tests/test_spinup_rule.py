@@ -283,3 +283,22 @@ def test_reset_counters_zeroes_the_counter_and_nothing_else(template: Path) -> N
     assert write_cell(rec, lay) == before
     rule = sr.SpinupRule(template, 0, NCELL, donors=None, forcing=_block(), reset_counters=True)
     assert rule.describe()["reset_counters"] is True
+
+
+def test_the_size_lever_grows_trees_instead_of_adding_them(template: Path) -> None:
+    (base, _), _ = _run(template, 1, _prediction())
+    v0 = cell_vegc(base)
+    want = v0["grass"] + 1.5 * v0["tree"]
+    rec, rep = _run_matched(
+        template, 1, _prediction(vegc_target=want), vegc_tol=0.05, vegc_lever="size"
+    )
+    assert rep.vegc_stems_factor == 1.0 and rep.vegc_height_factor > 1.0
+    assert abs(cell_vegc(rec)["total"] - want) < abs(v0["total"] - want)
+    # Less carbon still takes stems away (whole stems, so a later pass may grow the rest a little
+    # to close an overshoot); the count never goes above the map's.
+    _rec, rep = _run_matched(
+        template, 1, _prediction(vegc_target=v0["grass"] + 0.5 * v0["tree"]), vegc_lever="size"
+    )
+    assert rep.vegc_stems_factor < 1.0 and rep.vegc_height_factor >= 1.0
+    with pytest.raises(ValueError, match="vegc_lever"):
+        sr.SpinupRule(template, 0, NCELL, donors=None, forcing=_block(), vegc_lever="x")

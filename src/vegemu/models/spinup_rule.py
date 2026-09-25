@@ -253,7 +253,14 @@ class SpinupReport(SynthReport):
     vegc_passes: int = 0
     vegc_stems_factor: float = math.nan
     vegc_why: str = ""
+    vegc_height_factor: float = math.nan
     counters_reset: int = 0
+
+
+# A tree's carbon grows roughly as height to this power over the placed range (allometry: stem
+# mass ~ diameter^2 x height, height ~ diameter^(2/3) in LPJmL's allom3); only the step size of
+# `match_vegc`'s size lever reads it, so an error here costs a pass, not the result.
+HEIGHT_CARBON_EXP = 2.5
 
 
 @dataclass
@@ -264,6 +271,28 @@ class VegcMatch:
     passes: int = 0
     stems_factor: float = math.nan
     why: str = ""
+    height_factor: float = math.nan
+
+
+def _vegc_step(
+    v: dict[str, float],
+    target: float,
+    spp: float,
+    hfac: float,
+    spp0: float,
+    *,
+    lever: str,
+    max_factor: float,
+) -> tuple[float, float] | None:
+    """One pass's new (stems_per_patch, height factor), or None if the trees carry no carbon."""
+    tree_want = target - v["grass"]
+    if tree_want <= 0:
+        return 0.0, hfac
+    if not v["tree"] > 0:
+        return None
+    if lever == "size" and tree_want > v["tree"]:
+        return spp, min(hfac * (tree_want / v["tree"]) ** (1.0 / HEIGHT_CARBON_EXP), max_factor)
+    return min(spp * tree_want / v["tree"], max_factor * spp0), hfac
 
 
 def match_vegc(
@@ -273,6 +302,7 @@ def match_vegc(
     passes: int,
     tol: float,
     max_factor: float,
+    lever: str = "count",
 ) -> tuple[dict[str, Any], SynthReport, VegcMatch]:
     """Synthesise, then rescale `stems_per_patch` until the cell's VegC is `pred["vegc_target"]`.
 
@@ -289,7 +319,15 @@ def match_vegc(
     exceeds `max_factor` times the map's, so a cell whose placed stems carry almost no carbon is
     reported (`why`), not filled with thousands of saplings. A cell the map calls treeless
     (`stems_per_patch` 0) is left treeless.
+
+    `lever="size"`: where the cell needs MORE tree carbon, the map's height quantiles are scaled
+    up instead (by the carbon ratio to the power 1 / HEIGHT_CARBON_EXP, capped at `max_factor`),
+    and the count only ever goes down. Why: adding stems at the map's sizes crowds the stand
+    (29.7 stems per patch against restart_1999's 22.8 on a 342-cell sample), and the stems that
+    die in year 5 are mid-canopy ones (dev, journal 2026-09-25).
     """
+    if lever not in ("count", "size"):
+        raise ValueError(f"unknown lever {lever!r}")
     rec, rep = synth(pred)
     v = cell_vegc(rec)
     target = pred.get("vegc_target", math.nan)
@@ -301,27 +339,25 @@ def match_vegc(
     if not spp0 > 0:
         m.why = "treeless-prediction"
         return rec, rep, m
-    spp = spp0
+    spp, hfac = spp0, 1.0
+    heights = [k for k in pred if k.startswith("height_")]
     m.why = "passes-exhausted"
     for _ in range(passes):
         if abs(v["total"] - target) <= tol * max(target, 1.0):
             m.why = "matched"
             break
-        tree_want = target - v["grass"]
-        if tree_want <= 0:
-            spp = 0.0
-        elif v["tree"] > 0:
-            spp = min(spp * tree_want / v["tree"], max_factor * spp0)
-        else:
+        step = _vegc_step(v, target, spp, hfac, spp0, lever=lever, max_factor=max_factor)
+        if step is None:
             m.why = "no-tree-carbon"
             break
-        rec, rep = synth({**pred, "stems_per_patch": spp})
+        spp, hfac = step
+        rec, rep = synth({**pred, "stems_per_patch": spp, **{k: pred[k] * hfac for k in heights}})
         v = cell_vegc(rec)
         m.passes += 1
         if spp == 0.0:
             m.why = "below-grass"
             break
-        if spp >= max_factor * spp0:
+        if spp >= max_factor * spp0 or hfac >= max_factor:
             m.why = "capped"
             break
     else:
@@ -329,6 +365,7 @@ def match_vegc(
             m.why = "matched"
     m.written = v["total"]
     m.stems_factor = spp / spp0
+    m.height_factor = hfac
     return rec, rep, m
 
 
@@ -375,7 +412,8 @@ class SpinupRule:
       litter_rule         "soilc" (default), "predicted" or "none"
       min_establish_frac, max_mort_temp   the admission thresholds (the pilot's)
       match_vegc          pin each cell's VegC to `pred_vegc_target` (off; `match_vegc`), with
-                          vegc_passes (3), vegc_tol (0.02) and vegc_max_factor (4.0)
+                          vegc_passes (3), vegc_tol (0.02), vegc_max_factor (4.0) and
+                          vegc_lever ("count", or "size": taller trees, never more of them)
       reset_counters      zero every placed tree's bad-growth-years counter (off; `reset_counters`)
     Anything else in `--synth-kwargs` is passed to `synthesise_cell`, which must accept it.
     """
@@ -397,6 +435,7 @@ class SpinupRule:
         vegc_passes: int = 3,
         vegc_tol: float = 0.02,
         vegc_max_factor: float = 4.0,
+        vegc_lever: str = "count",
         forcing: BlockForcing | None = None,
         **synth_kwargs: Any,
     ) -> None:
@@ -423,6 +462,9 @@ class SpinupRule:
         self.vegc_passes = int(vegc_passes)
         self.vegc_tol = float(vegc_tol)
         self.vegc_max_factor = float(vegc_max_factor)
+        if vegc_lever not in ("count", "size"):
+            raise ValueError(f"unknown vegc_lever {vegc_lever!r}")
+        self.vegc_lever = vegc_lever
         self.synth_kwargs = dict(synth_kwargs)
         self.template_protocol = cb.STORED_SPINUP
         self.target_protocol = cb.STORED_SPINUP.until(int(stop_year))
@@ -508,6 +550,7 @@ class SpinupRule:
                 passes=self.vegc_passes,
                 tol=self.vegc_tol,
                 max_factor=self.vegc_max_factor,
+                lever=self.vegc_lever,
             )
         else:
             (rec, rep), vm = synth(pred), VegcMatch()
@@ -552,6 +595,7 @@ class SpinupRule:
                     "vegc_passes": self.vegc_passes,
                     "vegc_tol": self.vegc_tol,
                     "vegc_max_factor": self.vegc_max_factor,
+                    **({"vegc_lever": self.vegc_lever} if self.vegc_lever != "count" else {}),
                 }
                 if self.match_vegc
                 else {}
