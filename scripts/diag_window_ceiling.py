@@ -20,8 +20,10 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from corpus_convergence import cell_index_map, read_trajectory
@@ -32,6 +34,38 @@ FIRST_MODEL_YEAR = 1000
 LO, HI = 1450, 1699  # the truth window (inclusive)
 LENGTHS = (1, 5, 10, 20, 30, 50, 125, 250)
 NCELL = 67420
+
+
+def scored_trajectories(sc: dict[str, Any]) -> list[npt.NDArray[np.float32]]:
+    """Both seeds' annual VegC, (1000 years, scored cells), checked against the truth it built."""
+    mask = sc["mask"].astype(bool)
+    lat_i, lon_i = cell_index_map(path("ground_truth.grid_nc"), ncell=NCELL)
+    key = "ground_truth.spinup_trajectory_seed"
+    traj = [read_trajectory(path(f"{key}{k}"), lat_i, lon_i)[:, mask] for k in (1, 2)]
+    a, b = LO - FIRST_MODEL_YEAR, HI - FIRST_MODEL_YEAR + 1
+    for k, t in enumerate((sc["t1"], sc["t2"])):
+        got = traj[k][a:b].astype(np.float64).mean(axis=0)
+        err = float(np.nanmax(np.abs(got - t) / np.maximum(np.abs(t), 1.0)))
+        assert err < 1e-5, f"seed {k + 1}: trajectory 1450-1699 mean differs from truth by {err}"
+    return traj
+
+
+def window_cell_scores(
+    traj: list[npt.NDArray[np.float32]], sc: dict[str, Any], length: int
+) -> tuple[npt.NDArray[np.float64], int]:
+    """Per scored cell, how often an L-year window of one real seed lands in the band of the
+    other seed's truth: averaged over both seeds and every non-overlapping window of 1450-1699.
+    The reference a continuation scored on an L-year mean is read against (decision record
+    20260925-INT-a-continuation-is-judged-against-a-real-run-on-the-same-window)."""
+    t, w = (sc["t1"], sc["t2"]), sc["w"]
+    a, b = LO - FIRST_MODEL_YEAR, HI - FIRST_MODEL_YEAR + 1
+    starts = range(a, b - length + 1, length)
+    cell = np.zeros(t[0].shape[0])
+    for s0 in starts:
+        for k in (0, 1):
+            x = traj[k][s0 : s0 + length].astype(np.float64).mean(axis=0)
+            cell += _passes(x, t[1 - k], w)
+    return cell / (2 * len(starts)), len(starts)
 
 
 def main() -> int:
@@ -63,33 +97,14 @@ def main() -> int:
         "sample": in_sample,
     }
 
-    lat_i, lon_i = cell_index_map(path("ground_truth.grid_nc"), ncell=NCELL)
-    key = "ground_truth.spinup_trajectory_seed"
-    traj = [read_trajectory(path(f"{key}{k}"), lat_i, lon_i)[:, mask] for k in (1, 2)]
-    t = (sc["t1"], sc["t2"])
-    w = sc["w"]
-    a, b = LO - FIRST_MODEL_YEAR, HI - FIRST_MODEL_YEAR + 1
-    # The check that this reads the same numbers the truth was built from.
-    for k in (0, 1):
-        got = traj[k][a:b].astype(np.float64).mean(axis=0)
-        err = float(np.nanmax(np.abs(got - t[k]) / np.maximum(np.abs(t[k]), 1.0)))
-        assert err < 1e-5, f"seed {k + 1}: trajectory 1450-1699 mean differs from truth by {err}"
-
+    traj = scored_trajectories(sc)
     report: dict[str, object] = {"frac_rerun": sc["frac_rerun"], "lengths": {}}
     for L in LENGTHS:
-        starts = list(range(a, b - L + 1, L))
-        cell = np.zeros(int(mask.sum()))
-        for s0 in starts:
-            for k in (0, 1):
-                x = traj[k][s0 : s0 + L].astype(np.float64).mean(axis=0)
-                cell += _passes(x, t[1 - k], w)
-        cell /= 2 * len(starts)
-        row = {name: float(cell[m].mean()) for name, m in subsets.items()}
-        row["windows"] = len(starts)
+        cell, nwin = window_cell_scores(traj, sc, L)
+        row: dict[str, float] = {name: float(cell[m].mean()) for name, m in subsets.items()}
+        row["windows"] = nwin
         report["lengths"][str(L)] = row  # type: ignore[index]
-        print(
-            f"L={L:4d} windows {len(starts):3d}  " + "  ".join(f"{n} {row[n]:.3f}" for n in subsets)
-        )
+        print(f"L={L:4d} windows {nwin:3d}  " + "  ".join(f"{n} {row[n]:.3f}" for n in subsets))
     report["n"] = {n: int(m.sum()) for n, m in subsets.items()}
     (out / "window_ceiling.json").write_text(json.dumps(report, indent=2))
     print(f"wrote {out / 'window_ceiling.json'}")
