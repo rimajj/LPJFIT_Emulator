@@ -18,13 +18,13 @@ triaged, a disposition each, into `journal/X/2026-09b.md`); the integrator refre
 session end. Basis of every number: pilot corpus v2-constco2 (200 cells × 30 climates × 1 seed,
 CO₂ 276.59 ppm), 200 of 54,020 tree-bearing cells — no fidelity claim, acceptance untouched.
 
-🆕 **2026-09-25: the continuation test's year-5 die-off is the CO₂ step** (`journal/X/2026-09b.md`,
-dev diagnostic, 51 of 1,015 members). Continued at 367.26 ppm (the CO₂ restart_1999 was written
-at) instead of 276.59, restart_1999 holds within 0.5 %/yr (vs −29 % in year 5); the emulated file
-drops −5 % (vs −17 %) — its stems are donor copies of 367-ppm trees, plus a residual synthesis
-defect. So `X-20260925-spinup-restart-continuation`'s null arm is no "holds the state" bar, and its
-`fail` says nothing about equilibrium. **Next, each a new exp_id:** a constant-CO₂ null (continue
-the pilot's own v2-constco2 restarts), and the synthesiser's donors from a constant-CO₂ source.
+🆕 **2026-09-25: the continuation's year-5 die-off is the CO₂ step, and constant-CO₂ donors remove
+it** (journal, dev diagnostics, 51 of 1,015 members). restart_1999 (written at 367.26 ppm) holds at
+its own CO₂; the `pilot_donors:PilotBank` rule (58e860a) cuts the emulated file's year-5 kill from
+−16.8 % to −5.9 % = the residual synthesis defect; in band 0.308 / 0.458 (y1-10 / y21-30) vs a
+rerun's 0.851. So the sealed continuation's null arm is no "holds the state" bar. **Next, each a
+new exp_id:** the global file with PilotBank donors + a sealed re-run of the continuation test;
+the residual year-5 kill (stems shrinking 5 years running); the file starting ~20 % low.
 ✅ **Merged 2026-09-25 (`int/score2`):** centred kill tests pass, blind arm scores 0 — response
 0.377 (bar 0.133), composition 0.259 (bar 0.082); soil texture +0.0013 (fail); learning curve +0.034.
 
