@@ -278,9 +278,9 @@ def match_vegc(
     WHY THE STEM COUNT. The equilibrium map this rule was built for predicts no carbon: a cell's
     carbon falls out of how many stems are placed and at what sizes, and that product came out
     20 % low globally (year 0 of `restart_1699_emulated.lpj`: 0.80 of the stored equilibrium's
-    total), where a dedicated carbon map is within 2 %. The sizes are the map's (height and wood-density
-    quantiles), so the count is the one free lever; a stand's carbon is close to linear in it
-    because the placement draws the same size quantiles whatever the count.
+    total), where a dedicated carbon map is within 2 %. The sizes are the map's (height and
+    wood-density quantiles), so the count is the one free lever; a stand's carbon is close to
+    linear in it because the placement draws the same size quantiles whatever the count.
 
     `synth(pred) -> (rec, rep)` is one synthesis. Grass carbon is the template's and does not move,
     so the trees are asked for `target - grass`; at or below the grass, the cell gets no tree. At
