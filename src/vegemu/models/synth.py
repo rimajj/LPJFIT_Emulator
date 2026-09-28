@@ -427,6 +427,9 @@ class SynthReport:
     ladder_source: dict[int, str] = field(default_factory=dict)
     types_unplaceable: tuple[int, ...] = ()
     climbuf_source: str = "template"
+    # How stems were dealt to patches: "random" (the default path) or "template" (each stem into
+    # the patch that holds the template's stem at the same cell height rank, `patch_layout`).
+    patch_layout: str = "random"
     litter_target: float = 0.0
 
 
@@ -449,6 +452,21 @@ def template_ladder(template: dict[str, Any]) -> Any:
     allrows = np.concatenate(rows)
     order = np.argsort(np.asarray(allrows["height"], dtype=np.float64), kind="stable")
     return allrows[order]
+
+
+def template_patch_ladder(template: dict[str, Any]) -> npt.NDArray[np.int64]:
+    """The patch each row of `template_ladder` stands in: same rows, same (stable) order."""
+    heights: list[npt.NDArray[np.float64]] = []
+    homes: list[npt.NDArray[np.int64]] = []
+    for p, patch in enumerate(template["stands"][0]["patches"]):
+        arr = trees_of(patch["pftlist"])
+        if arr.size:
+            heights.append(np.asarray(arr["height"], dtype=np.float64))
+            homes.append(np.full(arr.size, p, dtype=np.int64))
+    if not heights:
+        return np.zeros(0, dtype=np.int64)
+    order = np.argsort(np.concatenate(heights), kind="stable")
+    return np.concatenate(homes)[order]
 
 
 def type_ladder(template: dict[str, Any]) -> npt.NDArray[np.uint8]:
@@ -886,6 +904,7 @@ def synthesise_cell(  # noqa: PLR0912, PLR0915 -- one pass over the patches; spl
     allowed_types: tuple[int, ...] | None = None,
     climbuf: dict[str, Any] | None = None,
     rescale_litter: bool = False,
+    patch_layout: str = "random",
 ) -> tuple[dict[str, Any], SynthReport]:
     """Replace a template record's roster and soil totals with a predicted state.
 
@@ -917,9 +936,15 @@ def synthesise_cell(  # noqa: PLR0912, PLR0915 -- one pass over the patches; spl
       climbuf         a replacement climate buffer (`climbuf.climate_buffer_from_forcing`).
       rescale_litter  scale the litter to `prediction["litterc"]`, preserving C:N and the derived
                       litter cover and water capacity.
+      patch_layout    "template": stem k of the cell's height-ordered roster goes into the patch
+                      whose template stem sits at the same cell rank, so each patch keeps the
+                      template's own mix of sizes and its own share of the stems. "random" (the
+                      default) deals them at random in equal counts. See PATCH LAYOUT below.
     """
     if template["skip"]:
         raise ValueError(f"template cell {template_cell} is a skip cell; nothing to condition on")
+    if patch_layout not in ("random", "template"):
+        raise ValueError(f"unknown patch_layout {patch_layout!r}")
     rng = np.random.default_rng(seed)
     rec = {k: v for k, v in template.items()}
     stand = template["stands"][0]
@@ -988,6 +1013,22 @@ def synthesise_cell(  # noqa: PLR0912, PLR0915 -- one pass over the patches; spl
         # has.
         imposed_cell, imposed_shapes = _targets(rungs, u_cell, prediction, impose_traits)
     report.imposed = imposed_shapes
+
+    # PATCH LAYOUT. Light is shared PER PATCH, in 2-m layers (`getfpar.c`), so which stems stand
+    # together decides each one's growth. A real stand's 25 patches are independent gap-dynamics
+    # replicates -- one holds a few big trees, another many young ones -- and the random deal
+    # above turns every patch into a sample of the whole stand with the same stem count. Whether
+    # that alone kills stems is tested by re-dealing the real 1999 stand's OWN stems
+    # (`shuffle_rule`; journal/X/2026-09b.md, 2026-09-28). "template" instead sends roster stem
+    # k, which sits at cell rank (k + 0.5) / n, into the patch that holds the template's stem at
+    # that rank. The roster is in height-rank order on both paths (`_targets`,
+    # `_composition_roster`).
+    if patch_layout == "template" and n_cell and rungs.size:
+        homes = template_patch_ladder(template)
+        u_final = (np.arange(n_cell) + 0.5) / n_cell
+        owner = homes[_rank_index(homes.size, u_final)]
+        counts = [int(c) for c in np.bincount(owner, minlength=len(counts))]
+        report.patch_layout = "template"
     pool_range = {
         name: (float(np.min(pool.trait(name))), float(np.max(pool.trait(name))))
         for name in imposed_cell
