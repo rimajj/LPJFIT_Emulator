@@ -99,3 +99,4 @@ Rows whose `verified` date is >90 days old and which no ADR or experiment refere
 | target-spinup-constco2 | Owner 2026-09-24: target = the STORED spin-up's constant-CO2 years (1000-1699, 1901-1930 recycled, 276.59 ppm); no new runs; 56,986 cells, 25 patches. | 20260924-INT record | 2026-09-24 |
 | spinup-kept-vegc-only | Per cell, the stored spin-up kept ONLY vegetation carbon (trees+grass) before 1999: no restart, no traits. All-cell tests are vegc-only; full state is a pilot test. | spinup_target.py | 2026-09-24 |
 | rerun-is-the-bar | Pass = as good as a rerun (D >= -0.02). Rerun: 85.9 % of cells in band on vegc, 10.35 % of pilot rows on all 19 at once. Emulator 24.7 % and 0.36 %. | X-20260924-* verdicts | 2026-09-24 |
+| patch-coherence | Light is shared per patch: re-dealing a real stand's OWN trees to random patches loses ~10 % of its carbon in year 5 at its own CO2. Keep each tree with the neighbours it grew with. | journal/X 2026-09-28, dev | 2026-09-28 |

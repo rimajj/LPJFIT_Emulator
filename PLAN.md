@@ -135,7 +135,7 @@ of rows: it rewards getting every quantity of one forest right at once.
 | **the Product A chain for the spin-up**: held-out predictions for every cell's 1901–1930 climate → a synthesised restart for all 56,986 cells (`synth_global.py`) → the model loads it and stays near the stored equilibrium | T/D | the synthesis branch's review |
 | **cell-level precision**: daily-forcing features and learner capacity, screened on dev folds only (`int/features`), then a sealed confirmation on untouched folds | T | nothing |
 | **a coherent forest, not 19 separate regressions** — the conjunctive test needs every quantity of one row right together | T | the screen's result |
-| synthesised established stems die at 2× the model's rate in year 1 even from a perfect prediction | T | nothing |
+| **the year-5 die-off is FOUND** (2026-09-28): the random deal of stems to patches causes it; transplanting whole patches cuts it −9.4 % → −2.8 % but not the in-band share (0.490 → 0.493, sample) — per-cell carbon now binds | T | nothing |
 | the emitted-restart test is SEALED (`X-20260924-restart-worst-quantity`); its model arm waits on re-running the synthesiser against the final map | X | the synthesis merge |
 
 **Still standing:** both kill tests (rungs 1, 8) with their blind-arm caveats; the equilibrium map

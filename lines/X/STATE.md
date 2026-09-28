@@ -18,16 +18,18 @@ triaged, a disposition each, into `journal/X/2026-09b.md`); the integrator refre
 session end. Basis of every number: pilot corpus v2-constco2 (200 cells × 30 climates × 1 seed,
 CO₂ 276.59 ppm), 200 of 54,020 tree-bearing cells — no fidelity claim, acceptance untouched.
 
-🆕 **2026-09-25 (journal).** Owner: a continuation is judged against a real run on the SAME window
-(decision record `20260925-INT-…-same-window`; a real 10-yr window lands in band on 0.598 of all
-cells, 0.622 on folds 3-4; the old 250-yr bar was unreachable). **`X-20260925-continuation-same-
-window` = `fail` (b):** global carbon-matched restart (PilotBank donors + `match_vegc`,
-`runs/spinup-product-v3vegc-global`, sha256 6cef14e0…) continued 30 yr: D −0.129 on folds 3-4
-(0.494 vs 0.622), best null −0.303; **year 1 is real-run grade** (D −0.018; all cells +0.001);
-the loss is the year-5 die-off (678 → 607 PgC). **NEXT: find why placed mid-canopy stems shrink
-from year 1** — NOT inherited counters (`reset_counters` made it worse), NOT crowding
-(`vegc_lever="size"` no better), NOT grass (4 % of carbon, flat). Suspect the per-stem pools a donor
-brings (leaf/sapwood/root, crown) set for its donor stand's light. Needs per-stem output (`ind`).
+🆕 **2026-09-25.** A continuation is judged against a real run on the SAME window (owner; record
+`20260925-INT-…-same-window`). **`X-20260925-continuation-same-window` = `fail` (b):** the global
+carbon-matched restart continued 30 yr, D −0.129 on folds 3-4 (0.494 vs a real run's 0.622), best
+null −0.303; year 1 real-run grade (D −0.018); the loss was the year-5 die-off (678 → 607 PgC).
+🆕 **2026-09-28: the die-off is FOUND** (journal): the synthesiser deals stems to the 25 patches at
+random, and light is shared per patch. Re-dealing restart_1999's OWN trees, nothing else changed,
+at its own CO2: year 5 −9.7 % (unshuffled −0.0 %). Copying the template's size-rank layout
+(`patch_layout="template"`) did not help (−9.8 %); transplanting WHOLE pilot patches
+(`patch_transplant:PatchTransplant`) cut it to −2.8 % — but in band over years 1-10 moved only
+0.490 → 0.493 on the 51-member sample (folds 3-4 0.561 → 0.531, noise). **NEXT: the per-cell carbon
+level binds, not the die-off** — each file is in band on only 0.54-0.58 of cells at year 0 and loses
+~0.09 in year 1 either way. Levers: the carbon map's precision (T), and why year 1 drops ~0.09.
 
 | experiment | model | bar | best null | ceiling | blind arm |
 |---|---|---|---|---|---|
@@ -47,9 +49,8 @@ own corpus and estimand.
 2. **Composition loses to no-change at 2 of 29 levels**, both cold (`core_t+0_p13` −0.0882,
    `lhs10` −0.0665); the response arm wins 29 of 29.
 3. **Every ceiling borrows its noise from the two TRANSIENT-CO₂ ground-truth spin-ups.** The
-   integrator's full constant-CO₂ second seed (running: jobs 2280660/2280661 + 24 spin-up
-   manifests) is what can re-derive them on the right basis — under a NEW exp_id, never by editing
-   a sealed one.
+   constant-CO₂ second seed (landed 2026-09-23, 6,000/6,000) can re-derive them — under a NEW
+   exp_id, never by editing a sealed one.
 4. **Product A rarely lands within 10 %**: 0.0 % of 5,620 tree-bearing runs inside a flat 10 % on
    all 22 (one real run predicting another: 4.9 %); the weakest traits (0.29–0.60) are the gap.
 
@@ -61,9 +62,7 @@ own corpus and estimand.
    is the competitor that matters. Making it the decision competitor needs its own exp_id.
 3. **When the second seed lands**, pre-register the constant-CO₂ band and ceilings before anything
    is scored against them.
-4. **Parallel integrator branches (`int/*`) are building new scoring, the equilibrium model and the
-   global writer.** Any new skill number from them needs its own sealed pre-registration with every
-   null; check `experiments/` on main before sealing a duplicate.
+4. Check `experiments/` on main before sealing a duplicate of anything.
 
 **Standing:** X3 `fail` at outcome (c) — no warmed climate may be quoted from the scenario-leg map.
 A sealed experiment is abandoned with `tools/abandon_experiment.py` (a registry row, never an edit).
