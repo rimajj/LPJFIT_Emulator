@@ -1017,12 +1017,14 @@ def synthesise_cell(  # noqa: PLR0912, PLR0915 -- one pass over the patches; spl
     # PATCH LAYOUT. Light is shared PER PATCH, in 2-m layers (`getfpar.c`), so which stems stand
     # together decides each one's growth. A real stand's 25 patches are independent gap-dynamics
     # replicates -- one holds a few big trees, another many young ones -- and the random deal
-    # above turns every patch into a sample of the whole stand with the same stem count. Whether
-    # that alone kills stems is tested by re-dealing the real 1999 stand's OWN stems
-    # (`shuffle_rule`; journal/X/2026-09b.md, 2026-09-28). "template" instead sends roster stem
-    # k, which sits at cell rank (k + 0.5) / n, into the patch that holds the template's stem at
-    # that rank. The roster is in height-rank order on both paths (`_targets`,
-    # `_composition_roster`).
+    # above turns every patch into a sample of the whole stand with the same stem count. That
+    # alone kills: the real 1999 stand's OWN stems, re-dealt so and continued at their own CO2,
+    # lose 9.7 % of the carbon in year 5 where the unshuffled stand loses none (`shuffle_rule`;
+    # journal/X/2026-09b.md, 2026-09-28). "template" sends roster stem k, at cell rank
+    # (k + 0.5) / n, into the patch holding the template's stem at that rank (the roster is in
+    # height-rank order on both paths). ⚠ MEASURED NOT TO HELP (-9.8 % against -9.4 %, 51-member
+    # sample): rank-matched strangers are not the neighbours a stem grew with. What does help is
+    # moving whole real patches, `vegemu.models.patch_transplant` (-2.8 %).
     if patch_layout == "template" and n_cell and rungs.size:
         homes = template_patch_ladder(template)
         u_final = (np.arange(n_cell) + 0.5) / n_cell

@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import polars as pl
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -61,6 +62,13 @@ def main() -> None:
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--arm", action="append", required=True, help="label=<root>/<arm>")
     ap.add_argument("--every", type=int, default=20)
+    ap.add_argument(
+        "--static",
+        action="append",
+        default=[],
+        help="label=<synth_global cells.parquet>: the file's own year-0 VegC (rep_vegc_written), "
+        "scored on the cells the first --arm covers against the 1-year reference",
+    )
     a = ap.parse_args()
     a.out.mkdir(parents=True, exist_ok=True)
     sc, held, refs, info = _setup()
@@ -88,6 +96,21 @@ def main() -> None:
         print(
             label, json.dumps({k: v for k, v in row.items() if k != "vegc_sum_by_year"}), flush=True
         )
+    first = load_arm(Path(a.arm[0].split("=", 1)[1]), a.every)[0]
+    covered = np.isfinite(first[0])[mask]
+    for spec in a.static:
+        label, f = spec.split("=", 1)
+        cells = pl.read_parquet(f).filter(pl.col("status") == "synthesised")
+        full = np.full(NCELL, np.nan)
+        full[cells["cell"].to_numpy()] = cells["rep_vegc_written"].to_numpy()
+        x = full[mask]
+        row = {}
+        for sel_name, base in (("folds_3_4", covered & held), ("all", covered)):
+            sel = base & np.isfinite(x)
+            s = score(x[sel], _with_reference(sc, sel, refs[1]))
+            row[f"y00_{sel_name}"] = {"cells": int(sel.sum()), "frac": s["frac"], "D": s["D"]}
+        out[label] = row
+        print(label, json.dumps(row), flush=True)
     (a.out / "sample_scores.json").write_text(json.dumps(out, indent=1))
 
 
