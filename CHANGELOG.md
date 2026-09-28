@@ -5,6 +5,11 @@ Entries are written as `changelog.d/<line>-<slug>.md` fragments and folded in at
 
 ## [Unreleased]
 
+<!-- collated 2026-09-28 from 1 fragment(s) -->
+
+### Added
+- **The cause of the emulated restart's year-5 die-off is found: trees are mixed between forest patches.** The original model divides each cell into 25 patches and shares sunlight among the trees within a patch, and the restart builder was dealing trees to patches at random. Taking the model's own 1999 forest, moving its trees to random patches and changing nothing else, then running it 30 years at its own CO2 level, loses 9.7 % of its carbon in year 5; unmoved it loses nothing. That is the whole die-off the emulated file shows (9.4 %). Keeping each patch's own tree count does not help (10.6 %), nor does copying the real forest's layout by tree-size rank (9.8 %). A new builder option that moves whole real patches from the nearest constant-CO2 pilot forests (`patch_transplant:PatchTransplant`, off by default) cuts the die-off to 2.8 % on a 51-range sample (2,904 cells, development test, not sealed). But the share of cells inside the band over years 1-10 barely moves (49.0 % to 49.3 %), because the file itself starts inside the band in only 54-58 % of cells. The limit is now how well each cell's carbon is predicted, not the die-off.
+
 <!-- collated 2026-09-25 from 1 fragment(s) -->
 
 ### Added
