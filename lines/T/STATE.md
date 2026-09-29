@@ -31,16 +31,19 @@ composition head by that, never by the 0.4459 (`X-20260923-pilot-composition-bli
 ⚠ **Response kill test**: 0.558968 vs bar 0.257725, blind arm 0.362322 — 64.8 % is blind skill and
 only +0.196646 reads the forcing; that, not the nulls, is what to move.
 
+🆕 **2026-09-29 (integrator, dev only): the spin-up carbon map is limited by COVERAGE, not by
+density or recipe.** Learning curve (spin-up pool, dev folds 0-2): error ~ regions^-0.59, ~ cells
+within regions^-0.14; full 0.605 in band vs rerun 0.853. Near-identical same-soil neighbours agree
+only 0.786 (rerun 0.900) and the map already explains their differences as well as a model of the
+differences (0.447 vs 0.454). Do not spend more screen rounds on features or tuning for this map;
+the lever is more distinct climates (perturbation spin-ups), which is the owner's call. Journal
+2026-09-29; `diag_spinup_vegc_learning_curve.py`, `diag_spinup_vegc_twins.py`.
+
 **THE PRINCIPAL BUILD: `models/synth.py` MUST STOP COPYING SPECIES COMPOSITION.** The model arm
 (`scripts/exp_model_pilot_composition.py`) predicts each type's stem-share change; wiring it into
 the roster builder is the work. ⚠ It needs its own t0–t4 pass, not just a score — right shares with
 inadmissible stems has failed here twice — and a PER-LEVEL check: composition loses to no-change at
 2 of 29 levels, both cold (`core_t+0_p13` −0.0882, `lhs10` −0.0665).
-
-🔄 **Parallel integrator branches (`int/*`) are building the corpus-v3 schema, the truth builder,
-features, the equilibrium model, synthesis, the global restart writer and new scoring**, which
-overlap this line: read `git log origin/main` before starting. A full constant-CO₂ second seed of
-the pilot is also running (integrator; jobs 2280660/2280661 + 24 spin-up manifests).
 
 ⚠ **With any composition number:** shares count stems, not biomass; the seven sum to 1 (six free);
 scored only where a forest exists at both ends (5,258 of 5,800 pairs). It is a SEPARATE estimand —

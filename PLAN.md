@@ -133,7 +133,7 @@ of rows: it rewards getting every quantity of one forest right at once.
 | open, in value order | owner | blocked on |
 |---|---|---|
 | **the Product A chain for the spin-up**: held-out predictions for every cell's 1901–1930 climate → a synthesised restart for all 56,986 cells (`synth_global.py`) → the model loads it and stays near the stored equilibrium | T/D | the synthesis branch's review |
-| **cell-level precision**: daily-forcing features and learner capacity, screened on dev folds only (`int/features`), then a sealed confirmation on untouched folds | T | nothing |
+| **cell-level precision**: screened recipe 0.606 vs rerun 0.869 (folds 3-4, sealed). ⚠ 2026-09-29 dev learning curve: error falls as regions covered^-0.59 but density^-0.14 -- the map is COVERAGE-limited; rerun grade needs ~5x the distinct climates the land offers, i.e. perturbation spin-ups (owner's "more data") | T | owner: which data |
 | **a coherent forest, not 19 separate regressions** — the conjunctive test needs every quantity of one row right together | T | the screen's result |
 | **the year-5 die-off is FOUND** (2026-09-28): the random deal of stems to patches causes it; transplanting whole patches cuts it −9.4 % → −2.8 % but not the in-band share (0.490 → 0.493, sample) — per-cell carbon now binds | T | nothing |
 | the emitted-restart test is SEALED (`X-20260924-restart-worst-quantity`); its model arm waits on re-running the synthesiser against the final map | X | the synthesis merge |
