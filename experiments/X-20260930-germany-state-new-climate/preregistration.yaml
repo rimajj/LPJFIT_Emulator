@@ -1,0 +1,164 @@
+schema_version: 1
+
+exp_id: X-20260930-germany-state-new-climate
+line: X
+
+status: draft
+
+title: "GERMANY: IS THE EMULATOR'S SETTLED FOREST -- TREE COUNTS, STOCKS AND TRAIT DISTRIBUTIONS AT ONCE -- UNDER A CLIMATE IT NEVER TRAINED ON AS GOOD AS A RERUN?"
+question: >
+  The second test on the owner's Germany equilibrium runs (decision
+  20260930-INT-the-germany-equilibrium-runs-become-their-own-corpus), and the first on the owner's
+  full acceptance clause there: tree counts AND trait medians AND trait distributions, per cell, at
+  once. The carbon test (X-20260930-germany-vegc-new-climate) scored vegetation carbon only. The
+  state is each run's 3070 restart -- the last full state inside the clean 2101-3070 segment --
+  proven readable on all twelve files (germany_corpus.py restart: 49 records per file
+  byte-identical, decoded VegC equal to the model's own 3070 output within 5.6e-8, job 2360270) and
+  decoded for every cell (germany_state_3070.parquet, job 2360277). Hold out one climate at a time
+  and predict every cell's 19-quantity state under it from maps trained on the other five.
+
+  THE FALSIFIABLE CLAIM: D = frac(map) - frac(rerun) >= -0.02 over the 54,402 rows.
+
+  ⚠ WHAT A PASS WOULD NOT SAY: Germany only, 9,067 cells at ~9 km, CO2 415.78 ppm, npatch 250 --
+  nothing about the global target; one snapshot year (3070) per seed, so the rerun reference
+  includes year-to-year noise and is itself only 0.494; the species mix is not among the 19;
+  climates inside the span of six ESM x SSP windows only.
+
+estimand:
+  name: asgood_state_germany_newclimate
+  definition: >
+    Computed by scripts/exp_germany_state.py. A row is (cell, climate), all 54,402 (9,067 cells x
+    six climates). The 19 quantities of score.SCORED_VARYING: stems per patch; above-ground
+    biomass, LAI, soil carbon; p10, p50 and p90 of wood density, SLA, D95max, leaf longevity and
+    height (fine-root conductivity is one constant value in every row, asserted by
+    assert_constant_quantities, and is not scored, as in the global test). Truth T_k = seed k's
+    state decoded from its restart_3070_nv.lpj (vegemu.corpus.state.summarise_cell, schema 3).
+    Band w, per cell and quantity = score.spread_across_climates: max(0.10, the median two-seed
+    relative spread over the cell's OTHER five climates); 99.25 % of cell-quantities sit at the
+    bare 10 % floor. Per-row pass vs T_k = every quantity T_k defines satisfies |x - T_k| <= w |T_k|
+    (a trait of a treeless truth is not scored; an undefined prediction of a defined quantity
+    fails). Per-row score = mean over k = 1, 2; frac = mean over rows; frac(rerun) = seed 2 scored
+    against seed 1 and seed 1 against seed 2, averaged (0.494127); D = frac(arm) - frac(rerun).
+    FOLDS: leave-one-climate-out, six folds, a row's fold is its (ESM, SSP); no row of the
+    held-out climate trains its prediction. THE MODEL ARM: per quantity and fold one LightGBM
+    regressor with the carbon test's frozen settings (exp_germany_vegc.LEARNER, chosen on the
+    GLOBAL spin-up dev folds by screen_spinup_vegc.py round 2; 3000 trees, L1 loss), fitted on both
+    seeds' rows of the other five climates where that seed defines the quantity; log1p target for
+    stems per patch, biomass, LAI and soil carbon, natural scale for the traits; emitted = clipped
+    at 0 and each trait's three quantiles sorted ascending (exp_germany_state.emit). Inputs: the
+    258 columns of germany_climate.parquet, all from the 2071-2100 daily forcing and the soil
+    inputs. REPORTED BESIDE, NEVER DECIDED ON: frac and D per held-out climate; per-quantity band
+    rates beside the rerun's; a BLIND arm, the same learners on the six soil columns only; the
+    two-seed mean as a predictor; frac without ssp245 (ssp245 rows neither train nor are scored;
+    four folds); the flat-10 % conjunctive rate.
+  reference_basis: >
+    The owner's Germany production runs (germany.runs in config/paths.yaml): LPJmL 5.6.004 with the
+    individual-tree extension, npatch 250, natural vegetation, fire on, nitrogen off, 9,067 cells,
+    seeds 1 and 2; ssp126 and ssp370 on the 2025-12-17 build, ssp245 on the 2026-02-05 build. CO2
+    constant 415.78 ppm over every year used. Truth = the 3070 restarts, inside the clean segment
+    (2071-2100 and 3071-3100 read relative humidity as specific; see the decision record).
+    germany_state_3070.parquet sha256 8786617314ec4670...; germany_climate.parquet sha256
+    b3ff8a9489d2d3c6.... 54,402 rows; 24 of the 108,804 seed states hold no trees; a level share of
+    a conjunction over 19 quantities; the statistic a difference of two shares.
+  units: dimensionless
+  kind: level
+
+data:
+  corpus: /p/tmp/jamirp/vegemu/corpus/germany-eq-v1
+  corpus_sha256: "8786617314ec4670df3faa3100903a20905fc14acdb56b3260472ad6870a232e"
+  plan_sha256: "b3ff8a9489d2d3c673213042aec716fa33c902b076908de161d84ece350ec8d6"
+  n_rows: 54402
+
+  split:
+    kind: holdout_forcing_leg
+    k: 6
+    seed: 0
+
+  leakage_checks:
+    - "Folds are the six (ESM, SSP) climates; fit_predict trains fold f on rows with fold != f only."
+    - "Features are exactly the 258 columns of exp_germany_vegc.FEATURES; cell, lon, lat, esm, ssp, seed and CO2 are asserted absent there (FORBIDDEN). The scenario and the ESM reach the model only through their own climate."
+    - "Every input is from the forcing and soil files, never a model output; the feature path was proven equal to the stored global tables on 200 cells (job 2359980)."
+    - "The learner's settings were chosen on the global stored spin-up's dev folds before any Germany number existed, and reused unchanged from the carbon test; no Germany state row selected them."
+    - "The band of a (cell, climate) row is built from the two seeds under that cell's other five climates only (spread_across_climates), so the scored pair never sets its own tolerance."
+    - "State rows are joined to climate rows by asserted equality of (esm, ssp, cell) for both seeds (exp_germany_state.load)."
+
+# Measured by scripts/exp_germany_state.py --arm nulls, job 2360304, 2026-09-30, before this file was
+# written and before any state model was fitted; nulls.json sha256 7e7ad85a8ea66d30...
+nulls:
+  - id: same_cell_nearest_climate
+    description: "THE BEST NULL. The cell's own two-seed mean state under the training climate nearest to the held-out one in the 85 standardised forcing features."
+    expected:
+      statistic: asgood_state_germany_newclimate
+      value: -0.365602
+      tolerance: 0.001
+      derivation: "Measured, job 2360304: frac 0.128525. Per held-out climate: ACCESS ssp126 0.160, ssp245 0.178, ssp370 0.144; MPI ssp126 0.026, ssp245 0.066, ssp370 0.198. Worst quantities D95max p10 0.455, D95max p50 0.649, biomass 0.668."
+
+  - id: same_cell_mean
+    description: "The mean of the cell's own state over its five training climates (geometric for the four count/stock quantities)."
+    expected:
+      statistic: asgood_state_germany_newclimate
+      value: -0.413882
+      tolerance: 0.001
+      derivation: "Measured, job 2360304: frac 0.080245."
+
+  - id: nearest_analogue
+    description: "The two-seed mean state of the nearest training ROW, any cell, in the eight analogue features standardised on the training rows."
+    expected:
+      statistic: asgood_state_germany_newclimate
+      value: -0.412163
+      tolerance: 0.001
+      derivation: "Measured, job 2360304: frac 0.081964."
+
+  - id: training_mean
+    description: "The per-quantity mean of the training rows' state (log scale for the four count/stock quantities)."
+    expected:
+      statistic: asgood_state_germany_newclimate
+      value: -0.472087
+      tolerance: 0.001
+      derivation: "Measured, job 2360304: frac 0.022040."
+
+  - id: shuffled
+    description: "The held-out climate's two-seed mean states permuted across its own rows (seed 20260930)."
+    expected:
+      statistic: asgood_state_germany_newclimate
+      value: -0.432925
+      tolerance: 0.001
+      derivation: "Measured, job 2360304: frac 0.061202."
+
+decision_rule:
+  statistic: asgood_state_germany_newclimate
+  comparator: model_absolute
+  pass_if: ">= -0.02"
+  arms: [model, same_cell_nearest_climate, same_cell_mean, nearest_analogue, training_mean, shuffled]
+  multiplicity: none
+  power_note: >
+    The owner's rule and margin: D >= -0.02, i.e. frac(map) >= 0.474127. Best null
+    same_cell_nearest_climate at -0.365602 (frac 0.1285); no null satisfies the rule, so the
+    estimand has power. ⚠ The rule is LENIENT for a map in one specific way: frac(rerun) = 0.494 is
+    low because each truth is one snapshot year and two seeds' snapshots disagree beyond 10 % on
+    biomass in 22 % of rows and on stems per patch in 13 %; a predictor of the seed average sits
+    between the two seeds and scores 0.945 (the ceiling). So a pass says "as good as a rerun",
+    exactly the owner's rule, and never "within 10 % of the truth".
+
+  ceiling_note: >
+    The two-seed mean as a predictor: frac 0.945186 (D +0.451). It is the arithmetic advantage of
+    predicting the ensemble mean against single-seed truths, not an attainable target for a map.
+    Read D against 0.
+
+  outcomes_note: >
+    (a) D >= -0.02: the full 19-quantity state under a held-out climate is rerun-grade on this
+    corpus. (b) -0.365602 < D < -0.02: it beats copying the cell's own nearest climate, i.e. it
+    reads the climate, but is not rerun-grade. (c) D <= -0.365602: no better than copying the same
+    cell's state under its most similar other climate. Always read with the per-climate table
+    (ACCESS ssp370, the hottest, is extrapolation; ssp245 folds are interpolation), the
+    per-quantity table beside the rerun's rates, and the blind arm.
+
+compute:
+  launcher: scripts/sbatch_py.sh
+  tag: X-ger-state-model
+  partition: standard
+  est_core_hours: 30
+
+outputs:
+  - path: /p/tmp/jamirp/vegemu/exp/X-20260930-germany-state-new-climate/metrics.json
+    kind: metrics
