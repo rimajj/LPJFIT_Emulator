@@ -65,6 +65,7 @@ from vegemu.corpus.climate import CLIMATE_FEATURES
 from vegemu.corpus.soil import SOIL_FEATURES
 from vegemu.nulls import ANALOGUE_FEATURES
 from vegemu.paths import paths
+from vegemu.results import append_result_block
 
 Array = npt.NDArray[np.float64]
 
@@ -306,8 +307,8 @@ def main() -> int:
     }
     arms = {"model": report["arm_details"]["model"]["all"]["D"]}
     arms.update({k: v["all"]["D"] for k, v in report["nulls"].items()})
-    report["arms"] = arms
-    report["n"] = int(base.sum())
+    # The stamped block append_result.py requires (prereg hash from the JOB's environment).
+    report.update(append_result_block(statistic=STATISTIC, arms=arms, n=int(base.sum())))
     report["decision"] = {
         "D": arms["model"],
         "threshold": -0.02,
