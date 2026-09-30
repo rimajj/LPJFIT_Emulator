@@ -4,6 +4,8 @@
     NCPUS=16 scripts/sbatch_py.sh D-germany-truth   scripts/germany_corpus.py truth
     NCPUS=16 scripts/sbatch_py.sh D-germany-climate scripts/germany_corpus.py climate --workers 16
     NCPUS=4  scripts/sbatch_py.sh D-germany-check   scripts/germany_corpus.py check
+    NCPUS=12 scripts/sbatch_py.sh D-germany-restart scripts/germany_corpus.py restart --workers 12
+    NCPUS=64 scripts/sbatch_py.sh D-germany-state   scripts/germany_corpus.py state --workers 64
 
 WHAT THE RUNS ARE (owner, 2026-09-30; inventory in `journal/D/2026-09b.md`). 9,067 cells of Germany
 at ~0.07 deg, npatch 250, natural vegetation, LPJmL 5.6.004 with the individual-tree extension.
@@ -476,15 +478,219 @@ def stage_check() -> int:
     return 0 if report["verdict"] == "PASS" else 1
 
 
+# -- restart: the clean 3070 restarts, proven before they are decoded ---------------------------
+#
+# The 3070 restart is the last full state inside the clean segment (the 3100 one comes out of the
+# 30 humidity-defect years), so it is where tree counts and traits come from. It is 195-211 GB per
+# run, 250 patches, written by LPJmL 5.6.004 on two builds (ssp245 on 2026-02-05, the rest on
+# 2025-12-17) -- neither of which our reader was proven on. Invariant 7: prove it on these files.
+
+RESTART_YEAR = 3070
+RT_SAMPLE = 48  # cells per file: an even stride, plus the file's largest record
+
+
+def restart_file(esm: str, ssp: str, seed: int) -> Path:
+    return (
+        path("germany.runs")
+        / esm
+        / ssp
+        / f"random_seed_{seed}"
+        / "restart"
+        / f"restart_{RESTART_YEAR}_nv.lpj"
+    )
+
+
+def _vegc_3070(esm: str, ssp: str, seed: int, g: Array) -> Array:
+    """The model's own annual VegC for 3070 (last step of vegc_3070.nc), per cell."""
+    o = path("germany.runs") / esm / ssp / f"random_seed_{seed}" / "output"
+    data, lat, lon, yrs = _read_vegc(o / "vegc_3070.nc")
+    assert yrs[-1] == RESTART_YEAR, (esm, ssp, seed, yrs[-1])
+    return _to_cells(data[-1:], lat, lon, g)[0]
+
+
+def _roundtrip_task(args: tuple[str, str, int]) -> dict[str, Any]:
+    from vegemu.binfmt.restart import RestartReader, read_cell, write_cell  # noqa: PLC0415
+    from vegemu.corpus.vegc import cell_vegc  # noqa: PLC0415
+
+    esm, ssp, seed = args
+    fn = restart_file(esm, ssp, seed)
+    r = RestartReader(fn)
+    sizes = r.cell_sizes()
+    cells = sorted(
+        set(np.linspace(0, r.ncell - 1, RT_SAMPLE).astype(int).tolist()) | {int(sizes.argmax())}
+    )
+    nc = _vegc_3070(esm, ssp, seed, grid())
+    out: dict[str, Any] = {
+        "file": str(fn),
+        "bytes": r.filesize,
+        "firstyear": r.generic.firstyear,
+        "ncell": r.ncell,
+        "layout": repr(r.layout),
+        "cells": cells,
+        "record_bytes_min_max": [int(sizes.min()), int(sizes.max())],
+        "unequal": [],
+        "npatch": set(),
+        "rel_vegc_vs_output": [],
+        "skip": 0,
+    }
+    t0 = time.time()
+    with r:
+        for c in cells:
+            blob = r.cell_bytes(c)
+            rec = read_cell(blob, r.layout)
+            if write_cell(rec, r.layout) != blob:
+                out["unequal"].append(c)
+            if rec["skip"]:
+                out["skip"] += 1
+                continue
+            out["npatch"].add(int(rec["stands"][0]["npatch"]))
+            ours = cell_vegc(rec)["total"]
+            out["rel_vegc_vs_output"].append(
+                abs(ours - float(nc[c])) / max(abs(float(nc[c])), 1e-9)
+            )
+    out["s_per_cell"] = (time.time() - t0) / len(cells)
+    out["npatch"] = sorted(out["npatch"])
+    rel = np.asarray(out.pop("rel_vegc_vs_output"))
+    out["vegc_vs_output_max_rel"] = float(rel.max()) if rel.size else None
+    out["vegc_vs_output_share_1e-6"] = float((rel <= 1e-6).mean()) if rel.size else None
+    return out
+
+
+def stage_restart(workers: int) -> int:
+    """Byte round-trip + a cross-check against the model's own 3070 VegC, on every 3070 file.
+
+    PASS needs, per file: the header says year 3070 and 9,067 cells; every sampled record re-encodes
+    to the same bytes; and the decoded total VegC equals the model's own VegC output for 3070 within
+    1e-6 relative (float32 output) on every sampled vegetated cell -- which proves the record order
+    is the grid order, not just that the bytes parse.
+    """
+    tasks = [(e, s, seed) for e in ESMS for s in SSPS for seed in SEEDS]
+    with ProcessPoolExecutor(max_workers=workers) as ex:
+        res = list(ex.map(_roundtrip_task, tasks))
+    fails: list[str] = []
+    for r in res:
+        bad = []
+        if r["firstyear"] != RESTART_YEAR or r["ncell"] != 9067:
+            bad.append("header")
+        if r["unequal"]:
+            bad.append(f"{len(r['unequal'])} records not byte-identical")
+        if r["vegc_vs_output_share_1e-6"] != 1.0:
+            bad.append(f"VegC off the output, max rel {r['vegc_vs_output_max_rel']:.3g}")
+        r["verdict"] = "PASS" if not bad else "FAIL: " + "; ".join(bad)
+        if bad:
+            fails.append(r["file"])
+        print(
+            f"  {r['file']}: {r['verdict']}, {len(r['cells'])} cells, npatch {r['npatch']}, "
+            f"{r['s_per_cell']:.2f} s/cell",
+            flush=True,
+        )
+    report = {
+        "files": res,
+        "code_commit": _commit(),
+        "verdict": "PASS" if not fails else "FAIL",
+        "failed": fails,
+    }
+    (_out() / "germany_restart_check.json").write_text(json.dumps(report, indent=2))
+    print(json.dumps({k: report[k] for k in ("verdict", "failed")}), flush=True)
+    return 0 if not fails else 1
+
+
+def _state_task(args: tuple[str, str, int, int, int]) -> list[dict[str, Any]]:
+    from vegemu.binfmt.restart import RestartReader  # noqa: PLC0415
+    from vegemu.corpus import schema as schema_mod  # noqa: PLC0415
+    from vegemu.corpus.state import summarise_cell  # noqa: PLC0415
+    from vegemu.corpus.vegc import cell_vegc  # noqa: PLC0415
+
+    esm, ssp, seed, c0, c1 = args
+    r = RestartReader(restart_file(esm, ssp, seed))
+    rows: list[dict[str, Any]] = []
+    with r:
+        for c in range(c0, c1):
+            rec = r.read(c)
+            row: dict[str, Any] = summarise_cell(rec, c, r.layout, schema=schema_mod.CURRENT)
+            v = cell_vegc(rec)
+            row.update({"vegc_out_tree": v["tree"], "vegc_out_grass": v["grass"]})
+            row.update({"esm": esm, "ssp": ssp, "seed": seed})
+            rows.append(row)
+    return rows
+
+
+STATE_CHUNK = 64
+
+
+def stage_state(workers: int) -> int:
+    """Every cell of every 3070 restart -> the per-cell state vector (tree counts, size bins, the
+    species mix, trait quantiles and means), schema 3, plus the model-definition VegC split. Refuses
+    to run unless `restart` passed on these files at this commit's reader."""
+    import polars as pl  # noqa: PLC0415
+
+    from vegemu.corpus import schema as schema_mod  # noqa: PLC0415
+    from vegemu.corpus.state import STATE_COLUMNS  # noqa: PLC0415
+
+    chk = _out() / "germany_restart_check.json"
+    if not chk.exists() or json.loads(chk.read_text())["verdict"] != "PASS":
+        print(f"refusing: {chk} missing or not PASS -- run the `restart` stage first", flush=True)
+        return 2
+    tasks = [
+        (e, s, seed, c0, min(c0 + STATE_CHUNK, 9067))
+        for e in ESMS
+        for s in SSPS
+        for seed in SEEDS
+        for c0 in range(0, 9067, STATE_CHUNK)
+    ]
+    rows: list[dict[str, Any]] = []
+    t0 = time.time()
+    with ProcessPoolExecutor(max_workers=workers) as ex:
+        for i, part in enumerate(ex.map(_state_task, tasks), 1):
+            rows.extend(part)
+            if i % 50 == 0:
+                print(f"  {i}/{len(tasks)} chunks, {time.time() - t0:.0f} s", flush=True)
+    keys = ["cell", "esm", "ssp", "seed"]
+    frame = (
+        pl.DataFrame(rows)
+        .select(
+            [*keys, *[c for c in STATE_COLUMNS if c != "cell"], "vegc_out_tree", "vegc_out_grass"]
+        )
+        .with_columns(pl.col("cell").cast(pl.Int32), pl.col("seed").cast(pl.Int8))
+        .sort(["esm", "ssp", "seed", "cell"])
+    )
+    assert frame.height == 9067 * len(ESMS) * len(SSPS) * len(SEEDS), frame.height
+    dest = _out() / "germany_state_3070.parquet"
+    frame.write_parquet(dest)
+    meta = {
+        "rows": frame.height,
+        "columns": frame.width,
+        "schema": schema_mod.CURRENT,
+        "restart_year": RESTART_YEAR,
+        "files": {
+            f"{e}/{s}/{sd}": str(restart_file(e, s, sd)) for e in ESMS for s in SSPS for sd in SEEDS
+        },
+        "restart_check_sha256": _sha256(chk),
+        "treeless_rows": int((frame["stems_total"] == 0).sum()),
+        "skip_rows": int((frame["skip"] == 1).sum()),
+        "output": str(dest),
+        "output_sha256": _sha256(dest),
+        "code_commit": _commit(),
+        "seconds": time.time() - t0,
+    }
+    (_out() / "germany_state_3070.json").write_text(json.dumps(meta, indent=2))
+    print(json.dumps({k: v for k, v in meta.items() if k != "files"}), flush=True)
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    ap.add_argument("stage", choices=("truth", "climate", "check"))
+    ap.add_argument("stage", choices=("truth", "climate", "check", "restart", "state"))
     ap.add_argument("--workers", type=int, default=8)
     a = ap.parse_args()
     if a.stage == "truth":
         return stage_truth()
     if a.stage == "climate":
         return stage_climate(a.workers)
+    if a.stage == "restart":
+        return stage_restart(a.workers)
+    if a.stage == "state":
+        return stage_state(a.workers)
     return stage_check()
 
 
