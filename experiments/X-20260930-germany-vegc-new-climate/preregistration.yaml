@@ -1,0 +1,149 @@
+schema_version: 1
+
+exp_id: X-20260930-germany-vegc-new-climate
+line: X
+
+status: draft
+
+title: "GERMANY: IS THE EMULATOR'S SETTLED VEGETATION CARBON UNDER A CLIMATE IT NEVER TRAINED ON AS GOOD AS A RERUN?"
+question: >
+  The first test on the owner's Germany equilibrium runs (decision
+  20260930-INT-the-germany-equilibrium-runs-become-their-own-corpus): every one of 9,067 cells
+  settled under six climates (ACCESS-CM2 and MPI-ESM1-2-HR x ssp126 / ssp245 / ssp370, each the
+  2071-2100 window recycled for a millennium), two seeds each. Hold out one climate at a time and
+  predict every cell's settled vegetation carbon under it from a map trained on the other five
+  climates. The same cell under the other climates trains the map: this is the same-place,
+  new-climate question the global stored spin-up (one climate per place) cannot ask.
+
+  THE FALSIFIABLE CLAIM: D = frac(map) - frac(rerun) >= -0.02 over the 54,390 scored rows.
+
+  ⚠ WHAT A PASS WOULD NOT SAY: Germany only, 9,067 cells at ~9 km, CO2 415.78 ppm, npatch 250 --
+  nothing about the global target; vegetation carbon only, nothing about tree counts or traits;
+  climates inside the span of six ESM x SSP windows, so nothing about a climate outside it.
+
+estimand:
+  name: asgood_vegc_germany_newclimate
+  definition: >
+    Computed by scripts/exp_germany_vegc.py. A row is (cell, climate); it is SCORED where both
+    seeds' truth is > 0 (54,390 of 54,402). Truth T_k = seed k's mean VegC over model years
+    2821-3070; band w = max(0.10, s), s = |E_1 - E_2| / mean(E_1, E_2) with E_k seed k's mean over
+    the disjoint earlier window 2571-2820 (0 where that mean is <= 1 gC/m2). Per-row pass =
+    (1[|x - T_1| <= w T_1] + 1[|x - T_2| <= w T_2]) / 2; frac = mean over scored rows; frac(rerun)
+    = the same with seed 2 predicting seed 1 and seed 1 predicting seed 2, averaged (0.999853);
+    D = frac(arm) - frac(rerun). FOLDS: leave-one-climate-out, six folds, a row's fold is its
+    (ESM, SSP); no row of the held-out climate trains its prediction. THE MODEL ARM: one LightGBM
+    regressor per fold with the settings the global spin-up screen selected on the GLOBAL dev folds
+    (screen_spinup_vegc.py round 2; frozen in the script's LEARNER, 3000 trees, L1 loss), fitted on
+    log1p of each training row's truth, one row per seed, all training rows of the other five
+    climates; prediction expm1, clipped at 0. Inputs: the 258 columns of germany_climate.parquet
+    (85 forcing columns of CLIMATE_FEATURES, soil depth, the five SOIL_FEATURES, the 167 columns of
+    features_v3.V3_ALLP), all from the 2071-2100 daily forcing and the soil inputs. REPORTED BESIDE,
+    NEVER DECIDED ON: frac and D per held-out climate; frac without ssp245 (ssp245 rows neither
+    train nor are scored; four folds); a BLIND arm, the same learner on the six soil columns only;
+    the two-seed mean as a predictor (the ceiling); variance explained on log1p; the flat 10 % rate.
+  reference_basis: >
+    The owner's Germany production runs (germany.runs in config/paths.yaml): LPJmL 5.6.004 with the
+    individual-tree extension, npatch 250, natural vegetation, fire on, nitrogen off, 9,067 cells,
+    seeds 1 and 2; ssp126 and ssp370 on the 2025-12-17 build, ssp245 on the 2026-02-05 build. CO2
+    constant 415.78 ppm over every year used. Truth and band inside the clean 2101-3070 segment
+    (the 2071-2100 and 3071-3100 segments read relative humidity as specific humidity; see the
+    decision record). germany_truth.parquet sha256 a2780d3c33bb7a1b...; germany_climate.parquet
+    sha256 b3ff8a9489d2d3c6.... Scored: 54,390 rows = cells x six climates; a level share; the
+    statistic a difference of two shares.
+  units: dimensionless
+  kind: level
+
+data:
+  corpus: /p/tmp/jamirp/vegemu/corpus/germany-eq-v1
+  corpus_sha256: "a2780d3c33bb7a1b7b15f0744dc62c0cd4686c6dfd648d86ffe580f65c442f1d"
+  plan_sha256: "b3ff8a9489d2d3c673213042aec716fa33c902b076908de161d84ece350ec8d6"
+  n_rows: 54390
+
+  split:
+    kind: holdout_forcing_leg
+    k: 6
+    seed: 0
+
+  leakage_checks:
+    - "Folds are the six (ESM, SSP) climates; the fit for fold f is asserted to use no row with fold f (fit_predict: tr = fold != f)."
+    - "Features are exactly the 258 columns listed in exp_germany_vegc.FEATURES; cell, lon, lat, esm, ssp, seed and CO2 are asserted absent (FORBIDDEN). The scenario and the ESM reach the model only through their own climate."
+    - "Every input is from the forcing and soil files, never from a model output (germany_corpus.py); the check stage proved the feature path equal to the stored global tables on 200 cells, worst difference 0.0 (job 2359980)."
+    - "The learner's settings were chosen on the global stored spin-up's dev folds before any Germany number existed; no Germany row selected them."
+    - "Truth and band come from disjoint windows (2821-3070, 2571-2820), both inside the clean segment."
+
+# Measured by scripts/exp_germany_vegc.py --arm nulls, job 2360077, 2026-09-30, before this file was
+# written and before any model was fitted; nulls.json sha256 192cace5b09d7eaf...
+nulls:
+  - id: same_cell_nearest_climate
+    description: "THE BEST NULL. Copy the cell's own two-seed truth under the training climate nearest to the held-out one in the 85 standardised forcing features: the same place, the most similar climate it was seen under."
+    expected:
+      statistic: asgood_vegc_germany_newclimate
+      value: -0.082147
+      tolerance: 0.001
+      derivation: "Measured, job 2360077: frac 0.917705, D -0.082147. Per held-out climate: ACCESS ssp126 0.916, ssp245 0.851, ssp370 0.901; MPI ssp126 0.975, ssp245 0.955, ssp370 0.909."
+
+  - id: same_cell_mean
+    description: "The geometric mean of the cell's own truth under the five training climates."
+    expected:
+      statistic: asgood_vegc_germany_newclimate
+      value: -0.14749
+      tolerance: 0.001
+      derivation: "Measured, job 2360077: frac 0.852363. It reaches 0.984 / 0.985 on the two ssp245 folds (the middle scenario: interpolation) and 0.548 / 0.759 on ACCESS ssp126 / MPI ssp370 (the extremes)."
+
+  - id: nearest_analogue
+    description: "Copy the truth of the nearest training ROW, any cell, in the eight analogue features standardised on the training rows."
+    expected:
+      statistic: asgood_vegc_germany_newclimate
+      value: -0.359147
+      tolerance: 0.001
+      derivation: "Measured, job 2360077: frac 0.640706."
+
+  - id: training_mean
+    description: "The mean on log1p of the training rows' truth: the average German forest."
+    expected:
+      statistic: asgood_vegc_germany_newclimate
+      value: -0.401278
+      tolerance: 0.001
+      derivation: "Measured, job 2360077: frac 0.598575 -- Germany's carbon is homogeneous enough that the average lands in band in 60 % of rows."
+
+  - id: shuffled
+    description: "The held-out climate's two-seed truth permuted across its own scored rows (seed 20260930)."
+    expected:
+      statistic: asgood_vegc_germany_newclimate
+      value: -0.470914
+      tolerance: 0.001
+      derivation: "Measured, job 2360077: frac 0.528939."
+
+decision_rule:
+  statistic: asgood_vegc_germany_newclimate
+  comparator: model_absolute
+  pass_if: ">= -0.02"
+  arms: [model, same_cell_nearest_climate, same_cell_mean, nearest_analogue, training_mean, shuffled]
+  multiplicity: none
+  power_note: >
+    The owner's rule and margin: D >= -0.02, i.e. frac(map) >= 0.979853. Best null
+    same_cell_nearest_climate at -0.082147 (frac 0.9177); no null satisfies the rule, so the
+    estimand has power. ⚠ The same-cell nulls are strong because the map's job is the RESPONSE:
+    the cell's carbon under its most similar other climate is already within 10 % in 92 % of rows.
+
+  ceiling_note: >
+    frac(rerun) = 0.999853: at 250 patches two seeds agree almost exactly and the band is the bare
+    10 % floor in 99.98 % of rows. The two-seed mean as a predictor scores 1.0. Read D against 0.
+
+  outcomes_note: >
+    (a) D >= -0.02: rerun-grade settled carbon under a held-out climate, on this corpus. (b)
+    -0.082147 < D < -0.02: beats copying the cell's own nearest climate, i.e. it reads the
+    climate, but not rerun-grade. (c) D <= -0.082147: no better than copying the same cell under
+    its most similar other climate -- no usable learned response. Always read with the per-climate
+    table: ssp245 folds are interpolation (the same-cell mean already scores 0.98 there), the
+    ACCESS ssp126 and MPI ssp370 folds are the extrapolation that matters; and with the blind arm.
+
+compute:
+  launcher: scripts/sbatch_py.sh
+  tag: X-ger-model
+  partition: standard
+  est_core_hours: 8
+
+outputs:
+  - path: /p/tmp/jamirp/vegemu/exp/X-20260930-germany-vegc-new-climate/metrics.json
+    kind: metrics
