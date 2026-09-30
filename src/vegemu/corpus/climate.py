@@ -163,7 +163,97 @@ def _static_inputs(
     return soil, read_grid(coord)
 
 
-def climate_columns(  # noqa: PLR0912, PLR0915 -- a flat sequence of independent feature definitions
+class _Accumulator:
+    """The per-year accumulation behind every 86-column climate table, fed one year at a time.
+
+    `climate_columns` feeds it from the `.clm` files and `climate_columns_from_daily` from arrays
+    already in memory, so the two compute the SAME columns by the same arithmetic in the same order.
+    """
+
+    def __init__(self, n: int, ny: int) -> None:
+        self.n, self.ny, self.iy = n, ny, 0
+        self.monthly = {v: np.zeros((n, NMONTH), dtype=np.float64) for v in VARS}
+        self.annual_by_year = {v: np.empty((n, ny), dtype=np.float64) for v in VARS}
+        self.gdd5 = np.zeros(n)
+        self.gdd0 = np.zeros(n)
+        self.frost = np.zeros(n)
+        self.vpd_monthly = np.zeros((n, NMONTH), dtype=np.float64)
+
+    def add_year(self, daily: dict[str, npt.NDArray[np.float64]]) -> None:
+        iy = self.iy
+        for var in VARS:
+            is_sum = var in SUM_VARS
+            self.monthly[var] += _monthly(daily[var], is_sum)
+            self.annual_by_year[var][:, iy] = (
+                daily[var].sum(axis=1) if is_sum else daily[var].mean(axis=1)
+            )
+        temp = daily["tas"]
+        self.gdd5 += np.maximum(temp - 5.0, 0.0).sum(axis=1)
+        self.gdd0 += np.maximum(temp, 0.0).sum(axis=1)
+        self.frost += (temp < 0.0).sum(axis=1)
+        self.vpd_monthly += _monthly(_vpd(temp, daily["huss"]), reduce_sum=False)
+        self.iy += 1
+
+    def finish(self) -> dict[str, npt.NDArray[Any]]:
+        if self.iy != self.ny:
+            raise ValueError(f"fed {self.iy} years, expected {self.ny}")
+        n, ny = self.n, self.ny
+        monthly, annual_by_year = self.monthly, self.annual_by_year
+        vpd_monthly = self.vpd_monthly
+        for var in VARS:
+            monthly[var] /= ny
+        vpd_monthly /= ny
+        gdd5 = self.gdd5 / ny
+        gdd0 = self.gdd0 / ny
+        frost = self.frost / ny
+
+        cols: dict[str, npt.NDArray[Any]] = {}
+        for var in VARS:
+            cols[f"{var}_ann"] = annual_by_year[var].mean(axis=1)
+            cols[f"{var}_iav"] = annual_by_year[var].std(axis=1, ddof=1)
+            for m in range(NMONTH):
+                cols[f"{var}_m{m + 1:02d}"] = monthly[var][:, m]
+
+        tmon = monthly["tas"]
+        pmon = monthly["pr"]
+        cols["tas_coldest_month"] = tmon.min(axis=1)
+        cols["tas_warmest_month"] = tmon.max(axis=1)
+        cols["tas_seasonal_range"] = tmon.max(axis=1) - tmon.min(axis=1)
+        cols["gdd5"] = gdd5
+        cols["gdd0"] = gdd0
+        cols["frost_days"] = frost
+        cols["pr_wettest_month"] = pmon.max(axis=1)
+        cols["pr_driest_month"] = pmon.min(axis=1)
+        annual_pr = pmon.sum(axis=1)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            cols["pr_seasonality"] = np.where(
+                annual_pr > 0, pmon.std(axis=1, ddof=1) / (annual_pr / NMONTH), 0.0
+            )
+        cols["dry_months"] = (pmon < 30.0).sum(axis=1).astype(np.float64)
+        cols["vpd_ann"] = vpd_monthly.mean(axis=1)
+
+        # The warmest consecutive three months (cyclic), which is the growing season for most of
+        # the tree-bearing domain and a far better predictor than an annual mean at high latitudes.
+        tri_t = np.stack(
+            [tmon[:, np.arange(m, m + 3) % NMONTH].mean(axis=1) for m in range(NMONTH)], 1
+        )
+        warm = tri_t.argmax(axis=1)
+        idx = (warm[:, None] + np.arange(3)[None, :]) % NMONTH
+        rows = np.arange(n)[:, None]
+        cols["tas_warm_quarter"] = tmon[rows, idx].mean(axis=1)
+        cols["pr_warm_quarter"] = pmon[rows, idx].sum(axis=1)
+        cols["vpd_warm_quarter"] = vpd_monthly[rows, idx].mean(axis=1)
+
+        # A dimensionless water-supply index. Priestley-Taylor-flavoured: net radiation converted
+        # to an evaporative equivalent, so it is a ratio and not a level.
+        latent = 2.45e6  # J/kg
+        pet = np.maximum(cols["rsds_ann"], 0.0) * 86400.0 / latent * 365.0
+        with np.errstate(divide="ignore", invalid="ignore"):
+            cols["aridity"] = np.where(pet > 0, annual_pr / pet, 0.0)
+        return cols
+
+
+def climate_columns(
     window: Window,
     cells: Sequence[int] | None = None,
     files: dict[str, str] | None = None,
@@ -236,83 +326,20 @@ def climate_columns(  # noqa: PLR0912, PLR0915 -- a flat sequence of independent
     n = sel.size
     ny = window.nyear
 
-    monthly = {v: np.zeros((n, NMONTH), dtype=np.float64) for v in VARS}
-    annual_by_year = {v: np.empty((n, ny), dtype=np.float64) for v in VARS}
-    gdd5 = np.zeros(n)
-    gdd0 = np.zeros(n)
-    frost = np.zeros(n)
-    vpd_monthly = np.zeros((n, NMONTH), dtype=np.float64)
-
+    acc = _Accumulator(n, ny)
     opened = {v: r.__enter__() for v, r in readers.items()}
     try:
-        for iy, year in enumerate(range(window.first, window.last + 1)):
+        for year in range(window.first, window.last + 1):
             daily: dict[str, npt.NDArray[np.float64]] = {}
             for var in VARS:
                 block = opened[var].year(year)
                 daily[var] = block[sel] if cells is not None else block
-                is_sum = var in SUM_VARS
-                monthly[var] += _monthly(daily[var], is_sum)
-                annual_by_year[var][:, iy] = (
-                    daily[var].sum(axis=1) if is_sum else daily[var].mean(axis=1)
-                )
-            temp = daily["tas"]
-            gdd5 += np.maximum(temp - 5.0, 0.0).sum(axis=1)
-            gdd0 += np.maximum(temp, 0.0).sum(axis=1)
-            frost += (temp < 0.0).sum(axis=1)
-            vpd_monthly += _monthly(_vpd(temp, daily["huss"]), reduce_sum=False)
+            acc.add_year(daily)
     finally:
         for v, r in readers.items():
             r.__exit__(None, None, None)
             del v
-
-    for var in VARS:
-        monthly[var] /= ny
-    vpd_monthly /= ny
-    gdd5 /= ny
-    gdd0 /= ny
-    frost /= ny
-
-    cols: dict[str, npt.NDArray[Any]] = {}
-    for var in VARS:
-        cols[f"{var}_ann"] = annual_by_year[var].mean(axis=1)
-        cols[f"{var}_iav"] = annual_by_year[var].std(axis=1, ddof=1)
-        for m in range(NMONTH):
-            cols[f"{var}_m{m + 1:02d}"] = monthly[var][:, m]
-
-    tmon = monthly["tas"]
-    pmon = monthly["pr"]
-    cols["tas_coldest_month"] = tmon.min(axis=1)
-    cols["tas_warmest_month"] = tmon.max(axis=1)
-    cols["tas_seasonal_range"] = tmon.max(axis=1) - tmon.min(axis=1)
-    cols["gdd5"] = gdd5
-    cols["gdd0"] = gdd0
-    cols["frost_days"] = frost
-    cols["pr_wettest_month"] = pmon.max(axis=1)
-    cols["pr_driest_month"] = pmon.min(axis=1)
-    annual_pr = pmon.sum(axis=1)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        cols["pr_seasonality"] = np.where(
-            annual_pr > 0, pmon.std(axis=1, ddof=1) / (annual_pr / NMONTH), 0.0
-        )
-    cols["dry_months"] = (pmon < 30.0).sum(axis=1).astype(np.float64)
-    cols["vpd_ann"] = vpd_monthly.mean(axis=1)
-
-    # The warmest consecutive three months (cyclic), which is the growing season for most of the
-    # tree-bearing domain and a far better predictor than an annual mean at high latitudes.
-    tri_t = np.stack([tmon[:, np.arange(m, m + 3) % NMONTH].mean(axis=1) for m in range(NMONTH)], 1)
-    warm = tri_t.argmax(axis=1)
-    idx = (warm[:, None] + np.arange(3)[None, :]) % NMONTH
-    rows = np.arange(n)[:, None]
-    cols["tas_warm_quarter"] = tmon[rows, idx].mean(axis=1)
-    cols["pr_warm_quarter"] = pmon[rows, idx].sum(axis=1)
-    cols["vpd_warm_quarter"] = vpd_monthly[rows, idx].mean(axis=1)
-
-    # A dimensionless water-supply index. Priestley-Taylor-flavoured: net radiation converted to an
-    # evaporative equivalent, so it is a ratio and not a level.
-    latent = 2.45e6  # J/kg
-    pet = np.maximum(cols["rsds_ann"], 0.0) * 86400.0 / latent * 365.0
-    with np.errstate(divide="ignore", invalid="ignore"):
-        cols["aridity"] = np.where(pet > 0, annual_pr / pet, 0.0)
+    cols = acc.finish()
 
     soil, grid = _static_inputs(soildepth, coord)
     cols["soildepth"] = soil[gsel]
@@ -327,6 +354,27 @@ def climate_columns(  # noqa: PLR0912, PLR0915 -- a flat sequence of independent
         "state_year": np.full(n, window.state_year, dtype=np.int32),
         **{k: v.astype(np.float64) for k, v in cols.items()},
     }
+
+
+def climate_columns_from_daily(
+    daily_by_year: Sequence[dict[str, npt.NDArray[np.float64]]],
+) -> dict[str, npt.NDArray[Any]]:
+    """The 85 forcing columns of `CLIMATE_FEATURES` (all but `soildepth`) from in-memory days.
+
+    `daily_by_year` holds one dict per year of the window, each mapping every name in `VARS` to an
+    (n, 365) array in the units `climate_columns` reads (tas deg C, pr mm/day, rsds and lwnet W m-2,
+    huss kg/kg). Same accumulator, same arithmetic, same order as `climate_columns`, so a regional
+    forcing set whose variables were converted into these units gets the same features.
+    """
+    first = daily_by_year[0]
+    n = first["tas"].shape[0]
+    acc = _Accumulator(n, len(daily_by_year))
+    for daily in daily_by_year:
+        for var in VARS:
+            if daily[var].shape != (n, NDAYYEAR):
+                raise ValueError(f"{var} is {daily[var].shape}, expected ({n}, {NDAYYEAR})")
+        acc.add_year(daily)
+    return acc.finish()
 
 
 def climate_table(

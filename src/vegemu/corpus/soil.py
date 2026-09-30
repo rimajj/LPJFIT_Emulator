@@ -171,7 +171,21 @@ def soil_columns(
         raise ValueError(
             f"cells {int(gsel.min())}..{int(gsel.max())} but the soil file holds {codes.size}"
         )
-    code = codes[gsel].astype(np.int64)
+    return soil_columns_for_codes(codes[gsel], depth)
+
+
+def soil_columns_for_codes(
+    codes: npt.ArrayLike, soildepth: npt.ArrayLike
+) -> dict[str, npt.NDArray[np.float64]]:
+    """The five `SOIL_FEATURES` from each row's soil code and depth, for any soil file's codes.
+
+    `soil_columns` is this with the codes read from the GLOBAL soil.bin; a regional corpus whose
+    codes come from its own soil file (e.g. the Germany grid's `.clm`) calls this directly.
+    """
+    code = np.asarray(codes).astype(np.int64)
+    depth = np.asarray(soildepth, dtype=np.float64)
+    if depth.shape != code.shape:
+        raise ValueError(f"{code.size} soil codes but {depth.size} soil depths")
     table = code_table()[code]
     w_avail = table[:, 0]
     return {

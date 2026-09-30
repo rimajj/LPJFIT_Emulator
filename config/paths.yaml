@@ -192,3 +192,17 @@ cells:
 cluster:
   account: waldspektrum
   python: /home/jamirp/.conda/envs/py311_new/bin/python   # [VERIFIED 2026-09-02] 3.11.9, torch 2.5.1+cu124
+
+# ---------------------------------------------------------------------------
+# Germany equilibrium runs (owner, 2026-09-30). 9,067 cells at ~0.07 deg (~9 km), npatch 250,
+# 2 ESMs x ssp126/245/370 x seeds 1-2; 2071-2100 climate recycled to 3100; CO2 constant 415.78 ppm
+# from 2020. ⚠ Segments 2071-2100 and 3071-3100 read the RELATIVE humidity file as SPECIFIC
+# humidity (logged "humid", not "rhumid"), so vapour-pressure deficit is zero there; 2101-3070 is
+# clean. ⚠ ssp245 ran on the 2026-02-05 build, ssp126/370 on 2025-12-17. READ-ONLY: never write.
+# ---------------------------------------------------------------------------
+germany:
+  runs: /p/projects/waldspektrum/data/LPJmLFIT/productionruns_jamir          # [VERIFIED 2026-09-30]
+  forcing: /p/projects/waldspektrum/data/FirEUrisk                           # [VERIFIED 2026-09-30] <ESM>/<VAR>_<ESM>_<scen>_germany.clm
+  coord: /p/projects/biodiversity/billing/input/FirEUrisk/LPJ/grid_germany_9km_new.clm   # [VERIFIED 2026-09-30]
+  soil: /p/projects/biodiversity/billing/input/FirEUrisk/LPJ/soil_germany_9km_new.clm    # [VERIFIED 2026-09-30] LPJSOIL v3 byte
+  soildepth_nc: /p/projects/biodiversity/bereswil/input/Pelletier_etal_2016_sedimentthickness/soil_sed_deposits_depth_Pelletier2016_5arcmin.nc  # [VERIFIED 2026-09-30] var soild
