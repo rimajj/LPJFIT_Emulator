@@ -149,6 +149,13 @@ def _read_vegc(fn: Path) -> tuple[Array, Array, Array, Array]:
     return data, lat, lon, years
 
 
+def _nsteps(fn: Path) -> int:
+    import netCDF4  # noqa: PLC0415
+
+    with netCDF4.Dataset(str(fn)) as f:
+        return len(f.dimensions["time"])
+
+
 def _to_cells(data: Array, lat: Array, lon: Array, g: Array) -> Array:
     """(time, lat, lon) -> (time, 9067) by the nearest grid centre, which must be within 1 % of a
     grid spacing (the NetCDF is written on the run's own grid)."""
@@ -175,12 +182,16 @@ def run_series(esm: str, ssp: str, seed: int, g: Array) -> tuple[Array, dict[str
     if backup.exists():
         tail, lat2, lon2, y2 = _read_vegc(backup)
         note["tail"] = backup.name
-        fdata, _, _, yf = _read_vegc(full)
-        if yf.size == 1000:  # a concatenated full series exists: its last 30 must equal the backup
+        if (
+            _nsteps(full) == 1000
+        ):  # a concatenated full series exists: its tail must equal the backup
+            fdata, *_ = _read_vegc(full)
             same = np.array_equal(fdata[-30:], tail, equal_nan=True)
             note["full_tail_equals_backup"] = bool(same)
             if not same:
                 raise AssertionError(f"{o}: vegc_3100.nc's last 30 years differ from the backup")
+        else:  # MPI-ESM1-2-HR ssp370 seed 2: a cancelled rerun overwrote it; even time is masked
+            note["full"] = f"{_nsteps(full)}-step {full.name}, not a full series; not read"
     else:
         tail, lat2, lon2, y2 = _read_vegc(full)
         note["tail"] = full.name
