@@ -18,18 +18,13 @@ triaged, a disposition each, into `journal/X/2026-09b.md`); the integrator refre
 session end. Basis of every number: pilot corpus v2-constco2 (200 cells × 30 climates × 1 seed,
 CO₂ 276.59 ppm), 200 of 54,020 tree-bearing cells — no fidelity claim, acceptance untouched.
 
-🆕 **2026-09-25.** A continuation is judged against a real run on the SAME window (owner; record
-`20260925-INT-…-same-window`). **`X-20260925-continuation-same-window` = `fail` (b):** the global
-carbon-matched restart continued 30 yr, D −0.129 on folds 3-4 (0.494 vs a real run's 0.622), best
-null −0.303; year 1 real-run grade (D −0.018); the loss was the year-5 die-off (678 → 607 PgC).
-🆕 **2026-09-28: the die-off is FOUND** (journal): the synthesiser deals stems to the 25 patches at
-random, and light is shared per patch. Re-dealing restart_1999's OWN trees, nothing else changed,
-at its own CO2: year 5 −9.7 % (unshuffled −0.0 %). Copying the template's size-rank layout
-(`patch_layout="template"`) did not help (−9.8 %); transplanting WHOLE pilot patches
-(`patch_transplant:PatchTransplant`) cut it to −2.8 % — but in band over years 1-10 moved only
-0.490 → 0.493 on the 51-member sample (folds 3-4 0.561 → 0.531, noise). **NEXT: the per-cell carbon
-level binds, not the die-off** — each file is in band on only 0.54-0.58 of cells at year 0 and loses
-~0.09 in year 1 either way. Levers: the carbon map's precision (T), and why year 1 drops ~0.09.
+🆕 **2026-09-30 GERMANY (owner's new data): `X-20260930-germany-vegc-new-climate` = `fail` (b) by
+0.22 pp.** Settled carbon under a held-out ESM x SSP climate, 54,390 rows: 0.9777 in band vs rerun
+0.9999 (D -0.0222, bar -0.02); best null same-cell-nearest-climate 0.9177; soil-only blind 0.7916.
+Fails only on the hottest climate (ACCESS ssp370, 0.925); the other five 0.98-0.99. Record
+`20260930-INT-…-own-corpus` (truth ends 3070: humidity defect in 2071-2100 / 3071-3100).
+Earlier: the global continuation fails (b), D -0.129 (09-25); its year-5 die-off is the random
+deal of stems to patches (09-28, journal); per-cell carbon binds there, not the die-off.
 
 | experiment | model | bar | best null | ceiling | blind arm |
 |---|---|---|---|---|---|

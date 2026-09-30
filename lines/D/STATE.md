@@ -23,6 +23,12 @@ touch it.** All 200 cells × 30 climates at seed 2, CO₂ 276.59 ppm (plan job 2
 two-run truth and a band measured on the constant-CO₂ basis. Nothing from it is harvested yet;
 judge each run by `^lpjml successfully terminated`, never by exit code.
 
+🆕 **2026-09-30: corpus `germany-eq-v1` BUILT** from the owner's Germany runs (`germany.*` in
+paths.yaml; `scripts/germany_corpus.py`): 9,067 cells x 6 climates, truth 2821-3070 per seed,
+258 inputs from the 2071-2100 forcing (proven equal to the global feature path on 200 cells).
+⚠ Its 2071-2100 and 3071-3100 segments misread humidity (`MEMORY.md:germany-humidity`). NEXT for
+traits and tree counts: decode the clean `restart_3070_nv.lpj` (250 patches; round-trip first).
+
 ✅ **Corpus `v2-constco2` is LANDED — do NOT relaunch it**: 6,000/6,000 spin-ups, `corpus.parquet`
 6,000 × 181 (sha256 `9c117cb6c045fe90…`). Model inputs come from the 78-column
 `state_pilot-v2-constco2.parquet`, never `corpus.parquet` (`MEMORY.md:never-cache-corpus-parquet`).
