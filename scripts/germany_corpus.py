@@ -268,7 +268,8 @@ def stage_truth() -> int:
         + (np.abs(w2 - w1) <= band * np.abs(w1)).astype(float)
     ) / 2
     tr_abs = np.maximum(
-        np.abs(frame["trend_pct_century_s1"]), np.abs(frame["trend_pct_century_s2"])
+        np.abs(frame["trend_pct_century_s1"].to_numpy()),
+        np.abs(frame["trend_pct_century_s2"].to_numpy()),
     )
     sh = np.concatenate([frame["shift3100_s1"].to_numpy(), frame["shift3100_s2"].to_numpy()])
     summary = {
