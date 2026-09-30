@@ -143,7 +143,9 @@ def _read_vegc(fn: Path) -> tuple[Array, Array, Array, Array]:
         lat = np.asarray(f.variables["lat"][:], dtype=np.float64)
         lon = np.asarray(f.variables["lon"][:], dtype=np.float64)
         t = f.variables["time"]
-        years = np.array([int(str(d)[:4]) for d in netCDF4.num2date(t[:], t.units)])
+        # The files use a 365-day calendar; decoding them as "standard" drifts a year by 3070.
+        cal = getattr(t, "calendar", "standard")
+        years = np.array([d.year for d in netCDF4.num2date(t[:], t.units, cal)])
     return data, lat, lon, years
 
 
