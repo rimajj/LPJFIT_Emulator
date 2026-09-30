@@ -625,7 +625,7 @@ def fig_spinup(traj: pl.DataFrame, summary: dict[str, object], out: Path) -> Non
     ax.set_ylim(lo, hi)
     ax.set_xlabel("year of the 1000-year spin-up  (model years 1000-1999)")
     ax.set_ylabel("global vegetation carbon (Pg C)")
-    ax.legend(loc="lower right", fontsize=8.5, labelcolor=INK_2)
+    ax.legend(loc="lower center", fontsize=8.5, labelcolor=INK_2)
     despine(ax)
     fig.suptitle(
         "The spin-up converges — the late rise is CO₂, not drift",
@@ -770,7 +770,7 @@ def fig_hits_map(frame: pl.DataFrame, quantities: list[str], out: Path) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--exp-dir", default=None)
-    ap.add_argument("--out", default="figures")
+    ap.add_argument("--out", default="figures/archive/2026-09-08-first-map")
     args = ap.parse_args()
 
     style()

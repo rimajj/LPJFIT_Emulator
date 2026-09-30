@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import itertools
+import json
 import sys
 from pathlib import Path
 
@@ -76,6 +77,7 @@ def pairs(
 def main() -> int:  # noqa: PLR0915 -- one flat read-and-print pass
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     ap.add_argument("--pred", required=True, help="the screen's predictions.parquet")
+    ap.add_argument("--out", type=Path, default=None, help="also write the numbers as JSON here")
     args = ap.parse_args()
     exp = Path(str(paths()["scratch"]["exp"]))
     spin = Path(str(paths()["scratch"]["corpus"])) / "spinup-constco2"
@@ -122,6 +124,11 @@ def main() -> int:  # noqa: PLR0915 -- one flat read-and-print pass
         f"(1) dev pairs, same soil: {i.size}; {x.shape[1]} inputs; rerun frac (dev) "
         f"{rerun[fold <= 2].mean():.3f}"
     )
+    report: dict[str, object] = {
+        "inputs": int(x.shape[1]),
+        "rerun_dev": float(rerun[fold <= 2].mean()),
+    }
+    bins: list[dict[str, float]] = []
     q = np.quantile(dist, [0, 0.1, 0.25, 0.5, 0.75, 1])
     for lo, hi in itertools.pairwise(q):
         s = (dist >= lo) & (dist <= hi)
@@ -131,6 +138,19 @@ def main() -> int:  # noqa: PLR0915 -- one flat read-and-print pass
             f"{passes(tm[j][s], i[s]).mean():.3f}, the map {passes(pb[i][s], i[s]).mean():.3f}, "
             f"rerun {rerun[i][s].mean():.3f}, median |log twin difference| {med:.3f}"
         )
+        bins.append(
+            {
+                "lo": float(lo),
+                "hi": float(hi),
+                "pairs": int(s.sum()),
+                "twin": float(passes(tm[j][s], i[s]).mean()),
+                "map": float(passes(pb[i][s], i[s]).mean()),
+                "rerun": float(rerun[i][s].mean()),
+                "median_abs_log_twin_diff": float(med),
+            }
+        )
+    report["by_distance"] = bins
+    parts: list[dict[str, float]] = []
 
     # (2) What explains a twin difference: seed noise, input differences, the map.
     pr = pairs(lon, lat, tm > 0, ((1, 0), (0, 1), (1, 1), (1, -1)))
@@ -163,6 +183,22 @@ def main() -> int:  # noqa: PLR0915 -- one flat read-and-print pass
             f"{vy:.4f}; seed noise {vn / vy:.0%}; explained by input differences: ridge "
             f"{r2_lin:.3f}, LightGBM {r2_gbm:.3f}; by the map's own difference {r2_map:.3f}"
         )
+        parts.append(
+            {
+                "max_distance": float(hi),
+                "pairs": int(te.sum()),
+                "var": float(vy),
+                "seed_noise_share": float(vn / vy),
+                "ridge": float(r2_lin),
+                "lightgbm": float(r2_gbm),
+                "map": float(r2_map),
+            }
+        )
+    report["difference_decomposition"] = parts
+    if args.out is not None:
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(json.dumps(report, indent=2))
+        print(f"wrote {args.out}")
     return 0
 
 
