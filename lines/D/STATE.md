@@ -26,8 +26,11 @@ judge each run by `^lpjml successfully terminated`, never by exit code.
 🆕 **2026-09-30: corpus `germany-eq-v1` BUILT** from the owner's Germany runs (`germany.*` in
 paths.yaml; `scripts/germany_corpus.py`): 9,067 cells x 6 climates, truth 2821-3070 per seed,
 258 inputs from the 2071-2100 forcing (proven equal to the global feature path on 200 cells).
-⚠ Its 2071-2100 and 3071-3100 segments misread humidity (`MEMORY.md:germany-humidity`). NEXT for
-traits and tree counts: decode the clean `restart_3070_nv.lpj` (250 patches; round-trip first).
+⚠ Its 2071-2100 and 3071-3100 segments misread humidity (`MEMORY.md:germany-humidity`).
+✅ **The 3070 restarts are PROVEN AND DECODED** (`germany_corpus.py restart|state`, jobs 2360270 /
+2360277): all 12 files, 49 records each byte-identical, decoded VegC = the model's 3070 output to
+5.6e-8; `germany_state_3070.parquet` 108,804 x 82, schema 3, sha256 `8786617314ec4670…`, 4.4 min
+on 64 cores. Fine-root conductivity is constant here too. Do not re-decode.
 
 ✅ **Corpus `v2-constco2` is LANDED — do NOT relaunch it**: 6,000/6,000 spin-ups, `corpus.parquet`
 6,000 × 181 (sha256 `9c117cb6c045fe90…`). Model inputs come from the 78-column

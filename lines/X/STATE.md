@@ -23,6 +23,12 @@ CO₂ 276.59 ppm), 200 of 54,020 tree-bearing cells — no fidelity claim, accep
 0.9999 (D -0.0222, bar -0.02); best null same-cell-nearest-climate 0.9177; soil-only blind 0.7916.
 Fails only on the hottest climate (ACCESS ssp370, 0.925); the other five 0.98-0.99. Record
 `20260930-INT-…-own-corpus` (truth ends 3070: humidity defect in 2071-2100 / 3071-3100).
+🆕 **`X-20260930-germany-state-new-climate` = `fail` (b), D -0.0573**: all 19 state quantities
+at once under a held-out climate, 0.4368 vs rerun 0.4941 (one 3070 snapshot per seed, so the rerun
+is low); best null same-cell-nearest-climate 0.1285, soil-only blind 0.0637, no-ssp245 0.313 vs
+0.484. Worst fold MPI ssp245 0.289 vs 0.510 (stems 0.63 vs 0.93, longevity p90 0.67 vs 0.96) --
+UNTESTED suspicion: ssp245 is the newer build (`new_tree.c` inheritance); separate build from
+climate under a new exp_id before tuning anything. Biggest gaps overall: longevity, D95max p10.
 Earlier: the global continuation fails (b), D -0.129 (09-25); its year-5 die-off is the random
 deal of stems to patches (09-28, journal); per-cell carbon binds there, not the die-off.
 
