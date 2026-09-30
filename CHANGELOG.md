@@ -7,6 +7,11 @@ Entries are written as `changelog.d/<line>-<slug>.md` fragments and folded in at
 
 <!-- collated 2026-09-30 from 1 fragment(s) -->
 
+### Added
+- **A first test on the owner's Germany equilibrium runs: the emulator predicts settled vegetation carbon under a climate it never trained on almost as well as a second run of the model.** Each of the six climates (two climate models x three scenarios, each recycled for a millennium) was held out in turn, and every one of the 9,067 cells predicted from a map trained on the other five. The map lands inside the tolerance band in 97.77 % of the 54,390 cell-climate pairs, where a second run of the model lands in 99.99 %; the pre-registered rule needed 97.99 %, so the test fails by 0.22 percentage points. It fails on one climate only, the hottest and driest (ACCESS-CM2 ssp370, 92.5 %), which lies 1.3 C beyond anything left in training; the other five are at 98-99 %. Copying each cell's own carbon from its most similar training climate reaches 91.8 %, and the same learner given soil alone 79.2 %. The runs' last 30 years (3071-3100) and 2071-2100 read the relative-humidity file as specific humidity, which switches off the dryness stress, so the truth is taken from 2821-3070. New: `scripts/germany_corpus.py`, `scripts/exp_germany_vegc.py`, and `climate_columns_from_daily`, proven to reproduce the stored global features exactly.
+
+<!-- collated 2026-09-30 from 1 fragment(s) -->
+
 ### Changed
 - **The figures now show the current results.** Ten new figures in `figures/`, drawn by `scripts/plot_current.py` from results already on disk: the acceptance test against a rerun of the model, where and by how much the carbon map is wrong, the learning curve and near-twin diagnostics, the three climate-response tests with their pass bars and blind comparison, the emulated restart continued in the real model, the cause of the year-5 die-off, the tolerance band, and the spin-up's convergence. The twelve figures of the first experiment (scenario runs, one climate per place, rising CO2) move to `figures/archive/2026-09-08-first-map/`. The spin-up figure there had its title corrected on 2026-09-15 but the image was never redrawn, so it still said the spin-up never settled; it is redrawn now.
 
