@@ -3,7 +3,7 @@ schema_version: 1
 exp_id: X-20260930-germany-state-new-climate
 line: X
 
-status: draft
+status: sealed
 
 title: "GERMANY: IS THE EMULATOR'S SETTLED FOREST -- TREE COUNTS, STOCKS AND TRAIT DISTRIBUTIONS AT ONCE -- UNDER A CLIMATE IT NEVER TRAINED ON AS GOOD AS A RERUN?"
 question: >
