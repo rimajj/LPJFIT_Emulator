@@ -18,19 +18,20 @@ triaged, a disposition each, into `journal/X/2026-09b.md`); the integrator refre
 session end. Basis of every number: pilot corpus v2-constco2 (200 cells × 30 climates × 1 seed,
 CO₂ 276.59 ppm), 200 of 54,020 tree-bearing cells — no fidelity claim, acceptance untouched.
 
-🆕 **2026-09-30 GERMANY (owner's new data): `X-20260930-germany-vegc-new-climate` = `fail` (b) by
-0.22 pp.** Settled carbon under a held-out ESM x SSP climate, 54,390 rows: 0.9777 in band vs rerun
-0.9999 (D -0.0222, bar -0.02); best null same-cell-nearest-climate 0.9177; soil-only blind 0.7916.
-Fails only on the hottest climate (ACCESS ssp370, 0.925); the other five 0.98-0.99. Record
-`20260930-INT-…-own-corpus` (truth ends 3070: humidity defect in 2071-2100 / 3071-3100).
+🆕 **2026-09-30 GERMANY: `X-20260930-germany-vegc-new-climate` = `fail` (b) by 0.22 pp**: settled
+carbon, held-out climate, 0.9777 vs rerun 0.9999; best null 0.9177; fails only on ACCESS ssp370
+(0.925). Record `20260930-INT-…-own-corpus` (truth ends 3070: humidity defect after it).
 🆕 **`X-20260930-germany-state-new-climate` = `fail` (b), D -0.0573**: all 19 state quantities
 at once under a held-out climate, 0.4368 vs rerun 0.4941 (one 3070 snapshot per seed, so the rerun
 is low); best null same-cell-nearest-climate 0.1285, soil-only blind 0.0637, no-ssp245 0.313 vs
-0.484. Worst fold MPI ssp245 0.289 vs 0.510 (stems 0.63 vs 0.93, longevity p90 0.67 vs 0.96) --
-UNTESTED suspicion: ssp245 is the newer build (`new_tree.c` inheritance); separate build from
-climate under a new exp_id before tuning anything. Biggest gaps overall: longevity, D95max p10.
-Earlier: the global continuation fails (b), D -0.129 (09-25); its year-5 die-off is the random
-deal of stems to patches (09-28, journal); per-cell carbon binds there, not the die-off.
+0.484. Worst fold MPI ssp245 0.289 vs 0.510. Biggest gaps overall: longevity, D95max p10.
+🆕 **2026-10-01: neither the build nor the CO₂ slip explains the miss.** MPI ssp245 (both seeds)
+held CO₂ 401.63 ppm, the rest 415.78 (`20261001-INT-mpi-ssp245-ran-at-401-ppm-*`); the build
+fix only moves extreme trait tails (`diag_germany_build_fingerprint.py`). Re-test on the five
+415.78 runs, `X-20261001-germany-state-415ppm` = `fail` (b), D -0.0615 (0.430 vs 0.492): MPI
+ssp370 collapses 0.448 -> 0.224 without its nearest climate. The limit is CLIMATE COVERAGE: 4-5
+training climates are too few. Next lever is more climates (owner's data), not tuning.
+Earlier: global continuation fails (b), D -0.129 (09-25); per-cell carbon binds, not the die-off.
 
 | experiment | model | bar | best null | ceiling | blind arm |
 |---|---|---|---|---|---|
