@@ -1,0 +1,164 @@
+schema_version: 1
+
+exp_id: X-20261001-germany-state-415ppm
+line: X
+
+status: draft
+
+title: "GERMANY, ONE CO2 ONLY: IS THE EMULATOR'S SETTLED FOREST UNDER A CLIMATE IT NEVER TRAINED ON AS GOOD AS A RERUN, ONCE THE ONE RUN AT ANOTHER CO2 IS LEFT OUT?"
+question: >
+  X-20260930-germany-state-new-climate failed at outcome (b), D -0.0573, and its worst held-out
+  climate was MPI-ESM1-2-HR ssp245 (0.289 vs a rerun's 0.510). That run -- both seeds -- held CO2
+  at 401.63 ppm over 2101-3070 where the other ten held 415.78 (decision
+  20261001-INT-mpi-ssp245-ran-at-401-ppm-so-it-is-not-the-germany-target). The emulator does not
+  see CO2 and must not respond to it, so that run is a different target and the sealed test mixed
+  it into training, scoring and the bands. Re-run the same test, every rule unchanged, on the five
+  climates at 415.78 ppm: leave one out, predict every cell's 19-quantity state under it from maps
+  trained on the other four.
+
+  THE FALSIFIABLE CLAIM: D = frac(map) - frac(rerun) >= -0.02 over the 45,335 rows.
+
+  ⚠ WHAT IS ALREADY KNOWN, disclosed before sealing: the sealed six-climate fit, restricted to
+  these five held-out climates, scored 0.4664 vs a rerun's 0.4912 (D -0.025) -- but with maps that
+  trained on the 401.63-ppm run and bands built from five other climates, so it is not this
+  number. This test was chosen because the run's CO2 file differs (found in its config, not in a
+  score), and the reason holds whatever it returns.
+  ⚠ WHAT A PASS WOULD NOT SAY: Germany only, 9,067 cells at ~9 km, CO2 415.78 ppm, npatch 250 --
+  nothing about the global target; one snapshot year (3070) per seed, so a rerun lands only ~0.49;
+  the species mix is not among the 19; every held-out climate but ACCESS ssp245 is an extreme
+  (ssp126 or ssp370) of its ESM, so four of five folds extrapolate along the scenario axis.
+
+estimand:
+  name: asgood_state_germany_newclimate
+  definition: >
+    Computed by scripts/exp_germany_state.py --exclude MPI-ESM1-2-HR/ssp245 (commit 278ff6c; the
+    default path reproduces all five sealed null values of X-20260930-germany-state-new-climate
+    exactly, job 2369763). Every rule is that experiment's, with the excluded run removed BEFORE
+    anything is built: a row is (cell, climate), 45,335 rows (9,067 cells x five climates). The
+    19 quantities of score.SCORED_VARYING. Truth T_k = seed k's 3070 restart state. Band w per
+    cell and quantity = score.spread_across_climates over the five climates: max(0.10, the median
+    two-seed relative spread over the cell's OTHER FOUR climates); 99.13 % of cell-quantities sit
+    at the bare 10 % floor. Per-row pass vs T_k = every quantity T_k defines is inside
+    |x - T_k| <= w |T_k|; per-row score = mean over k = 1, 2; frac = mean over rows;
+    frac(rerun) = seed 2 against seed 1 and seed 1 against seed 2, averaged (0.491552);
+    D = frac(arm) - frac(rerun). FOLDS: leave-one-climate-out, five folds. THE MODEL ARM: per
+    quantity and fold one LightGBM with exp_germany_vegc.LEARNER unchanged (chosen on the GLOBAL
+    spin-up dev folds), fitted on both seeds' rows of the four training climates; log1p target for
+    stems per patch, biomass, LAI and soil carbon; emitted = clipped at 0, each trait's three
+    quantiles sorted. Inputs: the 258 columns of germany_climate.parquet. REPORTED BESIDE, NEVER
+    DECIDED ON: frac and D per held-out climate; per-quantity band rates beside the rerun's; the
+    BLIND arm (soil columns only); the two-seed mean as a predictor; frac with ACCESS ssp245 also
+    removed (the old build only, four climates, three-climate training); the flat-10 % rate.
+  reference_basis: >
+    The owner's Germany production runs (germany.runs in config/paths.yaml): LPJmL 5.6.004 with the
+    individual-tree extension, npatch 250, natural vegetation, fire on, nitrogen off, 9,067 cells,
+    seeds 1 and 2; ACCESS-CM2 ssp126/ssp245/ssp370 and MPI-ESM1-2-HR ssp126/ssp370. CO2 415.78 ppm
+    in every year 2101-3070 of all five (input_*.js co2 = RCP85_co2_1765-2500_const_from_2020.dat,
+    read at fix_climate_year 2100). Builds: ssp126 and ssp370 on 2025-12-17; ACCESS ssp245 on
+    2026-02-05, whose only change (new_tree.c) moves the extreme tails of wood density and D95max
+    (diag_germany_build_fingerprint.py, job 2369693). EXCLUDED: MPI-ESM1-2-HR ssp245, CO2 401.63.
+    Truth = the 3070 restarts (germany_state_3070.parquet sha256 8786617314ec4670...;
+    germany_climate.parquet sha256 b3ff8a9489d2d3c6...). A level share of a conjunction over 19
+    quantities; the statistic a difference of two shares.
+  units: dimensionless
+  kind: level
+
+data:
+  corpus: /p/tmp/jamirp/vegemu/corpus/germany-eq-v1
+  corpus_sha256: "8786617314ec4670df3faa3100903a20905fc14acdb56b3260472ad6870a232e"
+  plan_sha256: "b3ff8a9489d2d3c673213042aec716fa33c902b076908de161d84ece350ec8d6"
+  n_rows: 45335
+
+  split:
+    kind: holdout_forcing_leg
+    k: 5
+    seed: 0
+
+  leakage_checks:
+    - "Folds are the five remaining (ESM, SSP) climates; fit_predict trains fold f on rows with fold != f only."
+    - "The excluded run is removed in exp_germany_state.load before the folds, the bands, the nulls or any fit are built; report['excluded'] records it."
+    - "Features are exactly the 258 columns of exp_germany_vegc.FEATURES; cell, lon, lat, esm, ssp, seed and CO2 are asserted absent (FORBIDDEN)."
+    - "Every input is from the forcing and soil files, never a model output."
+    - "The learner's settings were chosen on the global stored spin-up's dev folds and are unchanged; no Germany state row selected them."
+    - "The band of a (cell, climate) row is built from the two seeds under that cell's other four climates only."
+    - "The default (no --exclude) path reproduced every sealed null value of X-20260930-germany-state-new-climate to the last printed digit (job 2369763), so the edit changed nothing else."
+
+# Measured by scripts/exp_germany_state.py --arm nulls --exclude MPI-ESM1-2-HR/ssp245, job 2369764,
+# 2026-10-01, before this file was written and before any five-climate model was fitted; nulls.json
+# sha256 d6cd6fad2ef5614f....
+nulls:
+  - id: same_cell_nearest_climate
+    description: "THE BEST NULL. The cell's own two-seed mean state under the training climate nearest to the held-out one in the 85 standardised forcing features."
+    expected:
+      statistic: asgood_state_germany_newclimate
+      value: -0.388706
+      tolerance: 0.001
+      derivation: "Measured, job 2369764: frac 0.102845. Per held-out climate: ACCESS ssp126 0.160, ssp245 0.178, ssp370 0.143; MPI ssp126 0.011, ssp370 0.022."
+
+  - id: same_cell_mean
+    description: "The mean of the cell's own state over its four training climates (geometric for the four count/stock quantities)."
+    expected:
+      statistic: asgood_state_germany_newclimate
+      value: -0.418529
+      tolerance: 0.001
+      derivation: "Measured, job 2369764: frac 0.073023."
+
+  - id: nearest_analogue
+    description: "The two-seed mean state of the nearest training ROW, any cell, in the eight analogue features standardised on the training rows."
+    expected:
+      statistic: asgood_state_germany_newclimate
+      value: -0.409772
+      tolerance: 0.001
+      derivation: "Measured, job 2369764: frac 0.081780."
+
+  - id: training_mean
+    description: "The per-quantity mean of the training rows' state (log scale for the four count/stock quantities)."
+    expected:
+      statistic: asgood_state_germany_newclimate
+      value: -0.470277
+      tolerance: 0.001
+      derivation: "Measured, job 2369764: frac 0.021275."
+
+  - id: shuffled
+    description: "The held-out climate's two-seed mean states permuted across its own rows (seed 20260930)."
+    expected:
+      statistic: asgood_state_germany_newclimate
+      value: -0.430374
+      tolerance: 0.001
+      derivation: "Measured, job 2369764: frac 0.061178."
+
+decision_rule:
+  statistic: asgood_state_germany_newclimate
+  comparator: model_absolute
+  pass_if: ">= -0.02"
+  arms: [model, same_cell_nearest_climate, same_cell_mean, nearest_analogue, training_mean, shuffled]
+  multiplicity: none
+  power_note: >
+    The owner's rule and margin: D >= -0.02, i.e. frac(map) >= 0.471552. Best null
+    same_cell_nearest_climate at -0.388706 (frac 0.1028); no null satisfies the rule, so the
+    estimand has power. ⚠ As in the sealed test the rule is lenient for a predictor of the seed
+    average (the two-seed mean scores 0.941877), so a pass says "as good as a rerun", never "within
+    10 % of the truth". ⚠ Four training climates per fold instead of five: less coverage, which
+    the sealed test's no-ssp245 arm showed matters (0.313 vs 0.484 on four climates).
+
+  ceiling_note: >
+    The two-seed mean as a predictor: frac 0.941877 (D +0.450325). Arithmetic advantage of the
+    ensemble mean against single-seed truths, not an attainable target. Read D against 0.
+
+  outcomes_note: >
+    (a) D >= -0.02: on one CO2 the full 19-quantity state under a held-out climate is rerun-grade
+    on this corpus, and the sealed test's failure was the mixed-CO2 run. (b) -0.388706 < D < -0.02:
+    it reads the climate but is not rerun-grade even on one CO2; the sealed failure is not only the
+    401.63-ppm run. (c) D <= -0.388706: no better than copying the cell's nearest climate. Always
+    read with the per-climate table (MPI ssp126, the coldest, had a rerun of only 0.288), the
+    per-quantity table, the blind arm and the old-build-only arm.
+
+compute:
+  launcher: scripts/sbatch_py.sh
+  tag: X-ger-state415-model
+  partition: standard
+  est_core_hours: 25
+
+outputs:
+  - path: /p/tmp/jamirp/vegemu/exp/X-20261001-germany-state-415ppm/metrics.json
+    kind: metrics
