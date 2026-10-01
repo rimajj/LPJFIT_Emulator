@@ -48,6 +48,10 @@ THE NULLS (information-free about the held-out climate's truth), each a whole 19
 REPORTED BESIDE, NEVER DECIDED ON: frac per held-out climate; per-quantity band rates; the ceiling
 (the two-seed mean as a predictor); a BLIND arm, the same learner on the six soil columns; frac
 without ssp245; the flat-10 % conjunctive rate; frac on the rows where both seeds bear trees.
+
+`--exclude ESM/ssp` drops a whole run first (rows, folds AND every band), so "six climates" above
+becomes the number left. Used for MPI-ESM1-2-HR/ssp245, the one run held at 401.63 ppm CO2 where
+the other ten held 415.78 (its input file reads the RCP8.5 series constant from 2015, not 2020).
 """
 
 from __future__ import annotations
@@ -93,9 +97,19 @@ TRAIT_TRIPLES: tuple[tuple[str, str, str], ...] = tuple(
 NCELL = 9067
 
 
-def load() -> dict[str, Any]:
-    """The carbon test's inputs and folds, plus both seeds' 3070 states in the same row order."""
+ROW_KEYS: tuple[str, ...] = ("x", "t1", "t2", "w", "cell", "ssp", "scored", "s1", "s2")
+
+
+def load(exclude: tuple[str, ...] = ()) -> dict[str, Any]:
+    """The carbon test's inputs and folds, plus both seeds' 3070 states in the same row order.
+
+    `exclude` names whole runs ("ESM/ssp") to drop BEFORE anything is built from them: their rows
+    neither train, nor are scored, nor enter any other climate's band, and the folds are the
+    remaining climates. The default drops nothing and is the sealed six-climate test, unchanged.
+    """
     d = load_climate()
+    unknown = set(exclude) - set(d["names"])
+    assert not unknown, f"unknown climates to exclude: {sorted(unknown)}"
     corpus = Path(str(paths()["scratch"]["corpus"])) / "germany-eq-v1"
     st = pl.read_parquet(corpus / "germany_state_3070.parquet")
     meta = json.loads((corpus / "germany_state_3070.json").read_text())
@@ -111,12 +125,21 @@ def load() -> dict[str, Any]:
         full = s.select([*Q, *CONSTANT_ON_PILOT]).to_numpy().astype(np.float64)
         assert_constant_quantities(full, [*Q, *CONSTANT_ON_PILOT])
     assert np.array_equal(d["cell"], clim["cell"].to_numpy())
-    # (rows, q) -> (cells, climates, q): rows are climate-major (esm, ssp, cell), cells 0..9066
-    cube = [t.reshape(6, NCELL, len(Q)).transpose(1, 0, 2) for t in tk]
-    w = spread_across_climates(np.nan_to_num(cube[0], nan=0.0), np.nan_to_num(cube[1], nan=0.0))
     d["s1"], d["s2"] = tk
+    if exclude:
+        keep_names = [n for n in d["names"] if n not in exclude]
+        keep = np.isin(np.array(d["names"])[d["fold"]], keep_names)
+        d["fold"] = np.array([keep_names.index(d["names"][f]) for f in d["fold"][keep]])
+        for k in ROW_KEYS:
+            d[k] = d[k][keep]
+        d["names"] = keep_names
+    ncl = len(d["names"])
+    # (rows, q) -> (cells, climates, q): rows are climate-major (esm, ssp, cell), cells 0..9066
+    cube = [d[k].reshape(ncl, NCELL, len(Q)).transpose(1, 0, 2) for k in ("s1", "s2")]
+    w = spread_across_climates(np.nan_to_num(cube[0], nan=0.0), np.nan_to_num(cube[1], nan=0.0))
     d["w_state"] = w.transpose(1, 0, 2).reshape(-1, len(Q))
     d["sha"]["state"] = meta["output_sha256"]
+    d["excluded"] = list(exclude)
     return d
 
 
@@ -196,9 +219,10 @@ def nulls(d: dict[str, Any]) -> dict[str, Array]:
     y = two_seed_mean(d)
     ly = _to_log(y)
     nq = len(Q)
-    by = np.full((NCELL, 6, nq), np.nan)
+    ncl = len(d["names"])
+    by = np.full((NCELL, ncl, nq), np.nan)
     by[cell, fold] = ly
-    xf = np.full((NCELL, 6, len(FORCING)), np.nan)
+    xf = np.full((NCELL, ncl, len(FORCING)), np.nan)
     xf[cell, fold] = x[:, : len(FORCING)]
     a_idx = [FEATURES.index(f) for f in ANALOGUE_FEATURES]
     names = (
@@ -211,12 +235,12 @@ def nulls(d: dict[str, Any]) -> dict[str, Array]:
     out = {k: np.full(y.shape, np.nan) for k in names}
     rng = np.random.default_rng(SHUFFLE_SEED)
     nf = len(FORCING)
-    for f in range(6):
+    for f in range(ncl):
         te = fold == f
         tr = ~te
         mu, sd = x[tr].mean(axis=0), x[tr].std(axis=0)
         sd = np.where(sd > 0, sd, 1.0)
-        others = [g for g in range(6) if g != f]
+        others = [g for g in range(ncl) if g != f]
         ct = cell[te]
         q = (xf[ct, f] - mu[:nf]) / sd[:nf]
         dist = np.stack(
@@ -278,10 +302,16 @@ def main() -> int:
     ap.add_argument("--arm", choices=("nulls", "model"), required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--threads", type=int, default=16)
+    ap.add_argument(
+        "--exclude",
+        action="append",
+        default=[],
+        help="drop a whole run, ESM/ssp (repeatable); its rows never train, score or set a band",
+    )
     a = ap.parse_args()
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
-    d = load()
+    d = load(tuple(a.exclude))
     base = np.ones(d["fold"].size, dtype=bool)
     tm = two_seed_mean(d)
     report: dict[str, Any] = {
@@ -289,6 +319,7 @@ def main() -> int:
         "rows": int(base.size),
         "quantities": list(Q),
         "climates": d["names"],
+        "excluded": d["excluded"],
         "inputs_sha256": d["sha"],
         "band_is_floor_share": float((d["w_state"] == FLOOR).mean()),
         "band_quantiles": {
@@ -310,8 +341,8 @@ def main() -> int:
 
     all_cols = list(range(len(FEATURES)))
     soil_cols = [FEATURES.index(c) for c in SOIL]
-    pred = fit_predict(d, all_cols, list(range(6)), threads=a.threads)
-    blind = fit_predict(d, soil_cols, list(range(6)), threads=a.threads)
+    pred = fit_predict(d, all_cols, list(range(len(d["names"]))), threads=a.threads)
+    blind = fit_predict(d, soil_cols, list(range(len(d["names"]))), threads=a.threads)
     no245 = d["ssp"] != "ssp245"
     folds_same_build = [i for i, n in enumerate(d["names"]) if not n.endswith("ssp245")]
     pred_nb = fit_predict(d, all_cols, folds_same_build, keep=no245, threads=a.threads)
